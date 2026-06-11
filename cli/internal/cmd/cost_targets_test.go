@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
+	reportpkg "github.com/openshift-online/finops-tools/cli/internal/report"
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -67,6 +68,67 @@ func TestValidateCostTargetSelector(t *testing.T) {
 				t.Fatal("expected error")
 			}
 			if tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateReportCostTargetSelector(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		sel      costTargetSelector
+		wantErr  string
+	}{
+		{
+			name:     "hcp-hierarchy no alias",
+			template: reportpkg.TemplateHCPHierarchy,
+			sel:      costTargetSelector{},
+		},
+		{
+			name:     "hcp-hierarchy snowflake alias",
+			template: reportpkg.TemplateHCPHierarchy,
+			sel:      costTargetSelector{Aliases: []string{"rhsandbox"}},
+		},
+		{
+			name:     "hcp-hierarchy rejects aws alias flags",
+			template: reportpkg.TemplateHCPHierarchy,
+			sel:      costTargetSelector{AccountIDs: []string{"111111111111"}},
+			wantErr:  "does not use AWS account targets",
+		},
+		{
+			name:     "hcp-hierarchy rejects multiple aliases",
+			template: reportpkg.TemplateHCPHierarchy,
+			sel:      costTargetSelector{Aliases: []string{"rhsandbox", "rhprod"}},
+			wantErr:  "single Snowflake --account-alias",
+		},
+		{
+			name:     "costs optional empty",
+			template: reportpkg.TemplateCosts,
+			sel:      costTargetSelector{},
+		},
+		{
+			name:     "savings-plans requires targets",
+			template: reportpkg.TemplateSavingsPlans,
+			sel:      costTargetSelector{},
+			wantErr:  "provide --account/--account-alias, --ou, or --tag-key",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateReportCostTargetSelector(tc.template, tc.sel)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantErr)
 			}
 		})

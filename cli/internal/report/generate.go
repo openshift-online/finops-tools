@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	corehcp "github.com/openshift-online/finops-tools/core/hcphierarchy"
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
@@ -16,12 +17,26 @@ type Stepper interface {
 
 // GenerateInput is shared context for building and rendering a report template.
 type GenerateInput struct {
-	Format   string
-	Out      io.Writer
-	Targets  []cost.AccountTarget
-	Range    cost.DateRange
-	Progress Stepper
-	Now      time.Time
+	Format     string
+	Out        io.Writer
+	Targets    []cost.AccountTarget
+	Range      cost.DateRange
+	Progress   Stepper
+	Now        time.Time
+	ConfigPath     string
+	SnowflakeAlias string
+}
+
+// SnowflakeMartOpener opens a Snowflake connection for mart-backed reports.
+// Registered from cli/cmd at init to avoid an import cycle with Snowflake auth.
+// snowflakeAlias is empty to use the configured default (snowflake.account_alias).
+type SnowflakeMartOpener func(ctx context.Context, cfgPath, snowflakeAlias string) (corehcp.SnowflakeQueryer, error)
+
+var snowflakeMartOpener SnowflakeMartOpener
+
+// SetSnowflakeMartOpener registers the CLI Snowflake opener for mart-backed reports.
+func SetSnowflakeMartOpener(fn SnowflakeMartOpener) {
+	snowflakeMartOpener = fn
 }
 
 // Generator builds and renders one report template.
@@ -43,6 +58,31 @@ var generators = map[string]Generator{
 	TemplateCosts:         costsGenerator{},
 	TemplateSavingsPlans:  savingsPlansGenerator{},
 	TemplateCostAnomalies: costAnomaliesGenerator{},
+	TemplateHCPHierarchy:  hcpHierarchyGenerator{},
+}
+
+// AccountTargetMode describes whether a report uses AWS account targeting flags.
+type AccountTargetMode int
+
+const (
+	// AccountTargetsRequired needs --account/--account-alias, --ou, or --tag-key.
+	AccountTargetsRequired AccountTargetMode = iota
+	// AccountTargetsOptional allows zero targets (empty costs report).
+	AccountTargetsOptional
+	// AccountTargetsSnowflake uses --account-alias as a Snowflake alias, not AWS targets.
+	AccountTargetsSnowflake
+)
+
+// AccountTargetModeFor returns how a template uses account targeting flags.
+func AccountTargetModeFor(templateName string) AccountTargetMode {
+	switch templateName {
+	case TemplateHCPHierarchy:
+		return AccountTargetsSnowflake
+	case TemplateCosts:
+		return AccountTargetsOptional
+	default:
+		return AccountTargetsRequired
+	}
 }
 
 func validateTemplateFormat(templateName, format string) error {

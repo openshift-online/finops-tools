@@ -10,6 +10,7 @@ import (
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	reportpkg "github.com/openshift-online/finops-tools/cli/internal/report"
+	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
 )
 
@@ -39,9 +40,14 @@ Example:
   finops report generate costs --account-alias rh-control -o costs.html
   finops report generate costs --account 333333333333 --payer rhc -o member.html
   finops report generate costs --ou ou-abcd-1234 --payer rh-control -o ou-costs.html
-  finops report generate costs --payer rh-control --tag-key env --tag-value prod -o prod.html`,
+  finops report generate costs --payer rh-control --tag-key env --tag-value prod -o prod.html
+  finops report generate hcp-hierarchy --account-alias rhsandbox -o hcp-hierarchy.html`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		templateName, err := reportpkg.ParseTemplate(args[0])
+		if err != nil {
+			return err
+		}
 		sel, err := parseCostTargetSelector(
 			reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 			reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
@@ -50,10 +56,7 @@ Example:
 		if err != nil {
 			return err
 		}
-		if _, err := validateCostTargetSelector(sel); err != nil {
-			return err
-		}
-		if _, err := reportpkg.ParseTemplate(args[0]); err != nil {
+		if err := validateReportCostTargetSelector(templateName, sel); err != nil {
 			return err
 		}
 		if err := validatePeriodFlags(cmd); err != nil {
@@ -71,7 +74,7 @@ func init() {
 	reportCmd.AddCommand(reportGenerateCmd)
 	reportGenerateCmd.Flags().StringVar(&reportGenerateFormat, "format", reportpkg.FormatHTML, "Output format (supported: html)")
 	reportGenerateCmd.Flags().StringVar(&reportGenerateAccount, "account", "", "Payer AWS account ID(s), comma-separated 12-digit IDs")
-	reportGenerateCmd.Flags().StringVar(&reportGenerateAccountAliases, "account-alias", "", "Configured account alias(es), comma-separated (e.g. rh-control)")
+	reportGenerateCmd.Flags().StringVar(&reportGenerateAccountAliases, "account-alias", "", "Account alias: comma-separated AWS aliases for AWS reports, or a single Snowflake alias for Snowflake-backed reports")
 	reportGenerateCmd.Flags().StringVar(&reportGenerateOU, "ou", "", "AWS OU ID(s), comma-separated (requires --payer; recursive by default)")
 	reportGenerateCmd.Flags().BoolVar(&reportGenerateOUDirect, "ou-direct", false, "Include only accounts directly in --ou, not descendant OUs")
 	reportGenerateCmd.Flags().StringVar(&reportGeneratePayer, "payer", "", "Registered payer alias for --account member IDs, --ou, or --tag-key (e.g. rhc)")
@@ -121,13 +124,25 @@ func runReportGenerate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	targets, err := resolveCostTargets(
-		cmd.Context(), cmd, cfg, sel,
-		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
-		status,
-	)
-	if err != nil {
-		return err
+	var targets []cost.AccountTarget
+	var snowflakeAlias string
+	targetMode := reportpkg.AccountTargetModeFor(templateName)
+	switch targetMode {
+	case reportpkg.AccountTargetsSnowflake:
+		if len(sel.Aliases) == 1 {
+			snowflakeAlias = sel.Aliases[0]
+		}
+	default:
+		if targetMode != reportpkg.AccountTargetsOptional || costTargetSelectorSpecified(sel) {
+			targets, err = resolveCostTargets(
+				cmd.Context(), cmd, cfg, sel,
+				awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
+				status,
+			)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	dateRange, err := resolveCostPeriod(time.Now().UTC())
@@ -136,11 +151,13 @@ func runReportGenerate(cmd *cobra.Command, args []string) error {
 	}
 
 	in := reportpkg.GenerateInput{
-		Format:   format,
-		Targets:  targets,
-		Range:    dateRange,
-		Progress: status,
-		Now:      time.Now().UTC(),
+		Format:         format,
+		Targets:        targets,
+		Range:          dateRange,
+		Progress:       status,
+		Now:            time.Now().UTC(),
+		ConfigPath:     cfgPath,
+		SnowflakeAlias: snowflakeAlias,
 	}
 	if err := gen.Validate(in); err != nil {
 		return err

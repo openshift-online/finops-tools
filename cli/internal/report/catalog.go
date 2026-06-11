@@ -8,6 +8,8 @@ import (
 const (
 	// TemplateCosts is the AWS costs summary report template.
 	TemplateCosts = "costs"
+	// TemplateHCPHierarchy is the ROSA HCP SC → MC → Worker cluster hierarchy report template.
+	TemplateHCPHierarchy = "hcp-hierarchy"
 	// TemplateSavingsPlans is the Savings Plans coverage and utilization report template.
 	TemplateSavingsPlans = "savings-plans"
 	// TemplateCostAnomalies is the AWS Cost Anomaly Detection report template.
@@ -29,6 +31,11 @@ func Templates() []TemplateInfo {
 		{
 			Name:        TemplateCosts,
 			Description: "AWS net amortized cost: total, per linked account, per service, and daily trend",
+			Formats:     []string{FormatHTML},
+		},
+		{
+			Name:        TemplateHCPHierarchy,
+			Description: "ROSA HCP SC → MC → Worker cluster hierarchy with AWS account attribution (requires Snowflake)",
 			Formats:     []string{FormatHTML},
 		},
 		{

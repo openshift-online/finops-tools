@@ -1,0 +1,146 @@
+{{ define "title" }}HCP Hierarchy — SC → MC → Worker{{ end }}
+
+{{ define "content" }}
+<style>
+  .tier-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-right: 0.25rem;
+  }
+  .tier-sc  { background: #faf5ff; color: #7c3aed; }
+  .tier-mc  { background: #eff6ff; color: #1d4ed8; }
+  .tier-w   { background: #f0fdf4; color: #15803d; }
+  .state-ready    { color: #22c55e; font-weight: 600; }
+  .state-notready { color: #f59e0b; }
+  .state-deleting { color: #ef4444; }
+  .incomplete { color: #f59e0b; }
+  .complete   { color: #22c55e; }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .stat-value { font-size: 1.8rem; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 0.85rem; color: var(--muted); margin-top: 0.25rem; }
+  .filter-note { font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem; }
+</style>
+<header>
+  <h1>HCP Hierarchy</h1>
+  <p class="meta">
+    <strong>Source:</strong> {{ .MartView }}<br>
+    <strong>Generated:</strong> {{ .GeneratedAt }}
+  </p>
+</header>
+
+<section>
+  <h2>Summary</h2>
+  <div class="summary-grid">
+    <div class="stat-card">
+      <div class="stat-value">{{ .WorkerCount }}</div>
+      <div class="stat-label">Worker Clusters</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ .MCAccountCount }}</div>
+      <div class="stat-label">MC AWS Accounts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ .SCAccountCount }}</div>
+      <div class="stat-label">SC AWS Accounts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ .CompleteCount }}</div>
+      <div class="stat-label">Complete Hierarchies</div>
+    </div>
+  </div>
+
+  {{ if eq .WorkerCount 0 }}
+  <p style="color:var(--muted)">No worker clusters found. Verify the mart view and Snowflake connection.</p>
+  {{ end }}
+</section>
+
+{{ if .Rows }}
+<section>
+  <h2>Cluster Hierarchy</h2>
+  <p class="filter-note">
+    <span class="tier-badge tier-w">W</span> Worker &nbsp;
+    <span class="tier-badge tier-mc">MC</span> Management Cluster &nbsp;
+    <span class="tier-badge tier-sc">SC</span> Service Cluster
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Worker Cluster</th>
+        <th>Org / Classification</th>
+        <th>W State</th>
+        <th>MC Account</th>
+        <th>MC Region</th>
+        <th>MC Status</th>
+        <th>SC Account</th>
+        <th>SC Region</th>
+        <th>SC Status</th>
+        <th>Hierarchy</th>
+        <th>Billing</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Rows }}
+      <tr>
+        <td>
+          <strong>{{ .CustomerClusterName }}</strong><br>
+          <span style="font-size:0.8rem;color:var(--muted)">{{ .CustomerClusterID }}</span>
+        </td>
+        <td>
+          {{ .OrganizationName }}<br>
+          <span style="font-size:0.8rem;color:var(--muted)">{{ .Classification }}</span>
+        </td>
+        <td><span class="{{ .CustomerStateClass }}">{{ .CustomerState }}</span></td>
+        <td>
+          {{ if .MCAccountID }}
+          <span style="font-family:monospace;font-size:0.85rem">{{ .MCAccountID }}</span><br>
+          <span style="font-size:0.75rem;color:var(--muted)">{{ .MCName }}</span>
+          {{ else }}
+          <span style="color:var(--muted)">—</span>
+          {{ end }}
+        </td>
+        <td>{{ .MCRegion }}</td>
+        <td><span class="{{ .MCStatusClass }}">{{ .MCStatus }}</span></td>
+        <td>
+          {{ if .SCAccountID }}
+          <span style="font-family:monospace;font-size:0.85rem">{{ .SCAccountID }}</span><br>
+          <span style="font-size:0.75rem;color:var(--muted)">{{ .SCName }}</span>
+          {{ else }}
+          <span style="color:var(--muted)">—</span>
+          {{ end }}
+        </td>
+        <td>{{ .SCRegion }}</td>
+        <td><span class="{{ .SCStatusClass }}">{{ .SCStatus }}</span></td>
+        <td>
+          {{ if .HierarchyComplete }}
+          <span class="complete">&#x2713;</span>
+          {{ else }}
+          <span class="incomplete">&#x26A0;</span>
+          {{ end }}
+        </td>
+        <td>{{ .BillingModel }}</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+</section>
+{{ end }}
+{{ end }}
+
+{{ define "hcp-hierarchy" }}
+{{ template "layout" . }}
+{{ end }}

@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/orgcache"
+	reportpkg "github.com/openshift-online/finops-tools/cli/internal/report"
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -96,6 +97,45 @@ func validateOrgCacheFlags(skip, refresh bool) error {
 		return fmt.Errorf("--skip-org-cache and --refresh-org-cache are mutually exclusive")
 	}
 	return nil
+}
+
+func costTargetSelectorSpecified(sel costTargetSelector) bool {
+	return len(sel.AccountIDs) > 0 ||
+		len(sel.Aliases) > 0 ||
+		len(sel.OUIDs) > 0 ||
+		sel.TagKey != "" ||
+		sel.PayerAlias != "" ||
+		sel.OUDirectOnly
+}
+
+func awsReportSelectorSpecified(sel costTargetSelector) bool {
+	return len(sel.AccountIDs) > 0 ||
+		len(sel.OUIDs) > 0 ||
+		sel.TagKey != "" ||
+		sel.PayerAlias != "" ||
+		sel.OUDirectOnly
+}
+
+func validateReportCostTargetSelector(templateName string, sel costTargetSelector) error {
+	switch reportpkg.AccountTargetModeFor(templateName) {
+	case reportpkg.AccountTargetsSnowflake:
+		if awsReportSelectorSpecified(sel) {
+			return fmt.Errorf("%q report does not use AWS account targets (--account, --ou, --tag-key, --payer)", templateName)
+		}
+		if len(sel.Aliases) > 1 {
+			return fmt.Errorf("%q report accepts a single Snowflake --account-alias", templateName)
+		}
+		return nil
+	case reportpkg.AccountTargetsOptional:
+		if !costTargetSelectorSpecified(sel) {
+			return nil
+		}
+		_, err := validateCostTargetSelector(sel)
+		return err
+	default:
+		_, err := validateCostTargetSelector(sel)
+		return err
+	}
 }
 
 func validateCostTargetSelector(sel costTargetSelector) (costTargetSelectionMode, error) {

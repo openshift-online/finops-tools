@@ -7,7 +7,7 @@ import (
 )
 
 func TestGeneratorForKnownTemplates(t *testing.T) {
-	for _, name := range []string{TemplateCosts, TemplateSavingsPlans, TemplateCostAnomalies} {
+	for _, name := range []string{TemplateCosts, TemplateSavingsPlans, TemplateCostAnomalies, TemplateHCPHierarchy} {
 		if _, err := GeneratorFor(name); err != nil {
 			t.Fatalf("GeneratorFor(%q): %v", name, err)
 		}
@@ -43,6 +43,32 @@ func TestCostsGeneratorAllowsZeroTargets(t *testing.T) {
 	}
 	if err := gen.Validate(GenerateInput{Format: FormatHTML}); err != nil {
 		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestAccountTargetModeFor(t *testing.T) {
+	if got := AccountTargetModeFor(TemplateHCPHierarchy); got != AccountTargetsSnowflake {
+		t.Fatalf("hcp-hierarchy mode = %v, want snowflake", got)
+	}
+	if got := AccountTargetModeFor(TemplateCosts); got != AccountTargetsOptional {
+		t.Fatalf("costs mode = %v, want optional", got)
+	}
+	if got := AccountTargetModeFor(TemplateSavingsPlans); got != AccountTargetsRequired {
+		t.Fatalf("savings-plans mode = %v, want required", got)
+	}
+}
+
+func TestHCPHierarchyGeneratorRequiresSnowflakeOpener(t *testing.T) {
+	gen, err := GeneratorFor(TemplateHCPHierarchy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := snowflakeMartOpener
+	snowflakeMartOpener = nil
+	t.Cleanup(func() { snowflakeMartOpener = saved })
+	err = gen.Validate(GenerateInput{Format: FormatHTML})
+	if err == nil {
+		t.Fatal("expected error when snowflake opener is unset")
 	}
 }
 
