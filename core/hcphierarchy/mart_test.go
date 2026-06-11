@@ -258,14 +258,15 @@ func TestMCAccountTargets_Deduplicates(t *testing.T) {
 	report := Report{
 		Rows: []HierarchyRow{
 			{MCAccountID: "111111111111", MCRegion: "us-east-1"},
-			{MCAccountID: "111111111111", MCRegion: "us-east-1"}, // duplicate
+			{MCAccountID: "111111111111", MCRegion: "us-east-1"}, // duplicate pair
+			{MCAccountID: "111111111111", MCRegion: "us-west-2"}, // same account, different region
 			{MCAccountID: "222222222222", MCRegion: "eu-west-1"},
-			{MCAccountID: "", MCRegion: "us-east-1"},              // empty — excluded
+			{MCAccountID: "", MCRegion: "us-east-1"}, // empty — excluded
 		},
 	}
 	targets := report.MCAccountTargets(aws.Config{})
-	if len(targets) != 2 {
-		t.Fatalf("expected 2 MC targets (deduplicated), got %d", len(targets))
+	if len(targets) != 3 {
+		t.Fatalf("expected 3 MC targets (deduplicated by account+region), got %d", len(targets))
 	}
 }
 

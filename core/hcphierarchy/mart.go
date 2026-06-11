@@ -84,7 +84,7 @@ func (r Report) ClusterIDs() []string {
 }
 
 // MCAccountTargets returns cost.AccountTarget entries for every distinct MC
-// account ID. Pass directly to cost.Fetch() for Management Cluster cost attribution.
+// (account ID, region) pair. Pass directly to cost.Fetch() for Management Cluster cost attribution.
 func (r Report) MCAccountTargets(cfg aws.Config) []cost.AccountTarget {
 	return accountTargets(r.Rows, func(row HierarchyRow) (string, string) {
 		return row.MCAccountID, row.MCRegion
@@ -92,7 +92,7 @@ func (r Report) MCAccountTargets(cfg aws.Config) []cost.AccountTarget {
 }
 
 // SCAccountTargets returns cost.AccountTarget entries for every distinct SC
-// account ID. Pass directly to cost.Fetch() for Service Cluster cost attribution.
+// (account ID, region) pair. Pass directly to cost.Fetch() for Service Cluster cost attribution.
 func (r Report) SCAccountTargets(cfg aws.Config) []cost.AccountTarget {
 	return accountTargets(r.Rows, func(row HierarchyRow) (string, string) {
 		return row.SCAccountID, row.SCRegion
@@ -222,7 +222,7 @@ func stringOrEmpty(v *string) string {
 	return *v
 }
 
-// accountTargets deduplicates account IDs from rows and returns AccountTargets.
+// accountTargets deduplicates (account ID, region) pairs from rows and returns AccountTargets.
 func accountTargets(
 	rows []HierarchyRow,
 	pick func(HierarchyRow) (accountID, region string),
@@ -232,10 +232,14 @@ func accountTargets(
 	var targets []cost.AccountTarget
 	for _, row := range rows {
 		id, region := pick(row)
-		if id == "" || seen[id] {
+		if id == "" {
 			continue
 		}
-		seen[id] = true
+		key := id + "\x00" + region
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		c := cfg.Copy()
 		c.Region = region
 		targets = append(targets, cost.AccountTarget{AccountID: id, AWSConfig: c})
