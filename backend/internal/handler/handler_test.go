@@ -12,6 +12,62 @@ import (
 	coresnowflake "github.com/openshift-online/finops-tools/core/snowflake"
 )
 
+func TestLivezHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/livez", nil)
+	rec := httptest.NewRecorder()
+
+	(&Livez{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("status = %q, want ok", body["status"])
+	}
+}
+
+type fakeSnowflakeChecker struct {
+	err error
+}
+
+func (f *fakeSnowflakeChecker) Check(context.Context) error {
+	return f.err
+}
+
+func TestReadyzHandler(t *testing.T) {
+	t.Run("no snowflake", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		rec := httptest.NewRecorder()
+		(&Readyz{}).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+	})
+
+	t.Run("snowflake ok", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		rec := httptest.NewRecorder()
+		(&Readyz{Snowflake: &fakeSnowflakeChecker{}}).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+	})
+
+	t.Run("snowflake unavailable", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		rec := httptest.NewRecorder()
+		(&Readyz{Snowflake: &fakeSnowflakeChecker{err: backendsnowflake.ErrUnavailable}}).ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+		}
+	})
+}
+
 func TestHelloHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/hello", nil)
 	rec := httptest.NewRecorder()

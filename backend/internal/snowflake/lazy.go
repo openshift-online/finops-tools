@@ -51,6 +51,31 @@ func (l *LazyService) Query(ctx context.Context, sqlText string) (QueryResponse,
 	return svc.Query(ctx, sqlText)
 }
 
+// Check verifies Snowflake connectivity for readiness probes. Unlike Query,
+// it retries after prior connection failures and re-validates an existing pool.
+func (l *LazyService) Check(ctx context.Context) error {
+	l.mu.Lock()
+	if l.svc != nil {
+		err := coresnowflake.Ping(ctx, l.db)
+		if err == nil {
+			l.mu.Unlock()
+			return nil
+		}
+		_ = l.db.Close()
+		l.db = nil
+		l.svc = nil
+		l.init = false
+		l.initErr = nil
+	} else if l.init && l.initErr != nil {
+		l.init = false
+		l.initErr = nil
+	}
+	l.mu.Unlock()
+
+	_, err := l.serviceWithContext(ctx)
+	return err
+}
+
 // Close releases the Snowflake handle when connected.
 func (l *LazyService) Close() error {
 	l.mu.Lock()
@@ -67,6 +92,12 @@ func (l *LazyService) Close() error {
 }
 
 func (l *LazyService) service() (*Service, error) {
+	pingCtx, cancel := context.WithTimeout(context.Background(), snowflakeConnectTimeout)
+	defer cancel()
+	return l.serviceWithContext(pingCtx)
+}
+
+func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -85,9 +116,7 @@ func (l *LazyService) service() (*Service, error) {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
-	pingCtx, cancel := context.WithTimeout(context.Background(), snowflakeConnectTimeout)
-	defer cancel()
-	if err := coresnowflake.Ping(pingCtx, db); err != nil {
+	if err := coresnowflake.Ping(ctx, db); err != nil {
 		_ = db.Close()
 		l.init = true
 		l.initErr = err

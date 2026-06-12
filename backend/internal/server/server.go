@@ -37,9 +37,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	}
 
 	mux := http.NewServeMux()
-	hello := &handler.Hello{}
-	mux.Handle("/hello", hello)
-	mux.Handle("/health", &handler.Health{Hello: hello})
+	mux.Handle("/hello", &handler.Hello{})
+	livez := &handler.Livez{}
+	mux.Handle("/livez", livez)
+	mux.Handle("/health", livez) // backwards-compatible alias for /livez
+	var snowflakeChecker handler.SnowflakeChecker
+	if s.snowflake != nil {
+		snowflakeChecker = s.snowflake
+	}
+	mux.Handle("/readyz", &handler.Readyz{Snowflake: snowflakeChecker})
 	mux.Handle("/v1/snowflake/query", &handler.SnowflakeQuery{
 		Querier:      querier,
 		QueryTimeout: cfg.QueryTimeout,
@@ -76,6 +82,9 @@ func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
+		if isProbePath(r.URL.Path) {
+			return
+		}
 		logger.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -93,4 +102,13 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func isProbePath(path string) bool {
+	switch path {
+	case "/livez", "/readyz", "/health":
+		return true
+	default:
+		return false
+	}
 }

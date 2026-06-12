@@ -7,7 +7,7 @@ import (
 	"github.com/openshift-online/finops-tools/core"
 )
 
-// Hello serves GET /hello and GET /health.
+// Hello serves GET /hello.
 type Hello struct{}
 
 type helloResponse struct {
@@ -27,15 +27,6 @@ func (h *Hello) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, helloResponse{Message: msg})
-}
-
-// Health is an alias handler for probe endpoints.
-type Health struct {
-	Hello *Hello
-}
-
-func (h *Health) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.Hello.ServeHTTP(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

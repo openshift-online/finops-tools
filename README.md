@@ -73,7 +73,9 @@ The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/hello` | Smoke test; returns `{"message":"hello"}` |
-| `GET` | `/health` | Same as `/hello` (for probes) |
+| `GET` | `/livez` | Liveness probe; process is up (no external deps) |
+| `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
+| `GET` | `/health` | Alias for `/livez` |
 | `POST` | `/v1/snowflake/query` | Run SQL against Snowflake |
 
 **Query request:**
