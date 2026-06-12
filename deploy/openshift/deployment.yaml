@@ -15,6 +15,7 @@ spec:
       labels:
         app: finops-backend
     spec:
+      automountServiceAccountToken: false
       # serviceAccountName: finops-backend  # wire when Red Hat provides the service account
       securityContext:
         runAsNonRoot: true
