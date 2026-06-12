@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	snowflakeConnectTimeout = 15 * time.Second
+	snowflakeConnectTimeout = 30 * time.Second
 	initFailCooldown        = 30 * time.Second
 )
 
@@ -60,24 +60,33 @@ func (l *LazyService) Query(ctx context.Context, sqlText string) (QueryResponse,
 // Check verifies Snowflake connectivity for readiness probes. Unlike Query,
 // it retries after prior connection failures and re-validates an existing pool.
 func (l *LazyService) Check(ctx context.Context) error {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
+	defer cancel()
+
 	l.mu.Lock()
-	if l.svc != nil {
-		err := coresnowflake.Ping(ctx, l.db)
-		if err == nil {
-			l.mu.Unlock()
+	switch {
+	case l.svc != nil:
+		db := l.db
+		l.mu.Unlock()
+		if err := coresnowflake.Ping(ctxWithTimeout, db); err == nil {
 			return nil
+		}
+		l.mu.Lock()
+		if l.svc == nil {
+			l.mu.Unlock()
+			break
 		}
 		_ = l.db.Close()
 		l.db = nil
 		l.svc = nil
 		l.init = false
 		l.initErr = nil
-	} else if l.init && l.initErr != nil {
+	case l.init && l.initErr != nil:
 		l.clearInitFailureLocked()
 	}
 	l.mu.Unlock()
 
-	_, err := l.serviceWithContext(ctx)
+	_, err := l.serviceWithContext(ctxWithTimeout)
 	return err
 }
 
@@ -110,35 +119,50 @@ func (l *LazyService) recordInitFailureLocked(err error) {
 
 func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if l.svc != nil {
-		return l.svc, nil
+		svc := l.svc
+		l.mu.Unlock()
+		return svc, nil
 	}
 	if l.init && l.initErr != nil {
 		if time.Since(l.lastInitFail) < initFailCooldown {
-			return nil, fmt.Errorf("%w: %w", ErrUnavailable, l.initErr)
+			err := l.initErr
+			l.mu.Unlock()
+			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		l.clearInitFailureLocked()
 	}
+	l.mu.Unlock()
 
 	db, err := coresnowflake.OpenDB(l.connect)
 	if err != nil {
+		l.mu.Lock()
 		l.recordInitFailureLocked(err)
+		l.mu.Unlock()
 		l.logger.Error("snowflake open failed", "error", err)
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
 	if err := coresnowflake.Ping(ctx, db); err != nil {
 		_ = db.Close()
+		l.mu.Lock()
 		l.recordInitFailureLocked(err)
+		l.mu.Unlock()
 		l.logger.Error("snowflake ping failed", "error", err)
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.svc != nil {
+		_ = db.Close()
+		return l.svc, nil
 	}
 
 	l.db = db
 	l.svc = &Service{DB: db, MaxRows: l.maxRows}
 	l.init = true
+	l.initErr = nil
 	l.logger.Info("snowflake connected",
 		"account", l.connect.Account,
 		"warehouse", l.connect.Warehouse,

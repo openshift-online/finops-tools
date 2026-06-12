@@ -158,6 +158,14 @@ oc auth can-i create deployment -n finops-team--finops-tools-backend
 
 #### Deploy the API (developers)
 
+Full rebuild, push, and roll out:
+
+```bash
+make openshift-refresh
+```
+
+Or step by step:
+
 1. Build and push the image:
 
 ```bash
@@ -168,10 +176,7 @@ make podman-push
 2. Deploy workloads (do **not** apply `secret.yaml.example` with dummy values):
 
 ```bash
-oc apply -f deploy/openshift/deployment.yaml \
-  -f deploy/openshift/service.yaml \
-  -f deploy/openshift/route.yaml \
-  -f deploy/openshift/networkpolicy.yaml
+make openshift-apply
 ```
 
 3. Create the Snowflake Secret when ready:
@@ -186,6 +191,8 @@ oc create secret generic finops-backend-snowflake \
 
 oc rollout restart deployment/finops-backend -n finops-team--finops-tools-backend
 ```
+
+Or `make openshift-restart` after `make openshift-apply`.
 
 4. Verify:
 
