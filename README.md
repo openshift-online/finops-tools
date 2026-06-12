@@ -8,9 +8,10 @@ FinOps command-line tools. The repository is a Go monorepo with a shared **core*
 |------|--------|------|
 | `core/` | `github.com/openshift-online/finops-tools/core` | Business logic (no CLI/HTTP dependencies) |
 | `cli/` | `github.com/openshift-online/finops-tools/cli` | Cobra commands; calls into `core` |
+| `backend/` | `github.com/openshift-online/finops-tools/backend` | HTTP server; calls into `core` |
 | `go.work` | — | Ties modules together for local development |
 
-A future REST API can live in a separate module and import the same `core` package.
+The HTTP API is a separate module that imports **`core` only** — it must never depend on `cli` (enforced by `backend/boundary_test.go`).
 
 ### Package map (`cli/internal`)
 
@@ -44,18 +45,154 @@ From the repository root (uses `go.work`):
 go work sync
 make test
 make build
+make build-backend
 ./bin/finops demo hello   # prints: hello
+./bin/finops-backend      # starts HTTP server on :8080 (see HTTP API below)
 ```
 
 Or without Make:
 
 ```bash
-go test ./core/... ./cli/...
+go test ./core/... ./cli/... ./backend/...
 go run ./cli/cmd/finops demo hello
 go build -o bin/finops ./cli/cmd/finops
+go run ./backend/cmd/finops-backend
+go build -o bin/finops-backend ./backend/cmd/finops-backend
 ```
 
-Edits under `core/` are picked up immediately by the CLI (workspace + `replace` in `cli/go.mod`).
+Edits under `core/` are picked up immediately by the CLI and HTTP server (workspace + `replace` in module `go.mod` files).
+
+## HTTP API
+
+The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for cluster deployment. It uses environment variables for Snowflake credentials (no local config files).
+
+**Security note:** The MVP has **no HTTP authentication**. Restrict access at the network layer (cluster-internal Route, firewall rules) until auth and service-account Snowflake credentials are added.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/hello` | Smoke test; returns `{"message":"hello"}` |
+| `GET` | `/health` | Same as `/hello` (for probes) |
+| `POST` | `/v1/snowflake/query` | Run SQL against Snowflake |
+
+**Query request:**
+
+```json
+{ "sql": "SELECT CURRENT_USER(), CURRENT_ROLE()" }
+```
+
+**Query response:**
+
+```json
+{
+  "columns": ["CURRENT_USER()", "CURRENT_ROLE()"],
+  "rows": [["user@example.com", "MY_ROLE"]],
+  "row_count": 1,
+  "truncated": false
+}
+```
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SNOWFLAKE_ACCOUNT` | yes* | — | Snowflake account identifier |
+| `SNOWFLAKE_USER` | yes* | — | Snowflake login name |
+| `SNOWFLAKE_TOKEN` | yes* | — | OAuth access token |
+| `SNOWFLAKE_WAREHOUSE` | yes* | — | Warehouse for queries |
+| `SNOWFLAKE_ROLE` | no | — | Role |
+| `SNOWFLAKE_DATABASE` | no | — | Database |
+| `SNOWFLAKE_SCHEMA` | no | — | Schema |
+| `FINOPS_BACKEND_ADDR` | no | `:8080` | Listen address |
+| `FINOPS_BACKEND_MAX_ROWS` | no | `1000` | Max rows returned per query |
+| `FINOPS_BACKEND_QUERY_TIMEOUT` | no | `60s` | Per-query timeout |
+
+\*All four Snowflake variables are required together when Snowflake is enabled. Omit all four to start the server without Snowflake (`/v1/snowflake/query` returns 503).
+
+### Local run
+
+```bash
+export SNOWFLAKE_ACCOUNT=example-account
+export SNOWFLAKE_USER=example-user
+export SNOWFLAKE_TOKEN=example-token
+export SNOWFLAKE_WAREHOUSE=EXAMPLE_WH
+
+make build-backend
+./bin/finops-backend
+```
+
+```bash
+curl -s http://localhost:8080/hello
+curl -s -X POST http://localhost:8080/v1/snowflake/query \
+  -H 'Content-Type: application/json' \
+  -d '{"sql":"SELECT CURRENT_USER(), CURRENT_ROLE()"}'
+```
+
+### OpenShift deployment
+
+Runtime namespace: **`finops-team--finops-tools-backend`** on cluster `prod-stable-spoke1-dc-rdu2`.
+
+The TenantNamespace CR (`metadata.name: finops-tools-backend`) is applied in **`finops-team--config`**; the platform provisions **`finops-team--finops-tools-backend`**.
+
+#### One-time namespace setup (platform / tenant admin)
+
+Creating the namespace requires a **TenantNamespace** in `finops-team--config`. Most developers do not have permission for this API.
+
+Ask a tenant admin to run once:
+
+```bash
+oc apply -f deploy/openshift/tenantnamespace.yaml
+```
+
+If you see `Forbidden` on `tenantnamespaces.tenant.paas.redhat.com`, you need that admin step — you cannot self-provision the namespace.
+
+Confirm the namespace exists before deploying:
+
+```bash
+oc get namespace finops-team--finops-tools-backend
+oc auth can-i create deployment -n finops-team--finops-tools-backend
+```
+
+#### Deploy the API (developers)
+
+1. Build and push the image:
+
+```bash
+make podman-build
+make podman-push
+```
+
+2. Deploy workloads (do **not** apply `secret.yaml.example` with dummy values):
+
+```bash
+oc apply -f deploy/openshift/deployment.yaml \
+  -f deploy/openshift/service.yaml \
+  -f deploy/openshift/route.yaml \
+  -f deploy/openshift/networkpolicy.yaml
+```
+
+3. Create the Snowflake Secret when ready:
+
+```bash
+oc create secret generic finops-backend-snowflake \
+  --from-literal=SNOWFLAKE_ACCOUNT=example-account \
+  --from-literal=SNOWFLAKE_USER=example-user \
+  --from-literal=SNOWFLAKE_TOKEN=example-token \
+  --from-literal=SNOWFLAKE_WAREHOUSE=EXAMPLE_WH \
+  -n finops-team--finops-tools-backend
+
+oc rollout restart deployment/finops-backend -n finops-team--finops-tools-backend
+```
+
+4. Verify:
+
+```bash
+oc get pods,svc,endpoints,route -n finops-team--finops-tools-backend -l app=finops-backend
+curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/hello"
+```
+
+Wire `serviceAccountName` in `deployment.yaml` when Red Hat provides the service account.
 
 ## Configuration
 
@@ -367,5 +504,5 @@ finops demo hello
 
 ## CI
 
-- **Test** (`.github/workflows/test.yml`): runs on pull requests and pushes to `main`/`master`.
+- **Test** (`.github/workflows/test.yml`): runs on pull requests and pushes to `main`/`master` (tests and builds CLI + API).
 - **Release** (`.github/workflows/release.yml`): runs on version tags.

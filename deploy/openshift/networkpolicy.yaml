@@ -1,0 +1,33 @@
+# Allow the OpenShift ingress controller to reach finops-backend pods.
+# Apply if the pod is Running/Ready but the Route times out (TLS ok, HTTP hangs).
+#
+#   oc apply -f deploy/openshift/networkpolicy.yaml
+#
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: finops-backend-allow-ingress
+  namespace: finops-team--finops-tools-backend
+  labels:
+    app: finops-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: finops-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+      ports:
+        - protocol: TCP
+          port: 8080

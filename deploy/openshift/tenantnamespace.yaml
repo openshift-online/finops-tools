@@ -1,0 +1,18 @@
+# Provisions the runtime namespace finops-team--finops-tools-backend.
+#
+# Requires permission on tenantnamespaces in finops-team--config (platform/admin).
+# If you get Forbidden, ask the finops-team tenant admin to apply this file once.
+#
+#   oc apply -f deploy/openshift/tenantnamespace.yaml
+#
+# The TenantNamespace metadata.name is finops-tools-backend; the platform creates
+# the runtime namespace finops-team--finops-tools-backend.
+apiVersion: tenant.paas.redhat.com/v1alpha1
+kind: TenantNamespace
+metadata:
+  name: finops-tools-backend
+  namespace: finops-team--config
+spec:
+  network:
+    security-zone: internal
+  type: runtime

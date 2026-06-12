@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-backend
+  namespace: finops-team--finops-tools-backend
+  labels:
+    app: finops-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finops-backend
+  template:
+    metadata:
+      labels:
+        app: finops-backend
+    spec:
+      # serviceAccountName: finops-backend  # wire when Red Hat provides the service account
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: finops-backend
+          image: images.paas.redhat.com/finops/finops-tools:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: FINOPS_BACKEND_ADDR
+              value: ":8080"
+            - name: FINOPS_BACKEND_MAX_ROWS
+              value: "1000"
+            - name: FINOPS_BACKEND_QUERY_TIMEOUT
+              value: "60s"
+            - name: SNOWFLAKE_ACCOUNT
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_ACCOUNT
+                  optional: true
+            - name: SNOWFLAKE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_USER
+                  optional: true
+            - name: SNOWFLAKE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_TOKEN
+                  optional: true
+            - name: SNOWFLAKE_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_PRIVATE_KEY
+                  optional: true
+            - name: SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
+                  optional: true
+            - name: SNOWFLAKE_WAREHOUSE
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_WAREHOUSE
+                  optional: true
+            - name: SNOWFLAKE_ROLE
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_ROLE
+                  optional: true
+            - name: SNOWFLAKE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_DATABASE
+                  optional: true
+            - name: SNOWFLAKE_SCHEMA
+              valueFrom:
+                secretKeyRef:
+                  name: finops-backend-snowflake
+                  key: SNOWFLAKE_SCHEMA
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /hello
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /hello
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /hello
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-backend
+  namespace: finops-team--finops-tools-backend
+  labels:
+    app: finops-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: finops-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

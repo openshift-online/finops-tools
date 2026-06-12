@@ -21,9 +21,13 @@ jobs:
           cache-dependency-path: |
             core/go.sum
             cli/go.sum
+            backend/go.sum
 
       - name: Test
-        run: go test ./core/... ./cli/...
+        run: go test ./core/... ./cli/... ./backend/...
 
-      - name: Build
+      - name: Build CLI
         run: go build -o finops ./cli/cmd/finops
+
+      - name: Build backend
+        run: go build -o finops-backend ./backend/cmd/finops-backend
