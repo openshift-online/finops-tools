@@ -44,7 +44,9 @@ func NewLazyService(connect coresnowflake.ConnectParams, maxRows int, logger *sl
 
 // Query executes SQL, connecting to Snowflake first if needed.
 func (l *LazyService) Query(ctx context.Context, sqlText string) (QueryResponse, error) {
-	svc, err := l.service()
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
+	defer cancel()
+	svc, err := l.serviceWithContext(ctxWithTimeout)
 	if err != nil {
 		return QueryResponse{}, err
 	}
@@ -89,12 +91,6 @@ func (l *LazyService) Close() error {
 	l.init = false
 	l.initErr = nil
 	return err
-}
-
-func (l *LazyService) service() (*Service, error) {
-	pingCtx, cancel := context.WithTimeout(context.Background(), snowflakeConnectTimeout)
-	defer cancel()
-	return l.serviceWithContext(pingCtx)
 }
 
 func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) {
