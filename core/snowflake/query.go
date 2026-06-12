@@ -24,6 +24,9 @@ func Query(ctx context.Context, db *sql.DB, sqlText string) (QueryResult, error)
 // all rows are returned. The second return value is true when additional rows
 // were available beyond maxRows.
 func QueryLimited(ctx context.Context, db *sql.DB, sqlText string, maxRows int) (QueryResult, bool, error) {
+	if maxRows < 0 {
+		return QueryResult{}, false, fmt.Errorf("invalid maxRows: %d", maxRows)
+	}
 	rows, err := db.QueryContext(ctx, sqlText)
 	if err != nil {
 		return QueryResult{}, false, fmt.Errorf("snowflake query: %w", err)

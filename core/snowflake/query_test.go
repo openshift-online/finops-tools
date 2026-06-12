@@ -1,10 +1,24 @@
 package snowflake
 
 import (
+	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestQueryLimitedRejectsNegativeMaxRows(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := QueryLimited(context.Background(), nil, "SELECT 1", -1)
+	if err == nil {
+		t.Fatal("expected error for negative maxRows")
+	}
+	if !strings.Contains(err.Error(), "invalid maxRows: -1") {
+		t.Fatalf("err = %v, want invalid maxRows", err)
+	}
+}
 
 func TestResolveColumnNames(t *testing.T) {
 	t.Parallel()
