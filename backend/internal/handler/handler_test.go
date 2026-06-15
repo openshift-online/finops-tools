@@ -3,10 +3,13 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/openshift-online/finops-tools/core/awsaccounts"
 
 	backendsnowflake "github.com/openshift-online/finops-tools/backend/internal/snowflake"
 	coresnowflake "github.com/openshift-online/finops-tools/core/snowflake"
@@ -230,3 +233,98 @@ func TestValidateSQL(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+type fakeAWSAccountsDB struct {
+	db         *sql.DB
+	err        error
+	connection string
+}
+
+func (f *fakeAWSAccountsDB) Database(_ context.Context, connection string) (*sql.DB, error) {
+	f.connection = connection
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.db, nil
+}
+
+func TestAWSAccountsHistoricalCountHandler(t *testing.T) {
+	fakeDB := &fakeAWSAccountsDB{db: nil}
+	h := &AWSAccountsHistoricalCount{
+		Querier: fakeDB,
+		Table:   "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT",
+		MaxRows: 10000,
+		QueryFn: func(_ context.Context, _ awsaccounts.RowQuerier, _ awsaccounts.QueryOptions) (awsaccounts.QueryResult, error) {
+			return awsaccounts.QueryResult{
+				Points: []awsaccounts.DailyPoint{
+					{
+						Date:              "2026-01-19",
+						PayerAccountID:    "123456789012",
+						NBActiveAccounts:  100,
+						NBClosedAccounts:  1,
+						NBDeletedAccounts: 0,
+					},
+				},
+			}, nil
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/aws/accounts/historical-count?payer_account_id=123456789012&from=2026-01-01&to=2026-01-31", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var resp awsAccountsHistoricalCountResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Aggregate != awsaccounts.AggregatePayer || resp.RowCount != 1 || resp.Truncated {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.Data[0].PayerAccountID != "123456789012" || resp.Data[0].NBActiveAccounts != 100 {
+		t.Fatalf("unexpected data point: %+v", resp.Data[0])
+	}
+}
+
+func TestAWSAccountsHistoricalCountValidation(t *testing.T) {
+	h := &AWSAccountsHistoricalCount{
+		Querier: &fakeAWSAccountsDB{},
+		Table:   "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT",
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/aws/accounts/historical-count?payer_account_id=bad", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestAWSAccountsHistoricalCountNotConfigured(t *testing.T) {
+	h := &AWSAccountsHistoricalCount{
+		Table: "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT",
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/aws/accounts/historical-count", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestAWSAccountsHistoricalCountUnknownConnection(t *testing.T) {
+	h := &AWSAccountsHistoricalCount{
+		Querier: &fakeAWSAccountsDB{err: backendsnowflake.ErrUnknownConnection},
+		Table:   "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT",
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/aws/accounts/historical-count?connection=missing", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+

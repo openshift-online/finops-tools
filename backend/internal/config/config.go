@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	defaultAddr         = ":8080"
-	defaultMaxRows      = 1000
-	defaultQueryTimeout = 60 * time.Second
+	defaultAddr                            = ":8080"
+	defaultMaxRows                         = 1000
+	defaultQueryTimeout                    = 60 * time.Second
+	defaultAWSAccountsHistoricalTable      = "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT"
+	defaultAWSAccountsHistoricalMaxRows    = 10000
 )
 
 var snowflakeConnectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -28,18 +30,22 @@ type SnowflakeConnections struct {
 
 // Config is the runtime configuration for the HTTP API server.
 type Config struct {
-	Addr         string
-	MaxRows      int
-	QueryTimeout time.Duration
-	Snowflake    *SnowflakeConnections
+	Addr                         string
+	MaxRows                      int
+	QueryTimeout                 time.Duration
+	AWSAccountsHistoricalTable   string
+	AWSAccountsHistoricalMaxRows int
+	Snowflake                    *SnowflakeConnections
 }
 
 // Load reads configuration from the process environment.
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:         envOrDefault("FINOPS_BACKEND_ADDR", defaultAddr),
-		MaxRows:      defaultMaxRows,
-		QueryTimeout: defaultQueryTimeout,
+		Addr:                         envOrDefault("FINOPS_BACKEND_ADDR", defaultAddr),
+		MaxRows:                      defaultMaxRows,
+		QueryTimeout:                 defaultQueryTimeout,
+		AWSAccountsHistoricalTable:   envOrDefault("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE", defaultAWSAccountsHistoricalTable),
+		AWSAccountsHistoricalMaxRows: defaultAWSAccountsHistoricalMaxRows,
 	}
 
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_MAX_ROWS")); v != "" {
@@ -56,6 +62,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("FINOPS_BACKEND_QUERY_TIMEOUT must be a positive duration (e.g. 60s)")
 		}
 		cfg.QueryTimeout = d
+	}
+
+	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return Config{}, fmt.Errorf("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS must be a positive integer")
+		}
+		cfg.AWSAccountsHistoricalMaxRows = n
 	}
 
 	sf, err := loadSnowflakeConnections()

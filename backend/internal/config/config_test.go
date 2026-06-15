@@ -65,6 +65,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.MaxRows != defaultMaxRows {
 		t.Fatalf("MaxRows = %d, want %d", cfg.MaxRows, defaultMaxRows)
 	}
+	if cfg.AWSAccountsHistoricalTable != defaultAWSAccountsHistoricalTable {
+		t.Fatalf("AWSAccountsHistoricalTable = %q, want %q", cfg.AWSAccountsHistoricalTable, defaultAWSAccountsHistoricalTable)
+	}
+	if cfg.AWSAccountsHistoricalMaxRows != defaultAWSAccountsHistoricalMaxRows {
+		t.Fatalf("AWSAccountsHistoricalMaxRows = %d, want %d", cfg.AWSAccountsHistoricalMaxRows, defaultAWSAccountsHistoricalMaxRows)
+	}
 	if cfg.Snowflake != nil {
 		t.Fatal("expected snowflake to be nil when unset")
 	}
@@ -270,6 +276,33 @@ func writeTempKeyFile(t *testing.T, contents string) string {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return path
+}
+
+func TestLoadAWSAccountsHistoricalConfig(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE", "EXAMPLE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT")
+	t.Setenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS", "5000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AWSAccountsHistoricalTable != "EXAMPLE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT" {
+		t.Fatalf("AWSAccountsHistoricalTable = %q", cfg.AWSAccountsHistoricalTable)
+	}
+	if cfg.AWSAccountsHistoricalMaxRows != 5000 {
+		t.Fatalf("AWSAccountsHistoricalMaxRows = %d, want 5000", cfg.AWSAccountsHistoricalMaxRows)
+	}
+}
+
+func TestLoadAWSAccountsHistoricalMaxRowsInvalid(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS", "0")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid historical max rows")
+	}
 }
 
 func TestNormalizePEM(t *testing.T) {

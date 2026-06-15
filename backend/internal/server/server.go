@@ -58,6 +58,12 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		Querier:      querier,
 		QueryTimeout: cfg.QueryTimeout,
 	})
+	mux.Handle("/v1/aws/accounts/historical-count", &handler.AWSAccountsHistoricalCount{
+		Querier:      s.snowflake,
+		Table:        cfg.AWSAccountsHistoricalTable,
+		MaxRows:      cfg.AWSAccountsHistoricalMaxRows,
+		QueryTimeout: cfg.QueryTimeout,
+	})
 
 	s.http = &http.Server{
 		Addr:              cfg.Addr,

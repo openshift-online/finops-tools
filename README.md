@@ -68,6 +68,8 @@ The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for
 
 **Security note:** The MVP has **no HTTP authentication**. Restrict access at the network layer (cluster-internal Route, firewall rules) until auth and service-account Snowflake credentials are added.
 
+OpenAPI 3.0 spec: [`backend/openapi.yaml`](backend/openapi.yaml)
+
 ### Endpoints
 
 | Method | Path | Description |
@@ -77,6 +79,7 @@ The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for
 | `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
 | `GET` | `/health` | Alias for `/livez` |
 | `POST` | `/v1/snowflake/query` | Run SQL against Snowflake |
+| `GET` | `/v1/aws/accounts/historical-count` | Daily AWS linked-account counts per payer (time series) |
 
 **Query request:**
 
@@ -100,6 +103,57 @@ The optional `connection` field selects a named Snowflake environment (see below
 }
 ```
 
+#### AWS accounts historical count
+
+`GET /v1/aws/accounts/historical-count` returns daily snapshots of linked AWS account counts from `HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT`. For each payer and calendar day, the API keeps the latest snapshot that day (by `TIMESTAMP`, then `RUN_ID`).
+
+| Query param | Default | Description |
+|-------------|---------|-------------|
+| `from` | none | Start date `YYYY-MM-DD` (inclusive) |
+| `to` | none | End date `YYYY-MM-DD` (inclusive) |
+| `payer_account_id` | none | 12-digit AWS payer account filter |
+| `aggregate` | `payer` | `payer` = one series per payer per day; `sum` = totals across payers per day |
+| `connection` | default Snowflake connection | Query param or `X-FinOps-Snowflake-Connection` header |
+
+**Per-payer response** (`aggregate=payer`, default):
+
+```json
+{
+  "aggregate": "payer",
+  "from": "2026-01-01",
+  "to": "2026-03-01",
+  "data": [
+    {
+      "date": "2026-01-19",
+      "payer_account_id": "123456789012",
+      "nb_active_accounts": 100,
+      "nb_closed_accounts": 1,
+      "nb_deleted_accounts": 0
+    }
+  ],
+  "row_count": 1,
+  "truncated": false
+}
+```
+
+**Summed across payers** (`aggregate=sum`):
+
+```json
+{
+  "aggregate": "sum",
+  "data": [
+    {
+      "date": "2026-01-19",
+      "nb_active_accounts": 300,
+      "nb_closed_accounts": 3,
+      "nb_deleted_accounts": 0
+    }
+  ],
+  "row_count": 1,
+  "truncated": false
+}
+```
+
 ### Environment variables
 
 #### Server
@@ -107,8 +161,10 @@ The optional `connection` field selects a named Snowflake environment (see below
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `FINOPS_BACKEND_ADDR` | no | `:8080` | Listen address |
-| `FINOPS_BACKEND_MAX_ROWS` | no | `1000` | Max rows returned per query |
+| `FINOPS_BACKEND_MAX_ROWS` | no | `1000` | Max rows returned per generic Snowflake query |
 | `FINOPS_BACKEND_QUERY_TIMEOUT` | no | `60s` | Per-query timeout |
+| `FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE` | no | `HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT` | Snowflake table for account-count history |
+| `FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS` | no | `10000` | Max rows returned by `/v1/aws/accounts/historical-count` |
 
 #### Snowflake
 
@@ -168,6 +224,8 @@ curl -s -X POST http://localhost:8080/v1/snowflake/query \
 curl -s -X POST http://localhost:8080/v1/snowflake/query \
   -H 'Content-Type: application/json' \
   -d '{"connection":"sandbox","sql":"SELECT CURRENT_DATABASE()"}'
+curl -s 'http://localhost:8080/v1/aws/accounts/historical-count?payer_account_id=123456789012&from=2026-01-01&to=2026-03-31'
+curl -s 'http://localhost:8080/v1/aws/accounts/historical-count?aggregate=sum&from=2026-01-01'
 ```
 
 ### OpenShift deployment

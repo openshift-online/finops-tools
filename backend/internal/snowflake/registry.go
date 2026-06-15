@@ -2,6 +2,7 @@ package snowflake
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,6 +47,24 @@ func (r *Registry) Query(ctx context.Context, connection, sqlText string) (Query
 		return QueryResponse{}, err
 	}
 	return svc.Query(ctx, sqlText)
+}
+
+// QueryUnlimited executes SQL without a row cap on the named connection.
+func (r *Registry) QueryUnlimited(ctx context.Context, connection, sqlText string) (QueryResponse, error) {
+	svc, err := r.serviceFor(connection)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	return svc.QueryUnlimited(ctx, sqlText)
+}
+
+// Database returns the Snowflake database handle for the named connection.
+func (r *Registry) Database(ctx context.Context, connection string) (*sql.DB, error) {
+	svc, err := r.serviceFor(connection)
+	if err != nil {
+		return nil, err
+	}
+	return svc.Database(ctx)
 }
 
 // Check verifies connectivity for the default connection (readiness probes).

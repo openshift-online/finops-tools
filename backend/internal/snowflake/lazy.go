@@ -57,6 +57,28 @@ func (l *LazyService) Query(ctx context.Context, sqlText string) (QueryResponse,
 	return svc.Query(ctx, sqlText)
 }
 
+// QueryUnlimited executes SQL without a row cap.
+func (l *LazyService) QueryUnlimited(ctx context.Context, sqlText string) (QueryResponse, error) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
+	defer cancel()
+	svc, err := l.serviceWithContext(ctxWithTimeout)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	return svc.QueryUnlimited(ctx, sqlText)
+}
+
+// Database returns the underlying Snowflake database handle.
+func (l *LazyService) Database(ctx context.Context) (*sql.DB, error) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
+	defer cancel()
+	svc, err := l.serviceWithContext(ctxWithTimeout)
+	if err != nil {
+		return nil, err
+	}
+	return svc.DB, nil
+}
+
 // Check verifies Snowflake connectivity for readiness probes. Unlike Query,
 // it retries after prior connection failures and re-validates an existing pool.
 func (l *LazyService) Check(ctx context.Context) error {

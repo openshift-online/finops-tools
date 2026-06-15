@@ -29,6 +29,15 @@ func (s *Service) Query(ctx context.Context, sqlText string) (QueryResponse, err
 	return QueryResponse{Result: result, Truncated: truncated}, nil
 }
 
+// QueryUnlimited executes SQL without a row cap.
+func (s *Service) QueryUnlimited(ctx context.Context, sqlText string) (QueryResponse, error) {
+	result, truncated, err := coresnowflake.QueryLimited(ctx, s.DB, sqlText, 0)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	return QueryResponse{Result: result, Truncated: truncated}, nil
+}
+
 // Ping verifies the Snowflake connection is usable.
 func (s *Service) Ping(ctx context.Context) error {
 	return coresnowflake.Ping(ctx, s.DB)
