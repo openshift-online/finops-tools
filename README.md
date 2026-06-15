@@ -68,13 +68,14 @@ The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for
 
 **Security note:** The MVP has **no HTTP authentication**. Restrict access at the network layer (cluster-internal Route, firewall rules) until auth and service-account Snowflake credentials are added.
 
-OpenAPI 3.0 spec: [`backend/openapi.yaml`](backend/openapi.yaml)
+OpenAPI 3.0 spec: embedded in the binary and served at `GET /openapi.yaml` (source: [`backend/internal/openapi/openapi.yaml`](backend/internal/openapi/openapi.yaml))
 
 ### Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/hello` | Smoke test; returns `{"message":"hello"}` |
+| `GET` | `/openapi.yaml` | OpenAPI 3.0 specification (YAML) |
 | `GET` | `/livez` | Liveness probe; process is up (no external deps) |
 | `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
 | `GET` | `/health` | Alias for `/livez` |
@@ -218,6 +219,7 @@ make build-backend
 
 ```bash
 curl -s http://localhost:8080/hello
+curl -s http://localhost:8080/openapi.yaml
 curl -s -X POST http://localhost:8080/v1/snowflake/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT CURRENT_USER(), CURRENT_ROLE()"}'
@@ -307,6 +309,7 @@ Or `make openshift-restart` after `make openshift-apply`.
 ```bash
 oc get pods,svc,endpoints,route -n finops-team--finops-tools-backend -l app=finops-backend
 curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/hello"
+curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/openapi.yaml"
 ```
 
 Wire `serviceAccountName` in `deployment.yaml` when Red Hat provides the service account.

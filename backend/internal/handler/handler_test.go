@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openshift-online/finops-tools/core/awsaccounts"
@@ -87,6 +88,30 @@ func TestHelloHandler(t *testing.T) {
 	}
 	if body["message"] != "hello" {
 		t.Fatalf("message = %q, want hello", body["message"])
+	}
+}
+
+func TestOpenAPIHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	rec := httptest.NewRecorder()
+
+	(&OpenAPI{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/yaml" {
+		t.Fatalf("Content-Type = %q, want application/yaml", ct)
+	}
+	body := rec.Body.String()
+	if body == "" {
+		t.Fatal("expected non-empty OpenAPI document")
+	}
+	if !strings.Contains(body, "openapi: 3.0.3") {
+		t.Fatalf("body missing openapi version")
+	}
+	if !strings.Contains(body, "/v1/aws/accounts/historical-count") {
+		t.Fatalf("body missing historical-count path")
 	}
 }
 

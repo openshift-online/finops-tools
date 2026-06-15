@@ -46,6 +46,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/hello", &handler.Hello{})
+	mux.Handle("/openapi.yaml", &handler.OpenAPI{})
 	livez := &handler.Livez{}
 	mux.Handle("/livez", livez)
 	mux.Handle("/health", livez) // backwards-compatible alias for /livez

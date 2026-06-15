@@ -24,12 +24,33 @@ servers:
 tags:
   - name: health
     description: Liveness and readiness probes
+  - name: docs
+    description: API documentation
   - name: snowflake
     description: Generic Snowflake SQL passthrough
   - name: aws
     description: AWS account metrics from Snowflake marts
 
 paths:
+  /openapi.yaml:
+    get:
+      tags: [docs]
+      summary: OpenAPI specification
+      description: Returns this API's OpenAPI 3.0 document (YAML).
+      operationId: getOpenAPI
+      responses:
+        "200":
+          description: OpenAPI document
+          content:
+            application/yaml:
+              schema:
+                type: string
+            text/yaml:
+              schema:
+                type: string
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
   /hello:
     get:
       tags: [health]
