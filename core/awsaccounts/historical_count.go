@@ -185,40 +185,43 @@ ORDER BY snapshot_date, PAYER_ACCOUNT_ID`), nil
 }
 
 // QueryHistoricalCount runs the historical account-count query.
-func QueryHistoricalCount(ctx context.Context, querier RowQuerier, opts QueryOptions) (QueryResult, error) {
-	opts, err := ValidateQueryOptions(opts)
+func QueryHistoricalCount(ctx context.Context, querier RowQuerier, opts QueryOptions) (result QueryResult, err error) {
+	opts, err = ValidateQueryOptions(opts)
 	if err != nil {
-		return QueryResult{}, err
+		return result, err
 	}
 	if querier == nil {
-		return QueryResult{}, fmt.Errorf("querier is required")
+		return result, fmt.Errorf("querier is required")
 	}
 
 	sqlText, err := BuildHistoricalCountSQL(opts)
 	if err != nil {
-		return QueryResult{}, err
+		return result, err
 	}
 
 	rows, err := querier.QueryContext(ctx, sqlText)
 	if err != nil {
-		return QueryResult{}, fmt.Errorf("aws accounts historical count query: %w", err)
+		return result, fmt.Errorf("aws accounts historical count query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close aws accounts historical count rows: %w", closeErr)
+		}
+	}()
 
-	var result QueryResult
 	for rows.Next() {
 		if opts.MaxRows > 0 && len(result.Points) >= opts.MaxRows {
 			result.Truncated = true
 			break
 		}
-		point, err := scanDailyPoint(rows, opts.Aggregate)
-		if err != nil {
-			return QueryResult{}, err
+		point, scanErr := scanDailyPoint(rows, opts.Aggregate)
+		if scanErr != nil {
+			return result, scanErr
 		}
 		result.Points = append(result.Points, point)
 	}
-	if err := rows.Err(); err != nil {
-		return QueryResult{}, fmt.Errorf("iterate aws accounts historical count rows: %w", err)
+	if iterErr := rows.Err(); iterErr != nil {
+		return result, fmt.Errorf("iterate aws accounts historical count rows: %w", iterErr)
 	}
 
 	return result, nil
