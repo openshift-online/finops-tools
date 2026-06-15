@@ -65,7 +65,7 @@ func TestParseDate(t *testing.T) {
 }
 
 func TestBuildHistoricalCountSQLPayerMode(t *testing.T) {
-	sqlText, err := BuildHistoricalCountSQL(QueryOptions{
+	sqlText, args, err := BuildHistoricalCountSQL(QueryOptions{
 		Table:          testTable,
 		PayerAccountID: "123456789012",
 		From:           time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -77,9 +77,9 @@ func TestBuildHistoricalCountSQLPayerMode(t *testing.T) {
 	}
 	for _, want := range []string{
 		"FROM " + testTable,
-		"PAYER_ACCOUNT_ID = '123456789012'",
-		"TIMESTAMP >= '2026-01-01'",
-		"TIMESTAMP < '2026-02-01'",
+		"PAYER_ACCOUNT_ID = ?",
+		"TIMESTAMP >= ?",
+		"TIMESTAMP < ?",
 		"QUALIFY ROW_NUMBER()",
 		"PAYER_ACCOUNT_ID",
 		"ORDER BY snapshot_date, PAYER_ACCOUNT_ID",
@@ -88,10 +88,19 @@ func TestBuildHistoricalCountSQLPayerMode(t *testing.T) {
 			t.Fatalf("SQL missing %q:\n%s", want, sqlText)
 		}
 	}
+	wantArgs := []any{"123456789012", "2026-01-01", "2026-02-01"}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+	for i := range wantArgs {
+		if args[i] != wantArgs[i] {
+			t.Fatalf("args[%d] = %#v, want %#v", i, args[i], wantArgs[i])
+		}
+	}
 }
 
 func TestBuildHistoricalCountSQLSumMode(t *testing.T) {
-	sqlText, err := BuildHistoricalCountSQL(QueryOptions{
+	sqlText, args, err := BuildHistoricalCountSQL(QueryOptions{
 		Table:     testTable,
 		Aggregate: AggregateSum,
 	})
@@ -109,6 +118,9 @@ func TestBuildHistoricalCountSQLSumMode(t *testing.T) {
 	}
 	if strings.Contains(sqlText, "SELECT\n  DATE(TIMESTAMP) AS snapshot_date,\n  PAYER_ACCOUNT_ID") {
 		t.Fatalf("sum SQL should not select payer_account_id in outer query: %s", sqlText)
+	}
+	if len(args) != 0 {
+		t.Fatalf("args = %#v, want none", args)
 	}
 }
 

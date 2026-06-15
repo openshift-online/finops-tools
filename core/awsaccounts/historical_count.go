@@ -120,22 +120,28 @@ func ParseDate(s string) (time.Time, error) {
 	return t, nil
 }
 
-// BuildHistoricalCountSQL returns SQL for the configured options. opts must be validated first.
-func BuildHistoricalCountSQL(opts QueryOptions) (string, error) {
+// BuildHistoricalCountSQL returns SQL and bind args for the configured options. opts must be validated first.
+func BuildHistoricalCountSQL(opts QueryOptions) (string, []any, error) {
 	opts, err := ValidateQueryOptions(opts)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	var filters []string
+	var (
+		filters []string
+		args    []any
+	)
 	if opts.PayerAccountID != "" {
-		filters = append(filters, fmt.Sprintf("PAYER_ACCOUNT_ID = '%s'", opts.PayerAccountID))
+		filters = append(filters, "PAYER_ACCOUNT_ID = ?")
+		args = append(args, opts.PayerAccountID)
 	}
 	if !opts.From.IsZero() {
-		filters = append(filters, fmt.Sprintf("TIMESTAMP >= '%s'", opts.From.Format(dateOnlyLayout)))
+		filters = append(filters, "TIMESTAMP >= ?")
+		args = append(args, opts.From.Format(dateOnlyLayout))
 	}
 	if !opts.To.IsZero() {
-		filters = append(filters, fmt.Sprintf("TIMESTAMP < '%s'", opts.To.AddDate(0, 0, 1).Format(dateOnlyLayout)))
+		filters = append(filters, "TIMESTAMP < ?")
+		args = append(args, opts.To.AddDate(0, 0, 1).Format(dateOnlyLayout))
 	}
 
 	where := ""
@@ -170,7 +176,7 @@ SELECT
   SUM(NB_DELETED_ACCOUNTS) AS nb_deleted_accounts
 FROM daily
 GROUP BY DATE(TIMESTAMP)
-ORDER BY snapshot_date`), nil
+ORDER BY snapshot_date`), args, nil
 	default:
 		return strings.TrimSpace(inner + `
 SELECT
@@ -180,7 +186,7 @@ SELECT
   NB_CLOSED_ACCOUNTS,
   NB_DELETED_ACCOUNTS
 FROM daily
-ORDER BY snapshot_date, PAYER_ACCOUNT_ID`), nil
+ORDER BY snapshot_date, PAYER_ACCOUNT_ID`), args, nil
 	}
 }
 
@@ -194,12 +200,12 @@ func QueryHistoricalCount(ctx context.Context, querier RowQuerier, opts QueryOpt
 		return result, fmt.Errorf("querier is required")
 	}
 
-	sqlText, err := BuildHistoricalCountSQL(opts)
+	sqlText, args, err := BuildHistoricalCountSQL(opts)
 	if err != nil {
 		return result, err
 	}
 
-	rows, err := querier.QueryContext(ctx, sqlText)
+	rows, err := querier.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return result, fmt.Errorf("aws accounts historical count query: %w", err)
 	}
