@@ -88,7 +88,7 @@ func (r *Registry) Close() error {
 }
 
 func (r *Registry) serviceFor(connection string) (*LazyService, error) {
-	name := strings.TrimSpace(connection)
+	name := strings.ToLower(strings.TrimSpace(connection))
 	if name == "" {
 		name = r.defaultConn
 	}
