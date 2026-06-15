@@ -24,6 +24,7 @@ func (hcpHierarchyGenerator) Generate(ctx context.Context, in GenerateInput) err
 	if err != nil {
 		return err
 	}
+	defer func() { _ = sf.Close() }()
 	in.Progress.Step("Resolving HCP hierarchy from Snowflake mart…")
 	hcpReport, err := corehcp.Build(ctx, sf, "")
 	if err != nil {

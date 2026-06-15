@@ -27,6 +27,10 @@ func (q *sqlQuerier) QueryContext(ctx context.Context, query string, args ...any
 	return q.db.QueryContext(ctx, query, args...)
 }
 
+func (q *sqlQuerier) Close() error {
+	return q.db.Close()
+}
+
 // openSnowflakeQuerier returns a SnowflakeQueryer for the HCP hierarchy report.
 // It loads the finops config, resolves the default Snowflake account, ensures a
 // valid OAuth token (refreshing or re-authenticating as needed), and opens a

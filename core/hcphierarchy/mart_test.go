@@ -63,6 +63,8 @@ func (m *mockQueryer) QueryContext(_ context.Context, _ string, _ ...any) (Snowf
 	return m.rows, nil
 }
 
+func (m *mockQueryer) Close() error { return nil }
+
 // makeWorkerRow builds a full 25-column test row.
 func makeWorkerRow(
 	ocmID, clusterID, clusterName, accountID, state, region string,

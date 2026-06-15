@@ -18,8 +18,10 @@ const defaultMartView = "HCMFINOPS_DB.MARTS.OCM_CLOUDABILITY_MAPPING"
 
 // SnowflakeQueryer executes a SQL query and returns iterable rows.
 // *sql.DB satisfies this interface via a thin adapter; inject a mock in tests.
+// Call Close when finished to release the underlying connection pool.
 type SnowflakeQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (SnowflakeRows, error)
+	Close() error
 }
 
 // SnowflakeRows is the minimal row-iteration interface (mirrors database/sql.Rows).
