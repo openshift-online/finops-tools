@@ -305,6 +305,16 @@ func TestLoadAWSAccountsHistoricalMaxRowsInvalid(t *testing.T) {
 	}
 }
 
+func TestLoadAWSAccountsHistoricalTableInvalid(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE", "bad.table")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid historical table")
+	}
+}
+
 func TestNormalizePEM(t *testing.T) {
 	want := fakePEM("abc")
 	got := normalizePEM(fakePEMEscaped("abc"))

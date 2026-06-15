@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-online/finops-tools/core/awsaccounts"
 	coresnowflake "github.com/openshift-online/finops-tools/core/snowflake"
 )
 
@@ -46,6 +47,11 @@ func Load() (Config, error) {
 		QueryTimeout:                 defaultQueryTimeout,
 		AWSAccountsHistoricalTable:   envOrDefault("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE", defaultAWSAccountsHistoricalTable),
 		AWSAccountsHistoricalMaxRows: defaultAWSAccountsHistoricalMaxRows,
+	}
+	if _, err := awsaccounts.ValidateQueryOptions(awsaccounts.QueryOptions{
+		Table: cfg.AWSAccountsHistoricalTable,
+	}); err != nil {
+		return Config{}, fmt.Errorf("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE: %w", err)
 	}
 
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_MAX_ROWS")); v != "" {
