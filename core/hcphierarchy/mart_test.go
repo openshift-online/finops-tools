@@ -304,7 +304,10 @@ func TestAccountTargets_RegionSetOnConfig(t *testing.T) {
 }
 
 func TestBuildMartSQL_SelfJoin(t *testing.T) {
-	sql := buildMartSQL("MY_DB.SCHEMA.TABLE")
+	sql, err := buildMartSQL("MY_DB.SCHEMA.TABLE")
+	if err != nil {
+		t.Fatalf("buildMartSQL: %v", err)
+	}
 	for _, want := range []string{
 		"MY_DB.SCHEMA.TABLE w",
 		"LEFT JOIN MY_DB.SCHEMA.TABLE mc ON w.HCP_MC_FLEET_ID = mc.MC_FLEET_ID",
@@ -322,8 +325,31 @@ func TestBuildMartSQL_SelfJoin(t *testing.T) {
 }
 
 func TestBuildMartSQL_DefaultView(t *testing.T) {
-	sql := buildMartSQL(defaultMartView)
+	sql, err := buildMartSQL(defaultMartView)
+	if err != nil {
+		t.Fatalf("buildMartSQL: %v", err)
+	}
 	if !strings.Contains(sql, defaultMartView) {
 		t.Errorf("SQL should reference defaultMartView %q", defaultMartView)
+	}
+}
+
+func TestBuildMartSQL_RejectsInvalidMartView(t *testing.T) {
+	for _, martView := range []string{
+		"FOO; DROP TABLE bar",
+		"FOO--comment",
+		"FOO BAR",
+		".SCHEMA.TABLE",
+		"DB..TABLE",
+	} {
+		t.Run(martView, func(t *testing.T) {
+			_, err := buildMartSQL(martView)
+			if err == nil {
+				t.Fatalf("buildMartSQL(%q): expected error, got nil", martView)
+			}
+			if !strings.Contains(err.Error(), "invalid mart view") {
+				t.Errorf("error = %v, want invalid mart view", err)
+			}
+		})
 	}
 }

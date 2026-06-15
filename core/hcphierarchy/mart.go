@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/openshift-online/finops-tools/core/cost"
+	"github.com/openshift-online/finops-tools/core/snowflake"
 )
 
 const defaultMartView = "HCMFINOPS_DB.MARTS.OCM_CLOUDABILITY_MAPPING"
@@ -109,7 +110,11 @@ func Build(ctx context.Context, sf SnowflakeQueryer, martView string) (Report, e
 		martView = defaultMartView
 	}
 
-	rows, err := sf.QueryContext(ctx, buildMartSQL(martView))
+	sql, err := buildMartSQL(martView)
+	if err != nil {
+		return Report{}, err
+	}
+	rows, err := sf.QueryContext(ctx, sql)
 	if err != nil {
 		return Report{}, fmt.Errorf("hcp hierarchy mart query: %w", err)
 	}
@@ -182,7 +187,10 @@ func Build(ctx context.Context, sf SnowflakeQueryer, martView string) (Report, e
 
 // buildMartSQL generates the self-join SQL for the given mart view.
 // The mart is joined to itself twice: once on MC fleet ID, once on SC fleet ID.
-func buildMartSQL(martView string) string {
+func buildMartSQL(martView string) (string, error) {
+	if err := snowflake.ValidateQualifiedIdentifier(martView, 3); err != nil {
+		return "", fmt.Errorf("invalid mart view: %w", err)
+	}
 	return strings.TrimSpace(fmt.Sprintf(`
 SELECT
     w.CLUSTER_ID                    AS customer_ocm_id,
@@ -214,7 +222,7 @@ FROM %s w
 LEFT JOIN %s mc ON w.HCP_MC_FLEET_ID = mc.MC_FLEET_ID
 LEFT JOIN %s sc ON w.HCP_SC_FLEET_ID = sc.SC_FLEET_ID
 WHERE w.CLUSTER_ROLE   = 'worker'
-  AND w.CLOUD_PROVIDER = 'aws'`, martView, martView, martView))
+  AND w.CLOUD_PROVIDER = 'aws'`, martView, martView, martView)), nil
 }
 
 func stringOrEmpty(v *string) string {
