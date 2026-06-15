@@ -72,25 +72,6 @@ func TestReadyzHandler(t *testing.T) {
 	})
 }
 
-func TestHelloHandler(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/hello", nil)
-	rec := httptest.NewRecorder()
-
-	(&Hello{}).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	var body map[string]string
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body["message"] != "hello" {
-		t.Fatalf("message = %q, want hello", body["message"])
-	}
-}
-
 func TestOpenAPIHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
 	rec := httptest.NewRecorder()

@@ -74,7 +74,6 @@ OpenAPI 3.0 spec: embedded in the binary and served at `GET /openapi.yaml` (sour
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/hello` | Smoke test; returns `{"message":"hello"}` |
 | `GET` | `/openapi.yaml` | OpenAPI 3.0 specification (YAML) |
 | `GET` | `/livez` | Liveness probe; process is up (no external deps) |
 | `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
@@ -218,7 +217,7 @@ make build-backend
 ```
 
 ```bash
-curl -s http://localhost:8080/hello
+curl -s http://localhost:8080/livez
 curl -s http://localhost:8080/openapi.yaml
 curl -s -X POST http://localhost:8080/v1/snowflake/query \
   -H 'Content-Type: application/json' \
@@ -308,7 +307,7 @@ Or `make openshift-restart` after `make openshift-apply`.
 
 ```bash
 oc get pods,svc,endpoints,route -n finops-team--finops-tools-backend -l app=finops-backend
-curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/hello"
+curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/livez"
 curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/openapi.yaml"
 ```
 

@@ -51,21 +51,6 @@ paths:
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
-  /hello:
-    get:
-      tags: [health]
-      summary: Smoke test
-      operationId: getHello
-      responses:
-        "200":
-          description: Service is up
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HelloResponse"
-        "405":
-          $ref: "#/components/responses/MethodNotAllowed"
-
   /livez:
     get:
       tags: [health]
@@ -323,14 +308,6 @@ components:
         error:
           type: string
           example: invalid payer_account_id "bad" (expected 12 digits)
-
-    HelloResponse:
-      type: object
-      required: [message]
-      properties:
-        message:
-          type: string
-          example: hello
 
     StatusResponse:
       type: object
