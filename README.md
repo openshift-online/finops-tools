@@ -81,8 +81,13 @@ The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for
 **Query request:**
 
 ```json
-{ "sql": "SELECT CURRENT_USER(), CURRENT_ROLE()" }
+{
+  "sql": "SELECT CURRENT_USER(), CURRENT_ROLE()",
+  "connection": "sandbox"
+}
 ```
+
+The optional `connection` field selects a named Snowflake environment (see below). When omitted, the default connection is used. Clients may also pass `X-FinOps-Snowflake-Connection` when the JSON field is empty.
 
 **Query response:**
 
@@ -97,28 +102,59 @@ The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for
 
 ### Environment variables
 
+#### Server
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SNOWFLAKE_ACCOUNT` | yes* | — | Snowflake account identifier |
-| `SNOWFLAKE_USER` | yes* | — | Snowflake login name |
-| `SNOWFLAKE_TOKEN` | yes* | — | OAuth access token |
-| `SNOWFLAKE_WAREHOUSE` | yes* | — | Warehouse for queries |
-| `SNOWFLAKE_ROLE` | no | — | Role |
-| `SNOWFLAKE_DATABASE` | no | — | Database |
-| `SNOWFLAKE_SCHEMA` | no | — | Schema |
 | `FINOPS_BACKEND_ADDR` | no | `:8080` | Listen address |
 | `FINOPS_BACKEND_MAX_ROWS` | no | `1000` | Max rows returned per query |
 | `FINOPS_BACKEND_QUERY_TIMEOUT` | no | `60s` | Per-query timeout |
 
-\*All four Snowflake variables are required together when Snowflake is enabled. Omit all four to start the server without Snowflake (`/v1/snowflake/query` returns 503).
+#### Snowflake
+
+Set `SNOWFLAKE_CONNECTIONS` to a comma-separated list of lowercase names (e.g. `sandbox`, or `preprod,sandbox` when both are configured). Each connection uses prefixed env vars: `SNOWFLAKE_CONN_<NAME>_*` where `<NAME>` is uppercased in the key (`sandbox` → `SNOWFLAKE_CONN_SANDBOX_ACCOUNT`). Omit all Snowflake variables to start without Snowflake (`/v1/snowflake/query` returns 503).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SNOWFLAKE_CONNECTIONS` | yes | Comma-separated connection names |
+| `SNOWFLAKE_DEFAULT_CONNECTION` | no | Default when the request omits `connection` (falls back to the first listed name) |
+| `SNOWFLAKE_CONN_<NAME>_ACCOUNT` | yes | Account for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_USER` | yes | User for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_WAREHOUSE` | yes | Warehouse for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_TOKEN` or `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY` | yes | Auth for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_FILE` | yes* | Read PEM from a mounted file instead of inline `PRIVATE_KEY` |
+| `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_PASSPHRASE` | no | Passphrase for encrypted keys |
+| `SNOWFLAKE_CONN_<NAME>_ROLE` / `_DATABASE` / `_SCHEMA` | no | Optional session defaults |
+
+\*Provide one of token, inline private key, or private key file per connection.
+
+Readiness (`/readyz`) checks only the **default** connection. Other connections connect lazily on first query.
+
+#### Separate Secrets per environment
+
+You can split credentials across multiple OpenShift Secrets and mount them with `envFrom.secretRef` entries (see [`deploy/openshift/deployment.yaml`](deploy/openshift/deployment.yaml)). Each environment Secret holds that connection’s `SNOWFLAKE_CONN_<NAME>_*` keys only. `SNOWFLAKE_CONNECTIONS` and `SNOWFLAKE_DEFAULT_CONNECTION` are non-secret and are set as plain env vars in the Deployment.
+
+Private keys are often mounted as files (one Secret volume per environment) with `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_FILE` pointing at the mount path. Example layout:
+
+| Source | Contents |
+|--------|----------|
+| Deployment `env` | `SNOWFLAKE_CONNECTIONS`, `SNOWFLAKE_DEFAULT_CONNECTION` |
+| `finops-backend-snowflake-preprod` | `SNOWFLAKE_CONN_PREPROD_*` env keys + `private_key` file mounted at `/etc/finops/snowflake/preprod/` |
+| `finops-backend-snowflake-sandbox` | `SNOWFLAKE_CONN_SANDBOX_*` env keys + `private_key` file mounted at `/etc/finops/snowflake/sandbox/` |
+
+Every name listed in `SNOWFLAKE_CONNECTIONS` must have a matching Secret before the backend starts.
+
+See [`deploy/openshift/secret.yaml.example`](deploy/openshift/secret.yaml.example) for a full multi-Secret example.
 
 ### Local run
 
 ```bash
-export SNOWFLAKE_ACCOUNT=example-account
-export SNOWFLAKE_USER=example-user
-export SNOWFLAKE_TOKEN=example-token
-export SNOWFLAKE_WAREHOUSE=EXAMPLE_WH
+export SNOWFLAKE_CONNECTIONS=sandbox
+export SNOWFLAKE_DEFAULT_CONNECTION=sandbox
+export SNOWFLAKE_CONN_SANDBOX_ACCOUNT=example-sandbox
+export SNOWFLAKE_CONN_SANDBOX_USER=example-user
+export SNOWFLAKE_CONN_SANDBOX_PRIVATE_KEY="$(cat ./sandbox_rsa_key.p8)"
+export SNOWFLAKE_CONN_SANDBOX_WAREHOUSE=SANDBOX_WH
 
 make build-backend
 ./bin/finops-backend
@@ -129,6 +165,9 @@ curl -s http://localhost:8080/hello
 curl -s -X POST http://localhost:8080/v1/snowflake/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT CURRENT_USER(), CURRENT_ROLE()"}'
+curl -s -X POST http://localhost:8080/v1/snowflake/query \
+  -H 'Content-Type: application/json' \
+  -d '{"connection":"sandbox","sql":"SELECT CURRENT_DATABASE()"}'
 ```
 
 ### OpenShift deployment
@@ -179,14 +218,25 @@ make podman-push
 make openshift-apply
 ```
 
-3. Create the Snowflake Secret when ready:
+3. Create Snowflake Secrets when ready (one per connection listed in `SNOWFLAKE_CONNECTIONS`):
 
 ```bash
-oc create secret generic finops-backend-snowflake \
-  --from-literal=SNOWFLAKE_ACCOUNT=example-account \
-  --from-literal=SNOWFLAKE_USER=example-user \
-  --from-literal=SNOWFLAKE_TOKEN=example-token \
-  --from-literal=SNOWFLAKE_WAREHOUSE=EXAMPLE_WH \
+# Preprod (default connection)
+oc create secret generic finops-backend-snowflake-preprod \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_ACCOUNT=example-preprod \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_USER=example-user \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_WAREHOUSE=PREPROD_WH \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_PRIVATE_KEY_FILE=/etc/finops/snowflake/preprod/private_key \
+  --from-file=private_key=./preprod_rsa_key.p8 \
+  -n finops-team--finops-tools-backend
+
+# Sandbox
+oc create secret generic finops-backend-snowflake-sandbox \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_ACCOUNT=example-sandbox \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_USER=example-user \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_WAREHOUSE=SANDBOX_WH \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_PRIVATE_KEY_FILE=/etc/finops/snowflake/sandbox/private_key \
+  --from-file=private_key=./sandbox_rsa_key.p8 \
   -n finops-team--finops-tools-backend
 
 oc rollout restart deployment/finops-backend -n finops-team--finops-tools-backend

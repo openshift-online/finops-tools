@@ -34,60 +34,24 @@ spec:
               value: "1000"
             - name: FINOPS_BACKEND_QUERY_TIMEOUT
               value: "60s"
-            - name: SNOWFLAKE_ACCOUNT
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_ACCOUNT
-                  optional: true
-            - name: SNOWFLAKE_USER
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_USER
-                  optional: true
-            - name: SNOWFLAKE_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_TOKEN
-                  optional: true
-            - name: SNOWFLAKE_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_PRIVATE_KEY
-                  optional: true
-            - name: SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
-                  optional: true
-            - name: SNOWFLAKE_WAREHOUSE
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_WAREHOUSE
-                  optional: true
-            - name: SNOWFLAKE_ROLE
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_ROLE
-                  optional: true
-            - name: SNOWFLAKE_DATABASE
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_DATABASE
-                  optional: true
-            - name: SNOWFLAKE_SCHEMA
-              valueFrom:
-                secretKeyRef:
-                  name: finops-backend-snowflake
-                  key: SNOWFLAKE_SCHEMA
-                  optional: true
+            - name: SNOWFLAKE_CONNECTIONS
+              value: "preprod,sandbox"
+            - name: SNOWFLAKE_DEFAULT_CONNECTION
+              value: "preprod"
+          envFrom:
+            - secretRef:
+                name: finops-backend-snowflake-preprod
+                optional: true
+            - secretRef:
+                name: finops-backend-snowflake-sandbox
+                optional: true
+          volumeMounts:
+            - name: snowflake-preprod-key
+              mountPath: /etc/finops/snowflake/preprod
+              readOnly: true
+            - name: snowflake-sandbox-key
+              mountPath: /etc/finops/snowflake/sandbox
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /livez
@@ -122,3 +86,12 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: snowflake-preprod-key
+          secret:
+            secretName: finops-backend-snowflake-preprod
+            optional: true
+        - name: snowflake-sandbox-key
+          secret:
+            secretName: finops-backend-snowflake-sandbox
+            optional: true

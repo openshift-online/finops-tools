@@ -13,10 +13,10 @@ import (
 
 // Server is the HTTP API server.
 type Server struct {
-	cfg      config.Config
-	snowflake *backendsnowflake.LazyService
-	http     *http.Server
-	logger   *slog.Logger
+	cfg       config.Config
+	snowflake *backendsnowflake.Registry
+	http      *http.Server
+	logger    *slog.Logger
 }
 
 // New builds a Server from configuration. Snowflake connects lazily on the first query.
@@ -29,9 +29,17 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 
 	var querier handler.SnowflakeQuerier
 	if cfg.Snowflake != nil {
-		s.snowflake = backendsnowflake.NewLazyService(cfg.Snowflake.Connect, cfg.MaxRows, logger)
+		s.snowflake = backendsnowflake.NewRegistry(
+			cfg.Snowflake.Default,
+			cfg.Snowflake.Connections,
+			cfg.MaxRows,
+			logger,
+		)
 		querier = s.snowflake
-		logger.Info("snowflake configured; connection deferred until first query")
+		logger.Info("snowflake configured; connections deferred until first query",
+			"default_connection", cfg.Snowflake.Default,
+			"connections", len(cfg.Snowflake.Connections),
+		)
 	} else {
 		logger.Warn("snowflake not configured; /v1/snowflake/query will return 503")
 	}

@@ -13,19 +13,22 @@ import (
 	backendsnowflake "github.com/openshift-online/finops-tools/backend/internal/snowflake"
 )
 
+const snowflakeConnectionHeader = "X-FinOps-Snowflake-Connection"
+
 // SnowflakeQuerier executes SQL against Snowflake.
 type SnowflakeQuerier interface {
-	Query(ctx context.Context, sqlText string) (backendsnowflake.QueryResponse, error)
+	Query(ctx context.Context, connection, sqlText string) (backendsnowflake.QueryResponse, error)
 }
 
 // SnowflakeQuery serves POST /v1/snowflake/query.
 type SnowflakeQuery struct {
-	Querier       SnowflakeQuerier
-	QueryTimeout  time.Duration
+	Querier      SnowflakeQuerier
+	QueryTimeout time.Duration
 }
 
 type snowflakeQueryRequest struct {
-	SQL string `json:"sql"`
+	SQL        string `json:"sql"`
+	Connection string `json:"connection,omitempty"`
 }
 
 type snowflakeQueryResponse struct {
@@ -63,6 +66,11 @@ func (h *SnowflakeQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	connection := strings.TrimSpace(req.Connection)
+	if connection == "" {
+		connection = strings.TrimSpace(r.Header.Get(snowflakeConnectionHeader))
+	}
+
 	timeout := h.QueryTimeout
 	if timeout <= 0 {
 		timeout = 60 * time.Second
@@ -70,10 +78,14 @@ func (h *SnowflakeQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	resp, err := h.Querier.Query(ctx, sqlText)
+	resp, err := h.Querier.Query(ctx, connection, sqlText)
 	if err != nil {
+		if errors.Is(err, backendsnowflake.ErrUnknownConnection) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, backendsnowflake.ErrUnavailable) {
-			slog.Error("snowflake unavailable", "error", err)
+			slog.Error("snowflake unavailable", "error", err, "connection", connection)
 			writeError(w, http.StatusServiceUnavailable, "snowflake is not available")
 			return
 		}

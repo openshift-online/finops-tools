@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,22 +13,25 @@ import (
 )
 
 const (
-	defaultAddr          = ":8080"
-	defaultMaxRows       = 1000
-	defaultQueryTimeout  = 60 * time.Second
+	defaultAddr         = ":8080"
+	defaultMaxRows      = 1000
+	defaultQueryTimeout = 60 * time.Second
 )
 
-// Snowflake holds connection parameters when Snowflake is configured.
-type Snowflake struct {
-	Connect coresnowflake.ConnectParams
+var snowflakeConnectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// SnowflakeConnections holds named Snowflake connection parameters.
+type SnowflakeConnections struct {
+	Default     string
+	Connections map[string]coresnowflake.ConnectParams
 }
 
 // Config is the runtime configuration for the HTTP API server.
 type Config struct {
-	Addr          string
-	MaxRows       int
-	QueryTimeout  time.Duration
-	Snowflake     *Snowflake
+	Addr         string
+	MaxRows      int
+	QueryTimeout time.Duration
+	Snowflake    *SnowflakeConnections
 }
 
 // Load reads configuration from the process environment.
@@ -54,7 +58,7 @@ func Load() (Config, error) {
 		cfg.QueryTimeout = d
 	}
 
-	sf, err := loadSnowflake()
+	sf, err := loadSnowflakeConnections()
 	if err != nil {
 		return Config{}, err
 	}
@@ -63,46 +67,107 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-func loadSnowflake() (*Snowflake, error) {
-	account := strings.TrimSpace(os.Getenv("SNOWFLAKE_ACCOUNT"))
-	user := strings.TrimSpace(os.Getenv("SNOWFLAKE_USER"))
-	token := strings.TrimSpace(os.Getenv("SNOWFLAKE_TOKEN"))
-	privateKey := normalizePEM(os.Getenv("SNOWFLAKE_PRIVATE_KEY"))
-	warehouse := strings.TrimSpace(os.Getenv("SNOWFLAKE_WAREHOUSE"))
-
-	if account == "" && user == "" && token == "" && privateKey == "" && warehouse == "" {
+func loadSnowflakeConnections() (*SnowflakeConnections, error) {
+	namesRaw := strings.TrimSpace(os.Getenv("SNOWFLAKE_CONNECTIONS"))
+	if namesRaw == "" {
 		return nil, nil
 	}
 
-	missing := make([]string, 0, 4)
-	if account == "" {
-		missing = append(missing, "SNOWFLAKE_ACCOUNT")
-	}
-	if user == "" {
-		missing = append(missing, "SNOWFLAKE_USER")
-	}
-	if warehouse == "" {
-		missing = append(missing, "SNOWFLAKE_WAREHOUSE")
-	}
-	if token == "" && privateKey == "" {
-		missing = append(missing, "SNOWFLAKE_TOKEN or SNOWFLAKE_PRIVATE_KEY")
-	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("incomplete snowflake configuration: missing %s", strings.Join(missing, ", "))
+	names, err := parseSnowflakeConnectionNames(namesRaw)
+	if err != nil {
+		return nil, err
 	}
 
-	return &Snowflake{
-		Connect: coresnowflake.ConnectParams{
-			Account:              account,
-			User:                 user,
-			Token:                token,
-			PrivateKeyPEM:        privateKey,
-			PrivateKeyPassphrase: strings.TrimSpace(os.Getenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")),
-			Role:                 strings.TrimSpace(os.Getenv("SNOWFLAKE_ROLE")),
-			Warehouse:            warehouse,
-			Database:             strings.TrimSpace(os.Getenv("SNOWFLAKE_DATABASE")),
-			Schema:               strings.TrimSpace(os.Getenv("SNOWFLAKE_SCHEMA")),
-		},
+	connections := make(map[string]coresnowflake.ConnectParams, len(names))
+	for _, name := range names {
+		if _, exists := connections[name]; exists {
+			return nil, fmt.Errorf("duplicate snowflake connection %q in SNOWFLAKE_CONNECTIONS", name)
+		}
+		prefix := "SNOWFLAKE_CONN_" + strings.ToUpper(name) + "_"
+		connect, err := loadConnectionParams(name, prefix)
+		if err != nil {
+			return nil, err
+		}
+		connections[name] = connect
+	}
+
+	defaultConn := strings.ToLower(strings.TrimSpace(os.Getenv("SNOWFLAKE_DEFAULT_CONNECTION")))
+	if defaultConn == "" {
+		defaultConn = names[0]
+	} else if _, ok := connections[defaultConn]; !ok {
+		return nil, fmt.Errorf("SNOWFLAKE_DEFAULT_CONNECTION %q is not listed in SNOWFLAKE_CONNECTIONS", defaultConn)
+	}
+
+	return &SnowflakeConnections{
+		Default:     defaultConn,
+		Connections: connections,
+	}, nil
+}
+
+func parseSnowflakeConnectionNames(raw string) ([]string, error) {
+	parts := strings.Split(raw, ",")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := strings.ToLower(strings.TrimSpace(part))
+		if name == "" {
+			continue
+		}
+		if !snowflakeConnectionNameRE.MatchString(name) {
+			return nil, fmt.Errorf("invalid snowflake connection name %q: must match %s", name, snowflakeConnectionNameRE.String())
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("SNOWFLAKE_CONNECTIONS must list at least one connection name")
+	}
+	return names, nil
+}
+
+func loadConnectionParams(name, prefix string) (coresnowflake.ConnectParams, error) {
+	account := strings.TrimSpace(os.Getenv(prefix + "ACCOUNT"))
+	user := strings.TrimSpace(os.Getenv(prefix + "USER"))
+	token := strings.TrimSpace(os.Getenv(prefix + "TOKEN"))
+	privateKey, err := loadPrivateKey(prefix)
+	if err != nil {
+		return coresnowflake.ConnectParams{}, fmt.Errorf(
+			"snowflake configuration for connection %q: %w",
+			name,
+			err,
+		)
+	}
+	warehouse := strings.TrimSpace(os.Getenv(prefix + "WAREHOUSE"))
+
+	missing := make([]string, 0, 4)
+	if account == "" {
+		missing = append(missing, prefix+"ACCOUNT")
+	}
+	if user == "" {
+		missing = append(missing, prefix+"USER")
+	}
+	if warehouse == "" {
+		missing = append(missing, prefix+"WAREHOUSE")
+	}
+	if token == "" && privateKey == "" {
+		missing = append(missing, prefix+"TOKEN, "+prefix+"PRIVATE_KEY, or "+prefix+"PRIVATE_KEY_FILE")
+	}
+	if len(missing) > 0 {
+		return coresnowflake.ConnectParams{}, fmt.Errorf(
+			"incomplete snowflake configuration for connection %q: missing %s",
+			name,
+			strings.Join(missing, ", "),
+		)
+	}
+
+	return coresnowflake.ConnectParams{
+		Account:              account,
+		User:                 user,
+		Token:                token,
+		PrivateKeyPEM:        privateKey,
+		PrivateKeyPassphrase: strings.TrimSpace(os.Getenv(prefix + "PRIVATE_KEY_PASSPHRASE")),
+		Role:                 strings.TrimSpace(os.Getenv(prefix + "ROLE")),
+		Warehouse:            warehouse,
+		Database:             strings.TrimSpace(os.Getenv(prefix + "DATABASE")),
+		Schema:               strings.TrimSpace(os.Getenv(prefix + "SCHEMA")),
 	}, nil
 }
 
@@ -111,6 +176,28 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func loadPrivateKey(prefix string) (string, error) {
+	if pem := normalizePEM(os.Getenv(prefix + "PRIVATE_KEY")); pem != "" {
+		return pem, nil
+	}
+	raw := strings.TrimSpace(os.Getenv(prefix + "PRIVATE_KEY_FILE"))
+	if raw == "" {
+		return "", nil
+	}
+	if looksLikePEM(raw) {
+		return normalizePEM(raw), nil
+	}
+	data, err := os.ReadFile(raw)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", prefix+"PRIVATE_KEY_FILE", err)
+	}
+	return normalizePEM(string(data)), nil
+}
+
+func looksLikePEM(v string) bool {
+	return strings.Contains(v, "-----BEGIN ")
 }
 
 // normalizePEM fixes literal \n sequences sometimes stored in Kubernetes secrets.

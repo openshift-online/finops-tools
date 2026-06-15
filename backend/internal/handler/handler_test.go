@@ -88,13 +88,15 @@ func TestHelloHandler(t *testing.T) {
 }
 
 type fakeQuerier struct {
-	resp backendsnowflake.QueryResponse
-	err  error
-	last string
+	resp           backendsnowflake.QueryResponse
+	err            error
+	lastSQL        string
+	lastConnection string
 }
 
-func (f *fakeQuerier) Query(_ context.Context, sqlText string) (backendsnowflake.QueryResponse, error) {
-	f.last = sqlText
+func (f *fakeQuerier) Query(_ context.Context, connection, sqlText string) (backendsnowflake.QueryResponse, error) {
+	f.lastConnection = connection
+	f.lastSQL = sqlText
 	return f.resp, f.err
 }
 
@@ -117,8 +119,11 @@ func TestSnowflakeQueryHandler(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if q.last != "SELECT 1" {
-		t.Fatalf("sql = %q, want SELECT 1", q.last)
+	if q.lastSQL != "SELECT 1" {
+		t.Fatalf("sql = %q, want SELECT 1", q.lastSQL)
+	}
+	if q.lastConnection != "" {
+		t.Fatalf("connection = %q, want empty default", q.lastConnection)
 	}
 
 	var resp snowflakeQueryResponse
@@ -128,6 +133,57 @@ func TestSnowflakeQueryHandler(t *testing.T) {
 	if resp.RowCount != 1 || resp.Truncated {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
+}
+
+func TestSnowflakeQueryConnectionRouting(t *testing.T) {
+	q := &fakeQuerier{
+		resp: backendsnowflake.QueryResponse{
+			Result: coresnowflake.QueryResult{
+				Columns: []string{"N"},
+				Rows:    [][]string{{"1"}},
+			},
+		},
+	}
+	h := &SnowflakeQuery{Querier: q}
+
+	t.Run("json connection field", func(t *testing.T) {
+		q.lastConnection = ""
+		body := bytes.NewBufferString(`{"connection":"sandbox","sql":"SELECT 1"}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/snowflake/query", body)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		if q.lastConnection != "sandbox" {
+			t.Fatalf("connection = %q, want sandbox", q.lastConnection)
+		}
+	})
+
+	t.Run("header fallback", func(t *testing.T) {
+		q.lastConnection = ""
+		req := httptest.NewRequest(http.MethodPost, "/v1/snowflake/query", bytes.NewBufferString(`{"sql":"SELECT 1"}`))
+		req.Header.Set("X-FinOps-Snowflake-Connection", "prod")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		if q.lastConnection != "prod" {
+			t.Fatalf("connection = %q, want prod", q.lastConnection)
+		}
+	})
+
+	t.Run("unknown connection", func(t *testing.T) {
+		q.err = backendsnowflake.ErrUnknownConnection
+		req := httptest.NewRequest(http.MethodPost, "/v1/snowflake/query", bytes.NewBufferString(`{"connection":"missing","sql":"SELECT 1"}`))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+		}
+		q.err = nil
+	})
 }
 
 func TestSnowflakeQueryValidation(t *testing.T) {
