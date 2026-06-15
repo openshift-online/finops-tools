@@ -7,20 +7,26 @@ import (
 	corehcp "github.com/openshift-online/finops-tools/core/hcphierarchy"
 )
 
-type hcpHierarchyGenerator struct{}
+type hcpHierarchyGenerator struct {
+	opener SnowflakeMartOpener
+}
 
-func (hcpHierarchyGenerator) Validate(in GenerateInput) error {
+func newHCPHierarchyGenerator(opener SnowflakeMartOpener) hcpHierarchyGenerator {
+	return hcpHierarchyGenerator{opener: opener}
+}
+
+func (g hcpHierarchyGenerator) Validate(in GenerateInput) error {
 	if err := validateTemplateFormat(TemplateHCPHierarchy, in.Format); err != nil {
 		return err
 	}
-	if snowflakeMartOpener == nil {
+	if g.opener == nil {
 		return fmt.Errorf("hcp-hierarchy report: snowflake opener not configured")
 	}
 	return nil
 }
 
-func (hcpHierarchyGenerator) Generate(ctx context.Context, in GenerateInput) error {
-	sf, err := snowflakeMartOpener(ctx, in.ConfigPath, in.SnowflakeAlias)
+func (g hcpHierarchyGenerator) Generate(ctx context.Context, in GenerateInput) error {
+	sf, err := g.opener(ctx, in.ConfigPath, in.SnowflakeAlias)
 	if err != nil {
 		return err
 	}

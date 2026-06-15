@@ -59,14 +59,8 @@ func TestAccountTargetModeFor(t *testing.T) {
 }
 
 func TestHCPHierarchyGeneratorRequiresSnowflakeOpener(t *testing.T) {
-	gen, err := GeneratorFor(TemplateHCPHierarchy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved := snowflakeMartOpener
-	snowflakeMartOpener = nil
-	t.Cleanup(func() { snowflakeMartOpener = saved })
-	err = gen.Validate(GenerateInput{Format: FormatHTML})
+	gen := newHCPHierarchyGenerator(nil)
+	err := gen.Validate(GenerateInput{Format: FormatHTML})
 	if err == nil {
 		t.Fatal("expected error when snowflake opener is unset")
 	}

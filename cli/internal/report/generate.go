@@ -47,6 +47,9 @@ type Generator interface {
 
 // GeneratorFor returns the generator registered for a parsed template name.
 func GeneratorFor(name string) (Generator, error) {
+	if name == TemplateHCPHierarchy {
+		return newHCPHierarchyGenerator(snowflakeMartOpener), nil
+	}
 	g, ok := generators[name]
 	if !ok {
 		return nil, fmt.Errorf("unsupported template %q", name)
@@ -58,7 +61,6 @@ var generators = map[string]Generator{
 	TemplateCosts:         costsGenerator{},
 	TemplateSavingsPlans:  savingsPlansGenerator{},
 	TemplateCostAnomalies: costAnomaliesGenerator{},
-	TemplateHCPHierarchy:  hcpHierarchyGenerator{},
 }
 
 // AccountTargetMode describes whether a report uses AWS account targeting flags.
