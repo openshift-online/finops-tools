@@ -16,34 +16,53 @@ type QueryResult struct {
 
 // Query executes SQL and returns all rows as strings.
 func Query(ctx context.Context, db *sql.DB, sqlText string) (QueryResult, error) {
+	result, _, err := QueryLimited(ctx, db, sqlText, 0)
+	return result, err
+}
+
+// QueryLimited executes SQL and returns up to maxRows rows. When maxRows is 0,
+// all rows are returned. The second return value is true when additional rows
+// were available beyond maxRows.
+func QueryLimited(ctx context.Context, db *sql.DB, sqlText string, maxRows int) (out QueryResult, truncated bool, err error) {
+	if maxRows < 0 {
+		return out, false, fmt.Errorf("invalid maxRows: %d", maxRows)
+	}
 	rows, err := db.QueryContext(ctx, sqlText)
 	if err != nil {
-		return QueryResult{}, fmt.Errorf("snowflake query: %w", err)
+		return out, false, fmt.Errorf("snowflake query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close snowflake query rows: %w", closeErr)
+		}
+	}()
 
 	cols, err := rows.Columns()
 	if err != nil {
-		return QueryResult{}, err
+		return out, false, err
 	}
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
-		return QueryResult{}, err
+		return out, false, err
 	}
 
-	out := QueryResult{Columns: resolveColumnNames(cols, colTypes)}
+	out = QueryResult{Columns: resolveColumnNames(cols, colTypes)}
 
 	for rows.Next() {
-		row, err := scanRowValues(rows, len(out.Columns))
-		if err != nil {
-			return QueryResult{}, err
+		if maxRows > 0 && len(out.Rows) >= maxRows {
+			truncated = true
+			break
+		}
+		row, scanErr := scanRowValues(rows, len(out.Columns))
+		if scanErr != nil {
+			return out, false, scanErr
 		}
 		out.Rows = append(out.Rows, row)
 	}
-	if err := rows.Err(); err != nil {
-		return QueryResult{}, err
+	if iterErr := rows.Err(); iterErr != nil {
+		return out, false, iterErr
 	}
-	return out, nil
+	return out, truncated, nil
 }
 
 func resolveColumnNames(cols []string, colTypes []*sql.ColumnType) []string {

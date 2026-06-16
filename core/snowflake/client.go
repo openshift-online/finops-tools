@@ -1,4 +1,3 @@
-// Package snowflake runs SQL queries against Snowflake using an OAuth access token.
 package snowflake
 
 import (
@@ -10,38 +9,61 @@ import (
 	"github.com/snowflakedb/gosnowflake"
 )
 
-// ConnectParams configures a Snowflake connection with Red Hat SSO OAuth.
+// ConnectParams configures a Snowflake connection.
+// Use Token for OAuth, or PrivateKeyPEM (+ optional PrivateKeyPassphrase) for JWT key-pair auth.
 type ConnectParams struct {
-	Account   string
-	User      string // Snowflake login name (from SSO token); required by gosnowflake for OAUTH
-	Token     string
-	Role      string
-	Warehouse string
-	Database  string
-	Schema    string
+	Account               string
+	User                  string
+	Token                 string
+	PrivateKeyPEM         string
+	PrivateKeyPassphrase  string
+	Role                  string
+	Warehouse             string
+	Database              string
+	Schema                string
 }
 
-// OpenDB opens a database/sql handle using OAuth token authentication.
+// OpenDB opens a database/sql handle using OAuth or JWT key-pair authentication.
 func OpenDB(params ConnectParams) (*sql.DB, error) {
 	account := strings.TrimSpace(params.Account)
-	token := strings.TrimSpace(params.Token)
+	user := strings.TrimSpace(params.User)
 	if account == "" {
 		return nil, fmt.Errorf("snowflake account is required")
 	}
-	if token == "" {
-		return nil, fmt.Errorf("oauth access token is required")
+	if user == "" {
+		return nil, fmt.Errorf("snowflake user is required")
 	}
 
 	cfg := &gosnowflake.Config{
-		Account:       account,
-		User:          strings.TrimSpace(params.User),
-		Authenticator: gosnowflake.AuthTypeOAuth,
-		Token:         token,
-		Role:          strings.TrimSpace(params.Role),
-		Warehouse:     strings.TrimSpace(params.Warehouse),
-		Database:      strings.TrimSpace(params.Database),
-		Schema:        strings.TrimSpace(params.Schema),
+		Account:   account,
+		User:      user,
+		Role:      strings.TrimSpace(params.Role),
+		Warehouse: strings.TrimSpace(params.Warehouse),
+		Database:  strings.TrimSpace(params.Database),
+		Schema:    strings.TrimSpace(params.Schema),
 	}
+
+	privateKeyPEM := strings.TrimSpace(params.PrivateKeyPEM)
+	token := strings.TrimSpace(params.Token)
+	if privateKeyPEM != "" && token != "" {
+		return nil, fmt.Errorf("snowflake configuration must not set both private key and oauth token")
+	}
+
+	switch {
+	case privateKeyPEM != "":
+		key, err := ParsePrivateKey(privateKeyPEM, params.PrivateKeyPassphrase)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Authenticator = gosnowflake.AuthTypeJwt
+		cfg.PrivateKey = key
+	case token != "":
+		cfg.Authenticator = gosnowflake.AuthTypeOAuth
+		cfg.Token = token
+	default:
+		return nil, fmt.Errorf("snowflake oauth token or private key is required")
+	}
+
 	dsn, err := gosnowflake.DSN(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build snowflake DSN: %w", err)
