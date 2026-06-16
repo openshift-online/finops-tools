@@ -96,7 +96,8 @@ func (l *LazyService) Check(ctx context.Context) error {
 		l.mu.Lock()
 		if l.svc == nil {
 			l.mu.Unlock()
-			break
+			_, err := l.serviceWithContext(ctxWithTimeout)
+			return err
 		}
 		_ = l.db.Close()
 		l.db = nil

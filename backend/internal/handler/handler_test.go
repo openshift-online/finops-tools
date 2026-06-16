@@ -209,6 +209,7 @@ func TestSnowflakeQueryValidation(t *testing.T) {
 		{name: "delete rejected", body: `{"sql":"DELETE FROM t"}`, status: http.StatusBadRequest},
 		{name: "insert rejected", body: `{"sql":"INSERT INTO t VALUES (1)"}`, status: http.StatusBadRequest},
 		{name: "with select ok", body: `{"sql":"WITH cte AS (SELECT 1) SELECT * FROM cte"}`, status: http.StatusOK},
+		{name: "body too large", body: `{"sql":"` + strings.Repeat("x", 1<<20) + `"}`, status: http.StatusRequestEntityTooLarge},
 	}
 
 	for _, tc := range tests {

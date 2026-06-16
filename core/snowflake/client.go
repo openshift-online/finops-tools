@@ -45,6 +45,9 @@ func OpenDB(params ConnectParams) (*sql.DB, error) {
 
 	privateKeyPEM := strings.TrimSpace(params.PrivateKeyPEM)
 	token := strings.TrimSpace(params.Token)
+	if privateKeyPEM != "" && token != "" {
+		return nil, fmt.Errorf("snowflake configuration must not set both private key and oauth token")
+	}
 
 	switch {
 	case privateKeyPEM != "":

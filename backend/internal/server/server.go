@@ -65,10 +65,18 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		QueryTimeout: cfg.QueryTimeout,
 	})
 
+	readTimeout := 30 * time.Second
+	writeTimeout := cfg.QueryTimeout + 15*time.Second
+	if writeTimeout < readTimeout {
+		writeTimeout = readTimeout
+	}
+
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           loggingMiddleware(logger, mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
 	}
 
 	return s, nil

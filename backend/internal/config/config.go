@@ -16,6 +16,7 @@ import (
 const (
 	defaultAddr                            = ":8080"
 	defaultMaxRows                         = 1000
+	maxRowsLimit                           = 100000
 	defaultQueryTimeout                    = 60 * time.Second
 	defaultAWSAccountsHistoricalTable      = "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT"
 	defaultAWSAccountsHistoricalMaxRows    = 10000
@@ -56,8 +57,8 @@ func Load() (Config, error) {
 
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_MAX_ROWS")); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return Config{}, fmt.Errorf("FINOPS_BACKEND_MAX_ROWS must be a positive integer")
+		if err != nil || n < 1 || n > maxRowsLimit {
+			return Config{}, fmt.Errorf("FINOPS_BACKEND_MAX_ROWS must be an integer between 1 and %d", maxRowsLimit)
 		}
 		cfg.MaxRows = n
 	}
@@ -72,8 +73,8 @@ func Load() (Config, error) {
 
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS")); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return Config{}, fmt.Errorf("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS must be a positive integer")
+		if err != nil || n < 1 || n > maxRowsLimit {
+			return Config{}, fmt.Errorf("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS must be an integer between 1 and %d", maxRowsLimit)
 		}
 		cfg.AWSAccountsHistoricalMaxRows = n
 	}

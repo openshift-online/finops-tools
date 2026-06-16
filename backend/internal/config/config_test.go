@@ -305,6 +305,26 @@ func TestLoadAWSAccountsHistoricalMaxRowsInvalid(t *testing.T) {
 	}
 }
 
+func TestLoadMaxRowsTooLarge(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("FINOPS_BACKEND_MAX_ROWS", "100001")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for max rows above limit")
+	}
+}
+
+func TestLoadAWSAccountsHistoricalMaxRowsTooLarge(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS", "100001")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for historical max rows above limit")
+	}
+}
+
 func TestLoadAWSAccountsHistoricalTableInvalid(t *testing.T) {
 	clearSnowflakeEnv(t)
 	t.Setenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE", "bad.table")
