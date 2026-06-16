@@ -78,7 +78,7 @@ OpenAPI 3.0 spec: embedded in the binary and served at `GET /openapi.yaml` (sour
 | `GET` | `/livez` | Liveness probe; process is up (no external deps) |
 | `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
 | `GET` | `/health` | Alias for `/livez` |
-| `POST` | `/v1/snowflake/query` | Run SQL against Snowflake |
+| `POST` | `/v1/snowflake/query` | Run read-only SQL against Snowflake (`SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN`, `LIST`) |
 | `GET` | `/v1/aws/accounts/historical-count` | Daily AWS linked-account counts per payer (time series) |
 
 **Query request:**

@@ -206,6 +206,9 @@ func TestSnowflakeQueryValidation(t *testing.T) {
 		{name: "empty sql", body: `{}`, status: http.StatusBadRequest},
 		{name: "multi statement", body: `{"sql":"SELECT 1; SELECT 2"}`, status: http.StatusBadRequest},
 		{name: "trailing semicolon ok", body: `{"sql":"SELECT 1;"}`, status: http.StatusOK},
+		{name: "delete rejected", body: `{"sql":"DELETE FROM t"}`, status: http.StatusBadRequest},
+		{name: "insert rejected", body: `{"sql":"INSERT INTO t VALUES (1)"}`, status: http.StatusBadRequest},
+		{name: "with select ok", body: `{"sql":"WITH cte AS (SELECT 1) SELECT * FROM cte"}`, status: http.StatusOK},
 	}
 
 	for _, tc := range tests {
@@ -231,12 +234,39 @@ func TestSnowflakeQueryNotConfigured(t *testing.T) {
 }
 
 func TestValidateSQL(t *testing.T) {
-	got, err := validateSQL(" SELECT 1 ; ")
-	if err != nil {
-		t.Fatalf("validateSQL: %v", err)
+	tests := []struct {
+		name    string
+		sql     string
+		want    string
+		wantErr bool
+	}{
+		{name: "select trimmed", sql: " SELECT 1 ; ", want: "SELECT 1"},
+		{name: "with cte", sql: "WITH cte AS (SELECT 1) SELECT * FROM cte", want: "WITH cte AS (SELECT 1) SELECT * FROM cte"},
+		{name: "show", sql: "SHOW TABLES", want: "SHOW TABLES"},
+		{name: "describe", sql: "DESCRIBE TABLE t", want: "DESCRIBE TABLE t"},
+		{name: "explain", sql: "EXPLAIN SELECT 1", want: "EXPLAIN SELECT 1"},
+		{name: "leading comment", sql: "-- setup\nSELECT 1", want: "-- setup\nSELECT 1"},
+		{name: "delete", sql: "DELETE FROM t", wantErr: true},
+		{name: "create", sql: "CREATE TABLE t (id INT)", wantErr: true},
+		{name: "comment bypass", sql: "/*x*/ DELETE FROM t", wantErr: true},
 	}
-	if got != "SELECT 1" {
-		t.Fatalf("got %q", got)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := validateSQL(tc.sql)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateSQL: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

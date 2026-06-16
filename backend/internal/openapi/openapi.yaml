@@ -112,10 +112,11 @@ paths:
       tags: [snowflake]
       summary: Run SQL against Snowflake
       description: |
-        Executes a single SQL statement against a named Snowflake connection.
-        Multi-statement SQL (statements separated by `;`) is rejected.
-        Request body is limited to 1 MiB. Row count is capped by
-        `FINOPS_BACKEND_MAX_ROWS` (default 1000).
+        Executes a single read-only SQL statement against a named Snowflake
+        connection. Allowed statement types: `SELECT`, `WITH`, `SHOW`,
+        `DESCRIBE`, `DESC`, `EXPLAIN`, and `LIST`. Multi-statement SQL
+        (statements separated by `;`) is rejected. Request body is limited to
+        1 MiB. Row count is capped by `FINOPS_BACKEND_MAX_ROWS` (default 1000).
       operationId: postSnowflakeQuery
       parameters:
         - $ref: "#/components/parameters/SnowflakeConnectionHeader"

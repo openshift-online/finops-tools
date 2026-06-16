@@ -9,9 +9,20 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	backendsnowflake "github.com/openshift-online/finops-tools/backend/internal/snowflake"
 )
+
+var allowedReadOnlySQL = map[string]struct{}{
+	"SELECT":    {},
+	"WITH":      {},
+	"SHOW":      {},
+	"DESCRIBE":  {},
+	"DESC":      {},
+	"EXPLAIN":   {},
+	"LIST":      {},
+}
 
 const snowflakeConnectionHeader = "X-FinOps-Snowflake-Connection"
 
@@ -119,5 +130,68 @@ func validateSQL(sqlText string) (string, error) {
 	if strings.Contains(trimmed, ";") {
 		return "", errors.New("multi-statement SQL is not allowed")
 	}
+	keyword, err := firstReadOnlyKeyword(trimmed)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := allowedReadOnlySQL[keyword]; !ok {
+		return "", errors.New("only read-only SQL is allowed (SELECT, WITH, SHOW, DESCRIBE, DESC, EXPLAIN, LIST)")
+	}
 	return trimmed, nil
+}
+
+func firstReadOnlyKeyword(sqlText string) (string, error) {
+	s := strings.TrimSpace(stripSQLComments(sqlText))
+	for len(s) > 0 {
+		switch s[0] {
+		case '(', ' ', '\t', '\n', '\r':
+			s = strings.TrimSpace(s[1:])
+			continue
+		}
+		break
+	}
+	if s == "" {
+		return "", errors.New("sql is required")
+	}
+
+	end := 0
+	for end < len(s) {
+		r := rune(s[end])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			end++
+			continue
+		}
+		break
+	}
+	if end == 0 {
+		return "", errors.New("invalid SQL")
+	}
+	return strings.ToUpper(s[:end]), nil
+}
+
+func stripSQLComments(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if i+1 < len(s) && s[i] == '-' && s[i+1] == '-' {
+			i += 2
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if i+1 < len(s) && s[i] == '/' && s[i+1] == '*' {
+			i += 2
+			for i+1 < len(s) && !(s[i] == '*' && s[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(s) {
+				i += 2
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
