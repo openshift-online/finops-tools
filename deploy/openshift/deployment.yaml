@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-backend
+  namespace: finops-team--finops-tools-backend
+  labels:
+    app: finops-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finops-backend
+  template:
+    metadata:
+      labels:
+        app: finops-backend
+    spec:
+      automountServiceAccountToken: false
+      # serviceAccountName: finops-backend  # wire when Red Hat provides the service account
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: finops-backend
+          image: images.paas.redhat.com/finops/finops-tools:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: FINOPS_BACKEND_ADDR
+              value: ":8080"
+            - name: FINOPS_BACKEND_MAX_ROWS
+              value: "1000"
+            - name: FINOPS_BACKEND_QUERY_TIMEOUT
+              value: "60s"
+            - name: SNOWFLAKE_CONNECTIONS
+              value: "preprod,sandbox"
+            - name: SNOWFLAKE_DEFAULT_CONNECTION
+              value: "preprod"
+          envFrom:
+            - secretRef:
+                name: finops-backend-snowflake-preprod
+            - secretRef:
+                name: finops-backend-snowflake-sandbox
+          volumeMounts:
+            - name: snowflake-preprod-key
+              mountPath: /etc/finops/snowflake/preprod
+              readOnly: true
+            - name: snowflake-sandbox-key
+              mountPath: /etc/finops/snowflake/sandbox
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: snowflake-preprod-key
+          secret:
+            secretName: finops-backend-snowflake-preprod
+        - name: snowflake-sandbox-key
+          secret:
+            secretName: finops-backend-snowflake-sandbox
