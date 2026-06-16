@@ -1,0 +1,425 @@
+openapi: 3.0.3
+info:
+  title: finops-backend API
+  description: |
+    HTTP API for the FinOps backend service (`finops-backend`).
+
+    Snowflake-backed endpoints require `SNOWFLAKE_CONNECTIONS` to be configured at
+    deploy time. The optional `connection` query parameter or
+    `X-FinOps-Snowflake-Connection` header selects a named connection; when omitted,
+    the default connection is used.
+
+    **Security:** This MVP has no HTTP authentication. Restrict access at the network
+    layer (cluster-internal Route, firewall rules).
+  version: 1.0.0
+  contact:
+    name: FinOps team
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://finops-backend-finops-team--finops-tools-backend.apps.prod-stable-spoke1-dc-rdu2.p1.openshiftapps.com
+    description: OpenShift (replace host with `oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}'`)
+
+tags:
+  - name: health
+    description: Liveness and readiness probes
+  - name: docs
+    description: API documentation
+  - name: snowflake
+    description: Generic Snowflake SQL passthrough
+  - name: aws
+    description: AWS account metrics from Snowflake marts
+
+paths:
+  /openapi.yaml:
+    get:
+      tags: [docs]
+      summary: OpenAPI specification
+      description: Returns this API's OpenAPI 3.0 document (YAML).
+      operationId: getOpenAPI
+      responses:
+        "200":
+          description: OpenAPI document
+          content:
+            application/yaml:
+              schema:
+                type: string
+            text/yaml:
+              schema:
+                type: string
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /livez:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      description: Confirms the process can serve HTTP. Does not call external dependencies.
+      operationId: getLivez
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe alias
+      description: Backwards-compatible alias for `/livez`.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Readiness probe
+      description: |
+        When Snowflake is configured, the default connection must be reachable
+        before this endpoint returns 200.
+      operationId: getReadyz
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "503":
+          description: Snowflake is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/snowflake/query:
+    post:
+      tags: [snowflake]
+      summary: Run SQL against Snowflake
+      description: |
+        Executes a single read-only SQL statement against a named Snowflake
+        connection. Allowed statement types: `SELECT`, `WITH`, `SHOW`,
+        `DESCRIBE`, `DESC`, `EXPLAIN`, and `LIST`. Multi-statement SQL
+        (statements separated by `;`) is rejected. Request body is limited to
+        1 MiB. Row count is capped by `FINOPS_BACKEND_MAX_ROWS` (default 1000).
+      operationId: postSnowflakeQuery
+      parameters:
+        - $ref: "#/components/parameters/SnowflakeConnectionHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SnowflakeQueryRequest"
+            examples:
+              defaultConnection:
+                summary: Default connection
+                value:
+                  sql: SELECT CURRENT_USER(), CURRENT_ROLE()
+              namedConnection:
+                summary: Named connection
+                value:
+                  connection: sandbox
+                  sql: SELECT CURRENT_DATABASE()
+      responses:
+        "200":
+          description: Query succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnowflakeQueryResponse"
+        "400":
+          description: Invalid request (bad JSON, SQL validation, unknown connection)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "502":
+          description: Snowflake query execution failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Snowflake is not configured or unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Query timed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/aws/accounts/historical-count:
+    get:
+      tags: [aws]
+      summary: Daily AWS linked-account counts
+      description: |
+        Returns daily snapshots of linked AWS account counts from
+        `HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT`.
+
+        For each payer and calendar day, the API keeps the latest snapshot that day.
+        With `aggregate=payer` (default), each data point is one payer on one day.
+        With `aggregate=sum`, counts are summed across payers per day.
+      operationId: getAWSAccountsHistoricalCount
+      parameters:
+        - name: from
+          in: query
+          description: Start date (inclusive), `YYYY-MM-DD`
+          schema:
+            type: string
+            format: date
+            example: "2026-01-01"
+        - name: to
+          in: query
+          description: End date (inclusive), `YYYY-MM-DD`
+          schema:
+            type: string
+            format: date
+            example: "2026-03-31"
+        - name: payer_account_id
+          in: query
+          description: Filter to a 12-digit AWS payer account ID
+          schema:
+            type: string
+            pattern: '^\d{12}$'
+            example: "123456789012"
+        - name: aggregate
+          in: query
+          description: |
+            `payer` returns one series per payer per day (default).
+            `sum` returns totals across payers per day.
+          schema:
+            type: string
+            enum: [payer, sum]
+            default: payer
+        - name: connection
+          in: query
+          description: Named Snowflake connection (falls back to default when omitted)
+          schema:
+            type: string
+            example: preprod
+        - $ref: "#/components/parameters/SnowflakeConnectionHeader"
+      responses:
+        "200":
+          description: Historical account counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AWSAccountsHistoricalCountResponse"
+              examples:
+                perPayer:
+                  summary: Per payer (default)
+                  value:
+                    aggregate: payer
+                    from: "2026-01-01"
+                    to: "2026-03-01"
+                    data:
+                      - date: "2026-01-19"
+                        payer_account_id: "123456789012"
+                        nb_active_accounts: 100
+                        nb_closed_accounts: 1
+                        nb_deleted_accounts: 0
+                    row_count: 1
+                    truncated: false
+                summed:
+                  summary: Summed across payers
+                  value:
+                    aggregate: sum
+                    from: "2026-01-01"
+                    data:
+                      - date: "2026-01-19"
+                        nb_active_accounts: 300
+                        nb_closed_accounts: 3
+                        nb_deleted_accounts: 0
+                    row_count: 1
+                    truncated: false
+        "400":
+          description: Invalid query parameters or unknown connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "502":
+          description: Snowflake query execution failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Snowflake is not configured or unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Query timed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  parameters:
+    SnowflakeConnectionHeader:
+      name: X-FinOps-Snowflake-Connection
+      in: header
+      description: |
+        Named Snowflake connection. Used when the request body or query string
+        does not set `connection`.
+      schema:
+        type: string
+        example: preprod
+
+  responses:
+    MethodNotAllowed:
+      description: HTTP method not allowed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: invalid payer_account_id "bad" (expected 12 digits)
+
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+
+    SnowflakeQueryRequest:
+      type: object
+      required: [sql]
+      properties:
+        sql:
+          type: string
+          description: Single SQL statement (no multi-statement batches)
+          example: SELECT CURRENT_USER(), CURRENT_ROLE()
+        connection:
+          type: string
+          description: Named Snowflake connection (optional)
+          example: sandbox
+
+    SnowflakeQueryResponse:
+      type: object
+      required: [columns, rows, row_count, truncated]
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+          example: ["CURRENT_USER()", "CURRENT_ROLE()"]
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+          description: All cell values are strings
+          example: [["user@example.com", "MY_ROLE"]]
+        row_count:
+          type: integer
+          minimum: 0
+          example: 1
+        truncated:
+          type: boolean
+          description: True when more rows were available beyond the server row cap
+          example: false
+
+    AWSAccountsHistoricalCountPoint:
+      type: object
+      required:
+        - date
+        - nb_active_accounts
+        - nb_closed_accounts
+        - nb_deleted_accounts
+      properties:
+        date:
+          type: string
+          format: date
+          description: Calendar day for this observation
+          example: "2026-01-19"
+        payer_account_id:
+          type: string
+          pattern: '^\d{12}$'
+          description: Present when `aggregate=payer`
+          example: "123456789012"
+        nb_active_accounts:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 100
+        nb_closed_accounts:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 1
+        nb_deleted_accounts:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 0
+
+    AWSAccountsHistoricalCountResponse:
+      type: object
+      required: [aggregate, data, row_count, truncated]
+      properties:
+        aggregate:
+          type: string
+          enum: [payer, sum]
+          example: payer
+        from:
+          type: string
+          format: date
+          description: Echo of the `from` query parameter when provided
+          example: "2026-01-01"
+        to:
+          type: string
+          format: date
+          description: Echo of the `to` query parameter when provided
+          example: "2026-03-01"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AWSAccountsHistoricalCountPoint"
+        row_count:
+          type: integer
+          minimum: 0
+          description: Number of items in `data`
+          example: 1
+        truncated:
+          type: boolean
+          description: True when more rows were available beyond the server row cap
+          example: false

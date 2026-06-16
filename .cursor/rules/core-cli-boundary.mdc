@@ -1,21 +1,24 @@
 ---
-description: enforce core-first architecture and thin CLI integration
-globs: cli/internal/**/*,core/**/*
+description: enforce core-first architecture and thin CLI/backend integration
+globs: cli/internal/**/*,core/**/*,backend/**/*
 alwaysApply: true
 ---
 
 # core-first architecture boundary
 
-Keep architecture organized so reusable logic lives in `core` and interface-specific concerns stay in `cli`.
+Keep architecture organized so reusable logic lives in `core` and interface-specific concerns stay in `cli` and `backend`.
 
 ## Ownership
 
-- **`core/` owns reusable business operations** that should be shared by CLI and future REST APIs.
-- **`cli/` owns interface concerns**: authentication, local config/profile resolution, command parsing, and output formatting.
+- **`core/` owns reusable business operations** that should be shared by CLI and HTTP API.
+- **`cli/` owns CLI interface concerns**: authentication, local config/profile resolution, command parsing, and output formatting.
+- **`backend/` owns HTTP interface concerns**: routing, JSON encoding, env/Secret-based config, and probes.
 
 ## Required layering
 
 - CLI commands should orchestrate inputs and call `core` services.
+- HTTP handlers should orchestrate requests and call `core` services.
+- **`backend/` must never depend on `cli/`** — not in `go.mod`, not in imports. If both need the same behavior, implement it in `core/` (or duplicate thin HTTP-specific wiring in `backend/` only when it is truly interface-specific).
 - `core` may call cloud APIs via callers' `aws.Config` (or equivalent), but must not read local config files.
 - New API entrypoints (HTTP, MCP, etc.) should consume `core` directly instead of duplicating provider logic from CLI.
 
@@ -26,6 +29,13 @@ Keep architecture organized so reusable logic lives in `core` and interface-spec
 - local config file reads/writes
 - Cobra flags/args/help handling
 - terminal/pretty output, JSON/CSV command rendering
+
+## Keep in backend
+
+- HTTP routing and middleware
+- env/Secret-based Snowflake (and future provider) connection config
+- JSON request/response types for REST endpoints
+- health/readiness probes
 
 ## Keep in core
 
@@ -38,5 +48,6 @@ Keep architecture organized so reusable logic lives in `core` and interface-spec
 
 - Any new cloud business capability is added in `core` first.
 - CLI change uses `core` API and does not reimplement provider calls in `cli/internal/cmd`.
+- Backend change uses `core` API and does not import `cli/` packages.
 - No local credential/config file I/O is introduced under `core/`.
 - If behavior is shared by multiple frontends, it is implemented once in `core`.

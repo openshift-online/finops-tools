@@ -8,9 +8,10 @@ FinOps command-line tools. The repository is a Go monorepo with a shared **core*
 |------|--------|------|
 | `core/` | `github.com/openshift-online/finops-tools/core` | Business logic (no CLI/HTTP dependencies) |
 | `cli/` | `github.com/openshift-online/finops-tools/cli` | Cobra commands; calls into `core` |
+| `backend/` | `github.com/openshift-online/finops-tools/backend` | HTTP server; calls into `core` |
 | `go.work` | — | Ties modules together for local development |
 
-A future REST API can live in a separate module and import the same `core` package.
+The HTTP API is a separate module that imports **`core` only** — it must never depend on `cli` (enforced by `backend/boundary_test.go`).
 
 ### Package map (`cli/internal`)
 
@@ -44,18 +45,273 @@ From the repository root (uses `go.work`):
 go work sync
 make test
 make build
+make build-backend
 ./bin/finops demo hello   # prints: hello
+./bin/finops-backend      # starts HTTP server on :8080 (see HTTP API below)
 ```
 
 Or without Make:
 
 ```bash
-go test ./core/... ./cli/...
+go test ./core/... ./cli/... ./backend/...
 go run ./cli/cmd/finops demo hello
 go build -o bin/finops ./cli/cmd/finops
+go run ./backend/cmd/finops-backend
+go build -o bin/finops-backend ./backend/cmd/finops-backend
 ```
 
-Edits under `core/` are picked up immediately by the CLI (workspace + `replace` in `cli/go.mod`).
+Edits under `core/` are picked up immediately by the CLI and HTTP server (workspace + `replace` in module `go.mod` files).
+
+## HTTP API
+
+The **`finops-backend`** HTTP server exposes a subset of FinOps capabilities for cluster deployment. It uses environment variables for Snowflake credentials (no local config files).
+
+**Security note:** The MVP has **no HTTP authentication**. Restrict access at the network layer (cluster-internal Route, firewall rules) until auth and service-account Snowflake credentials are added.
+
+OpenAPI 3.0 spec: embedded in the binary and served at `GET /openapi.yaml` (source: [`backend/internal/openapi/openapi.yaml`](backend/internal/openapi/openapi.yaml))
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/openapi.yaml` | OpenAPI 3.0 specification (YAML) |
+| `GET` | `/livez` | Liveness probe; process is up (no external deps) |
+| `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
+| `GET` | `/health` | Alias for `/livez` |
+| `POST` | `/v1/snowflake/query` | Run read-only SQL against Snowflake (`SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN`, `LIST`) |
+| `GET` | `/v1/aws/accounts/historical-count` | Daily AWS linked-account counts per payer (time series) |
+
+**Query request:**
+
+```json
+{
+  "sql": "SELECT CURRENT_USER(), CURRENT_ROLE()",
+  "connection": "sandbox"
+}
+```
+
+The optional `connection` field selects a named Snowflake environment (see below). When omitted, the default connection is used. Clients may also pass `X-FinOps-Snowflake-Connection` when the JSON field is empty.
+
+**Query response:**
+
+```json
+{
+  "columns": ["CURRENT_USER()", "CURRENT_ROLE()"],
+  "rows": [["user@example.com", "MY_ROLE"]],
+  "row_count": 1,
+  "truncated": false
+}
+```
+
+#### AWS accounts historical count
+
+`GET /v1/aws/accounts/historical-count` returns daily snapshots of linked AWS account counts from `HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT`. For each payer and calendar day, the API keeps the latest snapshot that day (by `TIMESTAMP`, then `RUN_ID`).
+
+| Query param | Default | Description |
+|-------------|---------|-------------|
+| `from` | none | Start date `YYYY-MM-DD` (inclusive) |
+| `to` | none | End date `YYYY-MM-DD` (inclusive) |
+| `payer_account_id` | none | 12-digit AWS payer account filter |
+| `aggregate` | `payer` | `payer` = one series per payer per day; `sum` = totals across payers per day |
+| `connection` | default Snowflake connection | Query param or `X-FinOps-Snowflake-Connection` header |
+
+**Per-payer response** (`aggregate=payer`, default):
+
+```json
+{
+  "aggregate": "payer",
+  "from": "2026-01-01",
+  "to": "2026-03-01",
+  "data": [
+    {
+      "date": "2026-01-19",
+      "payer_account_id": "123456789012",
+      "nb_active_accounts": 100,
+      "nb_closed_accounts": 1,
+      "nb_deleted_accounts": 0
+    }
+  ],
+  "row_count": 1,
+  "truncated": false
+}
+```
+
+**Summed across payers** (`aggregate=sum`):
+
+```json
+{
+  "aggregate": "sum",
+  "data": [
+    {
+      "date": "2026-01-19",
+      "nb_active_accounts": 300,
+      "nb_closed_accounts": 3,
+      "nb_deleted_accounts": 0
+    }
+  ],
+  "row_count": 1,
+  "truncated": false
+}
+```
+
+### Environment variables
+
+#### Server
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `FINOPS_BACKEND_ADDR` | no | `:8080` | Listen address |
+| `FINOPS_BACKEND_MAX_ROWS` | no | `1000` | Max rows returned per generic Snowflake query |
+| `FINOPS_BACKEND_QUERY_TIMEOUT` | no | `60s` | Per-query timeout |
+| `FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_TABLE` | no | `HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT` | Snowflake table for account-count history |
+| `FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS` | no | `10000` | Max rows returned by `/v1/aws/accounts/historical-count` |
+
+#### Snowflake
+
+Set `SNOWFLAKE_CONNECTIONS` to a comma-separated list of lowercase names (e.g. `sandbox`, or `preprod,sandbox` when both are configured). Each connection uses prefixed env vars: `SNOWFLAKE_CONN_<NAME>_*` where `<NAME>` is uppercased in the key (`sandbox` → `SNOWFLAKE_CONN_SANDBOX_ACCOUNT`). Omit all Snowflake variables to start without Snowflake (`/v1/snowflake/query` returns 503).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SNOWFLAKE_CONNECTIONS` | yes | Comma-separated connection names |
+| `SNOWFLAKE_DEFAULT_CONNECTION` | no | Default when the request omits `connection` (falls back to the first listed name) |
+| `SNOWFLAKE_CONN_<NAME>_ACCOUNT` | yes | Account for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_USER` | yes | User for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_WAREHOUSE` | yes | Warehouse for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_TOKEN` or `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY` | yes | Auth for connection `<NAME>` |
+| `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_FILE` | yes* | Read PEM from a mounted file instead of inline `PRIVATE_KEY` |
+| `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_PASSPHRASE` | no | Passphrase for encrypted keys |
+| `SNOWFLAKE_CONN_<NAME>_ROLE` / `_DATABASE` / `_SCHEMA` | no | Optional session defaults |
+
+\*Provide one of token, inline private key, or private key file per connection.
+
+Readiness (`/readyz`) checks only the **default** connection. Other connections connect lazily on first query.
+
+#### Separate Secrets per environment
+
+You can split credentials across multiple OpenShift Secrets and mount them with `envFrom.secretRef` entries (see [`deploy/openshift/deployment.yaml`](deploy/openshift/deployment.yaml)). Each environment Secret holds that connection’s `SNOWFLAKE_CONN_<NAME>_*` keys only. `SNOWFLAKE_CONNECTIONS` and `SNOWFLAKE_DEFAULT_CONNECTION` are non-secret and are set as plain env vars in the Deployment.
+
+Private keys are often mounted as files (one Secret volume per environment) with `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_FILE` pointing at the mount path. Example layout:
+
+| Source | Contents |
+|--------|----------|
+| Deployment `env` | `SNOWFLAKE_CONNECTIONS`, `SNOWFLAKE_DEFAULT_CONNECTION` |
+| `finops-backend-snowflake-preprod` | `SNOWFLAKE_CONN_PREPROD_*` env keys + `private_key` file mounted at `/etc/finops/snowflake/preprod/` |
+| `finops-backend-snowflake-sandbox` | `SNOWFLAKE_CONN_SANDBOX_*` env keys + `private_key` file mounted at `/etc/finops/snowflake/sandbox/` |
+
+Every name listed in `SNOWFLAKE_CONNECTIONS` must have a matching Secret before the backend starts.
+
+See [`deploy/openshift/secret.yaml.example`](deploy/openshift/secret.yaml.example) for a full multi-Secret example.
+
+### Local run
+
+```bash
+export SNOWFLAKE_CONNECTIONS=sandbox
+export SNOWFLAKE_DEFAULT_CONNECTION=sandbox
+export SNOWFLAKE_CONN_SANDBOX_ACCOUNT=example-sandbox
+export SNOWFLAKE_CONN_SANDBOX_USER=example-user
+export SNOWFLAKE_CONN_SANDBOX_PRIVATE_KEY="$(cat ./sandbox_rsa_key.p8)"
+export SNOWFLAKE_CONN_SANDBOX_WAREHOUSE=SANDBOX_WH
+
+make build-backend
+./bin/finops-backend
+```
+
+```bash
+curl -s http://localhost:8080/livez
+curl -s http://localhost:8080/openapi.yaml
+curl -s -X POST http://localhost:8080/v1/snowflake/query \
+  -H 'Content-Type: application/json' \
+  -d '{"sql":"SELECT CURRENT_USER(), CURRENT_ROLE()"}'
+curl -s -X POST http://localhost:8080/v1/snowflake/query \
+  -H 'Content-Type: application/json' \
+  -d '{"connection":"sandbox","sql":"SELECT CURRENT_DATABASE()"}'
+curl -s 'http://localhost:8080/v1/aws/accounts/historical-count?payer_account_id=123456789012&from=2026-01-01&to=2026-03-31'
+curl -s 'http://localhost:8080/v1/aws/accounts/historical-count?aggregate=sum&from=2026-01-01'
+```
+
+### OpenShift deployment
+
+Runtime namespace: **`finops-team--finops-tools-backend`** on cluster `prod-stable-spoke1-dc-rdu2`.
+
+The TenantNamespace CR (`metadata.name: finops-tools-backend`) is applied in **`finops-team--config`**; the platform provisions **`finops-team--finops-tools-backend`**.
+
+#### One-time namespace setup (platform / tenant admin)
+
+Creating the namespace requires a **TenantNamespace** in `finops-team--config`. Most developers do not have permission for this API.
+
+Ask a tenant admin to run once:
+
+```bash
+oc apply -f deploy/openshift/tenantnamespace.yaml
+```
+
+If you see `Forbidden` on `tenantnamespaces.tenant.paas.redhat.com`, you need that admin step — you cannot self-provision the namespace.
+
+Confirm the namespace exists before deploying:
+
+```bash
+oc get namespace finops-team--finops-tools-backend
+oc auth can-i create deployment -n finops-team--finops-tools-backend
+```
+
+#### Deploy the API (developers)
+
+Full rebuild, push, and roll out:
+
+```bash
+make openshift-refresh
+```
+
+Or step by step:
+
+1. Build and push the image:
+
+```bash
+make podman-build
+make podman-push
+```
+
+2. Deploy workloads (do **not** apply `secret.yaml.example` with dummy values):
+
+```bash
+make openshift-apply
+```
+
+3. Create Snowflake Secrets when ready (one per connection listed in `SNOWFLAKE_CONNECTIONS`):
+
+```bash
+# Preprod (default connection)
+oc create secret generic finops-backend-snowflake-preprod \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_ACCOUNT=example-preprod \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_USER=example-user \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_WAREHOUSE=PREPROD_WH \
+  --from-literal=SNOWFLAKE_CONN_PREPROD_PRIVATE_KEY_FILE=/etc/finops/snowflake/preprod/private_key \
+  --from-file=private_key=./preprod_rsa_key.p8 \
+  -n finops-team--finops-tools-backend
+
+# Sandbox
+oc create secret generic finops-backend-snowflake-sandbox \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_ACCOUNT=example-sandbox \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_USER=example-user \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_WAREHOUSE=SANDBOX_WH \
+  --from-literal=SNOWFLAKE_CONN_SANDBOX_PRIVATE_KEY_FILE=/etc/finops/snowflake/sandbox/private_key \
+  --from-file=private_key=./sandbox_rsa_key.p8 \
+  -n finops-team--finops-tools-backend
+
+oc rollout restart deployment/finops-backend -n finops-team--finops-tools-backend
+```
+
+Or `make openshift-restart` after `make openshift-apply`.
+
+4. Verify:
+
+```bash
+oc get pods,svc,endpoints,route -n finops-team--finops-tools-backend -l app=finops-backend
+curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/livez"
+curl -s "https://$(oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}')/openapi.yaml"
+```
+
+Wire `serviceAccountName` in `deployment.yaml` when Red Hat provides the service account.
 
 ## Configuration
 
@@ -367,5 +623,5 @@ finops demo hello
 
 ## CI
 
-- **Test** (`.github/workflows/test.yml`): runs on pull requests and pushes to `main`/`master`.
+- **Test** (`.github/workflows/test.yml`): runs on pull requests and pushes to `main`/`master` (tests and builds CLI + API).
 - **Release** (`.github/workflows/release.yml`): runs on version tags.
