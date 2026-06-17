@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/snowflakedb/gosnowflake"
+	"github.com/snowflakedb/gosnowflake/v2"
 )
 
 // ConnectParams configures a Snowflake connection.
