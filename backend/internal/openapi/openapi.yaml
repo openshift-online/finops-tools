@@ -151,6 +151,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
+        "413":
+          description: Request entity too large (body exceeds 1 MiB)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: Snowflake query execution failed
           content:
