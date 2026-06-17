@@ -180,12 +180,11 @@ func loadConnectionParams(name, prefix string) (coresnowflake.ConnectParams, err
 	}
 
 	return coresnowflake.ConnectParams{
-		Account:              account,
-		User:                 user,
-		Token:                token,
-		PrivateKeyPEM:        privateKey,
-		PrivateKeyPassphrase: strings.TrimSpace(os.Getenv(prefix + "PRIVATE_KEY_PASSPHRASE")),
-		Role:                 strings.TrimSpace(os.Getenv(prefix + "ROLE")),
+		Account:       account,
+		User:          user,
+		Token:         token,
+		PrivateKeyPEM: privateKey,
+		Role:          strings.TrimSpace(os.Getenv(prefix + "ROLE")),
 		Warehouse:            warehouse,
 		Database:             strings.TrimSpace(os.Getenv(prefix + "DATABASE")),
 		Schema:               strings.TrimSpace(os.Getenv(prefix + "SCHEMA")),

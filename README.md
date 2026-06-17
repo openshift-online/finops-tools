@@ -179,8 +179,9 @@ Set `SNOWFLAKE_CONNECTIONS` to a comma-separated list of lowercase names (e.g. `
 | `SNOWFLAKE_CONN_<NAME>_WAREHOUSE` | yes | Warehouse for connection `<NAME>` |
 | `SNOWFLAKE_CONN_<NAME>_TOKEN` or `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY` | yes | Auth for connection `<NAME>` |
 | `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_FILE` | yes* | Read PEM from a mounted file instead of inline `PRIVATE_KEY` |
-| `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_PASSPHRASE` | no | Passphrase for encrypted keys |
 | `SNOWFLAKE_CONN_<NAME>_ROLE` / `_DATABASE` / `_SCHEMA` | no | Optional session defaults |
+
+Private keys must be **unencrypted PEM** (PKCS#8 or PKCS#1). Decrypt encrypted keys externally before mounting or inlining them (for example `openssl pkcs8 -in encrypted.pem -out decrypted.pem`).
 
 \*Provide one of token, inline private key, or private key file per connection.
 

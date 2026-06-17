@@ -10,14 +10,13 @@ import (
 )
 
 // ConnectParams configures a Snowflake connection.
-// Use Token for OAuth, or PrivateKeyPEM (+ optional PrivateKeyPassphrase) for JWT key-pair auth.
+// Use Token for OAuth, or PrivateKeyPEM (unencrypted PEM) for JWT key-pair auth.
 type ConnectParams struct {
-	Account               string
-	User                  string
-	Token                 string
-	PrivateKeyPEM         string
-	PrivateKeyPassphrase  string
-	Role                  string
+	Account       string
+	User          string
+	Token         string
+	PrivateKeyPEM string
+	Role          string
 	Warehouse             string
 	Database              string
 	Schema                string
@@ -51,7 +50,7 @@ func OpenDB(params ConnectParams) (*sql.DB, error) {
 
 	switch {
 	case privateKeyPEM != "":
-		key, err := ParsePrivateKey(privateKeyPEM, params.PrivateKeyPassphrase)
+		key, err := ParsePrivateKey(privateKeyPEM)
 		if err != nil {
 			return nil, err
 		}
