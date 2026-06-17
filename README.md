@@ -188,17 +188,17 @@ Readiness (`/readyz`) checks only the **default** connection. Other connections 
 
 #### Separate Secrets per environment
 
-You can split credentials across multiple OpenShift Secrets and mount them with `envFrom.secretRef` entries (see [`deploy/openshift/deployment.yaml`](deploy/openshift/deployment.yaml)). Each environment Secret holds that connection’s `SNOWFLAKE_CONN_<NAME>_*` keys only. `SNOWFLAKE_CONNECTIONS` and `SNOWFLAKE_DEFAULT_CONNECTION` are non-secret and are set as plain env vars in the Deployment.
-
-Private keys are often mounted as files (one Secret volume per environment) with `SNOWFLAKE_CONN_<NAME>_PRIVATE_KEY_FILE` pointing at the mount path. Example layout:
+OpenShift uses split Secrets per connection (see [`deploy/openshift/deployment.yaml`](deploy/openshift/deployment.yaml)): a **config** Secret loaded via `envFrom` and a **key** Secret mounted as a file. This keeps private key material out of the process environment. `SNOWFLAKE_CONNECTIONS` and `SNOWFLAKE_DEFAULT_CONNECTION` are non-secret and are set as plain env vars in the Deployment.
 
 | Source | Contents |
 |--------|----------|
 | Deployment `env` | `SNOWFLAKE_CONNECTIONS`, `SNOWFLAKE_DEFAULT_CONNECTION` |
-| `finops-backend-snowflake-preprod` | `SNOWFLAKE_CONN_PREPROD_*` env keys + `private_key` file mounted at `/etc/finops/snowflake/preprod/` |
-| `finops-backend-snowflake-sandbox` | `SNOWFLAKE_CONN_SANDBOX_*` env keys + `private_key` file mounted at `/etc/finops/snowflake/sandbox/` |
+| `finops-backend-snowflake-preprod-config` | `SNOWFLAKE_CONN_PREPROD_*` env keys (including `PRIVATE_KEY_FILE` path) |
+| `finops-backend-snowflake-preprod-key` | `private_key` file mounted at `/etc/finops/snowflake/preprod/` |
+| `finops-backend-snowflake-sandbox-config` | `SNOWFLAKE_CONN_SANDBOX_*` env keys (including `PRIVATE_KEY_FILE` path) |
+| `finops-backend-snowflake-sandbox-key` | `private_key` file mounted at `/etc/finops/snowflake/sandbox/` |
 
-Every name listed in `SNOWFLAKE_CONNECTIONS` must have a matching Secret before the backend starts.
+Every name listed in `SNOWFLAKE_CONNECTIONS` must have matching config and key Secrets before the backend starts.
 
 See [`deploy/openshift/secret.yaml.example`](deploy/openshift/secret.yaml.example) for a full multi-Secret example.
 
@@ -277,24 +277,30 @@ make podman-push
 make openshift-apply
 ```
 
-3. Create Snowflake Secrets when ready (one per connection listed in `SNOWFLAKE_CONNECTIONS`):
+3. Create Snowflake Secrets when ready (config + key per connection listed in `SNOWFLAKE_CONNECTIONS`):
 
 ```bash
 # Preprod (default connection)
-oc create secret generic finops-backend-snowflake-preprod \
+oc create secret generic finops-backend-snowflake-preprod-config \
   --from-literal=SNOWFLAKE_CONN_PREPROD_ACCOUNT=example-preprod \
   --from-literal=SNOWFLAKE_CONN_PREPROD_USER=example-user \
   --from-literal=SNOWFLAKE_CONN_PREPROD_WAREHOUSE=PREPROD_WH \
   --from-literal=SNOWFLAKE_CONN_PREPROD_PRIVATE_KEY_FILE=/etc/finops/snowflake/preprod/private_key \
+  -n finops-team--finops-tools-backend
+
+oc create secret generic finops-backend-snowflake-preprod-key \
   --from-file=private_key=./preprod_rsa_key.p8 \
   -n finops-team--finops-tools-backend
 
 # Sandbox
-oc create secret generic finops-backend-snowflake-sandbox \
+oc create secret generic finops-backend-snowflake-sandbox-config \
   --from-literal=SNOWFLAKE_CONN_SANDBOX_ACCOUNT=example-sandbox \
   --from-literal=SNOWFLAKE_CONN_SANDBOX_USER=example-user \
   --from-literal=SNOWFLAKE_CONN_SANDBOX_WAREHOUSE=SANDBOX_WH \
   --from-literal=SNOWFLAKE_CONN_SANDBOX_PRIVATE_KEY_FILE=/etc/finops/snowflake/sandbox/private_key \
+  -n finops-team--finops-tools-backend
+
+oc create secret generic finops-backend-snowflake-sandbox-key \
   --from-file=private_key=./sandbox_rsa_key.p8 \
   -n finops-team--finops-tools-backend
 

@@ -40,9 +40,9 @@ spec:
               value: "preprod"
           envFrom:
             - secretRef:
-                name: finops-backend-snowflake-preprod
+                name: finops-backend-snowflake-preprod-config
             - secretRef:
-                name: finops-backend-snowflake-sandbox
+                name: finops-backend-snowflake-sandbox-config
           volumeMounts:
             - name: snowflake-preprod-key
               mountPath: /etc/finops/snowflake/preprod
@@ -87,7 +87,7 @@ spec:
       volumes:
         - name: snowflake-preprod-key
           secret:
-            secretName: finops-backend-snowflake-preprod
+            secretName: finops-backend-snowflake-preprod-key
         - name: snowflake-sandbox-key
           secret:
-            secretName: finops-backend-snowflake-sandbox
+            secretName: finops-backend-snowflake-sandbox-key
