@@ -29,21 +29,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	shutdownDone := make(chan error, 1)
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
+		signal.Stop(sigCh)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
+		err := srv.Shutdown(ctx)
+		if err != nil {
 			logger.Error("shutdown", "error", err)
-			os.Exit(1)
 		}
+		shutdownDone <- err
 	}()
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("serve", "error", err)
+		os.Exit(1)
+	}
+
+	if err := <-shutdownDone; err != nil {
 		os.Exit(1)
 	}
 }
