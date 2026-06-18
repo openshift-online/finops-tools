@@ -7,8 +7,8 @@ import (
 
 var snapshotCmd = &cobra.Command{
 	Use:   "snapshot",
-	Short: "AWS snapshot discovery",
-	Long:  "Find AWS EBS and RDS snapshots older than a cutoff.",
+	Short: "AWS snapshot discovery and storage cost estimates",
+	Long:  "Find AWS EBS and RDS snapshots and estimate monthly snapshot storage costs.",
 }
 
 func init() {

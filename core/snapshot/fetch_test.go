@@ -30,18 +30,21 @@ func (f fakeEBSLister) ListEBSSnapshots(
 	region, accountID string,
 	_ time.Time,
 	_ float64,
-) ([]Record, error) {
+) ([]Record, float64, error) {
 	out := make([]Record, 0, len(f.records))
 	for _, rec := range f.records {
 		if rec.Region == region && rec.AccountID == accountID {
 			out = append(out, rec)
 		}
 	}
-	return out, nil
+	return out, 0, nil
 }
 
 type fakeRDSLister struct {
-	records []Record
+	records        []Record
+	FreePoolGiB    float64
+	TotalBackupGiB float64
+	contextErr     error
 }
 
 func (f fakeRDSLister) ListRDSSnapshots(
@@ -60,14 +63,30 @@ func (f fakeRDSLister) ListRDSSnapshots(
 	return out, nil
 }
 
+func (f fakeRDSLister) GetRDSRegionContext(
+	_ context.Context,
+	_ aws.Config,
+	_ string,
+) (RDSRegionContext, error) {
+	if f.contextErr != nil {
+		return RDSRegionContext{}, f.contextErr
+	}
+	return RDSRegionContext{
+		FreePoolGiB:      f.FreePoolGiB,
+		TotalBackupGiB: f.TotalBackupGiB,
+	}, nil
+}
+
 func TestFetchAggregatesRecordsAndSummary(t *testing.T) {
 	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	ebs := Record{
-		AccountID:  "111111111111",
-		Region:     "us-east-1",
-		Kind:       KindEBSSnapshot,
-		ResourceID: "snap-old",
-		SizeGiB:    100,
+		AccountID:               "111111111111",
+		Region:                  "us-east-1",
+		Kind:                    KindEBSSnapshot,
+		ResourceID:              "snap-old",
+		SizeGiB:                 100,
+		EstimatedMonthlyCostUSD: 5,
+		CostBasis:               CostBasisVolumeSizeEstimate,
 	}
 	rds := Record{
 		AccountID:  "111111111111",
@@ -78,13 +97,17 @@ func TestFetchAggregatesRecordsAndSummary(t *testing.T) {
 	}
 
 	result, err := Fetch(context.Background(), Query{
-		Targets:   []AccountTarget{{AccountID: "111111111111"}},
+		Targets: []AccountTarget{{AccountID: "111111111111"}},
 		OlderThan: 180 * 24 * time.Hour,
-		Types:     []Kind{KindEBSSnapshot, KindRDSSnapshot, KindRDSClusterSnapshot},
-		Now:       now,
+		Types: []Kind{KindEBSSnapshot, KindRDSSnapshot, KindRDSClusterSnapshot},
+		Now: now,
 		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
 		ebsLister:    fakeEBSLister{records: []Record{ebs}},
-		rdsLister:    fakeRDSLister{records: []Record{rds}},
+		rdsLister: fakeRDSLister{
+			records:        []Record{rds},
+			FreePoolGiB:    500,
+			TotalBackupGiB: 200,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +117,9 @@ func TestFetchAggregatesRecordsAndSummary(t *testing.T) {
 	}
 	if result.Summary.TotalCount != 2 {
 		t.Fatalf("summary count = %d", result.Summary.TotalCount)
+	}
+	if result.Summary.EstimatedMonthlyCostUSD != 5 {
+		t.Fatalf("summary cost = %v, want 5 (RDS within free tier)", result.Summary.EstimatedMonthlyCostUSD)
 	}
 	if result.Summary.OlderThanDays != 180 {
 		t.Fatalf("older than days = %d", result.Summary.OlderThanDays)
@@ -109,23 +135,33 @@ func TestEBSSnapshotRecordFiltersByAgeAndSize(t *testing.T) {
 		VolumeSize:  aws.Int32(100),
 		StorageTier: ectypes.StorageTierStandard,
 	}
-	rec, ok := ebsSnapshotRecord(old, "111111111111", "us-east-1", cutoff, 0)
+	rec, ok := ebsSnapshotRecord(old, "111111111111", "us-east-1", cutoff, 0, map[string]ebsSnapshotCharge{
+		"snap-old": {IncrementalGiB: 100, MonthlyUSD: 5},
+	})
 	if !ok {
 		t.Fatal("expected old snapshot to match")
 	}
-	if rec.SizeGiB != 100 {
-		t.Fatalf("size = %v", rec.SizeGiB)
+	if rec.EstimatedMonthlyCostUSD != 5 {
+		t.Fatalf("cost = %v", rec.EstimatedMonthlyCostUSD)
+	}
+
+	noCharge, ok := ebsSnapshotRecord(old, "111111111111", "us-east-1", cutoff, 0, nil)
+	if !ok {
+		t.Fatal("expected old snapshot to match")
+	}
+	if noCharge.EstimatedMonthlyCostUSD != 0 {
+		t.Fatalf("cost without charge = %v, want 0", noCharge.EstimatedMonthlyCostUSD)
 	}
 
 	newSnap := old
 	newSnap.StartTime = aws.Time(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
-	if _, ok := ebsSnapshotRecord(newSnap, "111111111111", "us-east-1", cutoff, 0); ok {
+	if _, ok := ebsSnapshotRecord(newSnap, "111111111111", "us-east-1", cutoff, 0, nil); ok {
 		t.Fatal("expected new snapshot to be filtered out")
 	}
 
 	small := old
 	small.VolumeSize = aws.Int32(1)
-	if _, ok := ebsSnapshotRecord(small, "111111111111", "us-east-1", cutoff, 10); ok {
+	if _, ok := ebsSnapshotRecord(small, "111111111111", "us-east-1", cutoff, 10, nil); ok {
 		t.Fatal("expected small snapshot to be filtered out")
 	}
 }
@@ -152,7 +188,7 @@ func TestListEBSSnapshotsPagination(t *testing.T) {
 		},
 	}
 	cutoff := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	records, err := listEBSSnapshotsWithClient(context.Background(), client, "111111111111", "us-east-1", cutoff, 0)
+	records, _, err := listEBSSnapshotsWithClient(context.Background(), client, "111111111111", "us-east-1", cutoff, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,8 +279,26 @@ func TestListRDSSnapshotsWithClient(t *testing.T) {
 }
 
 type fakeRDS struct {
+	dbInstances      []rdstypes.DBInstance
+	dbClusters       []rdstypes.DBCluster
 	dbSnapshots      []rdstypes.DBSnapshot
 	clusterSnapshots []rdstypes.DBClusterSnapshot
+}
+
+func (f *fakeRDS) DescribeDBInstances(
+	_ context.Context,
+	_ *rds.DescribeDBInstancesInput,
+	_ ...func(*rds.Options),
+) (*rds.DescribeDBInstancesOutput, error) {
+	return &rds.DescribeDBInstancesOutput{DBInstances: f.dbInstances}, nil
+}
+
+func (f *fakeRDS) DescribeDBClusters(
+	_ context.Context,
+	_ *rds.DescribeDBClustersInput,
+	_ ...func(*rds.Options),
+) (*rds.DescribeDBClustersOutput, error) {
+	return &rds.DescribeDBClustersOutput{DBClusters: f.dbClusters}, nil
 }
 
 func (f *fakeRDS) DescribeDBSnapshots(
@@ -253,6 +307,144 @@ func (f *fakeRDS) DescribeDBSnapshots(
 	_ ...func(*rds.Options),
 ) (*rds.DescribeDBSnapshotsOutput, error) {
 	return &rds.DescribeDBSnapshotsOutput{DBSnapshots: f.dbSnapshots}, nil
+}
+
+func TestRDSMonthlyBackupRunRateUSD(t *testing.T) {
+	got := RDSMonthlyBackupRunRateUSD(1425)
+	want := 1425 * 30 * 0.095
+	if got != want {
+		t.Fatalf("run rate = %v, want %v", got, want)
+	}
+	if RDSMonthlyBackupRunRateUSD(0) != 0 {
+		t.Fatal("expected zero run rate for zero excess")
+	}
+}
+
+func TestApplyRDSRegionalCosts(t *testing.T) {
+	records := []Record{
+		{Kind: KindRDSSnapshot, SizeGiB: 100, SnapshotType: "manual"},
+		{Kind: KindRDSSnapshot, SizeGiB: 100, SnapshotType: "manual"},
+		{Kind: KindEBSSnapshot, SizeGiB: 50, EstimatedMonthlyCostUSD: 2.5},
+	}
+	ApplyRDSRegionalCosts(records, RDSRegionContext{FreePoolGiB: 150, TotalBackupGiB: 300})
+	if records[0].EstimatedMonthlyCostUSD != 213.75 {
+		t.Fatalf("snapshot 0 cost = %v, want 213.75", records[0].EstimatedMonthlyCostUSD)
+	}
+	if records[1].EstimatedMonthlyCostUSD != 213.75 {
+		t.Fatalf("snapshot 1 cost = %v, want 213.75", records[1].EstimatedMonthlyCostUSD)
+	}
+	if records[0].CostBasis != CostBasisRDSRegionalExcess {
+		t.Fatalf("cost basis = %q", records[0].CostBasis)
+	}
+	if records[2].EstimatedMonthlyCostUSD != 2.5 {
+		t.Fatalf("ebs cost changed = %v", records[2].EstimatedMonthlyCostUSD)
+	}
+
+	withinFree := []Record{{Kind: KindRDSSnapshot, SizeGiB: 100, SnapshotType: "manual"}}
+	ApplyRDSRegionalCosts(withinFree, RDSRegionContext{FreePoolGiB: 200, TotalBackupGiB: 100})
+	if withinFree[0].EstimatedMonthlyCostUSD != 0 {
+		t.Fatalf("within free tier cost = %v, want 0", withinFree[0].EstimatedMonthlyCostUSD)
+	}
+	if withinFree[0].CostBasis != CostBasisRDSWithinFreeTier {
+		t.Fatalf("cost basis = %q", withinFree[0].CostBasis)
+	}
+
+	automatedLive := []Record{{
+		Kind:             KindRDSSnapshot,
+		SizeGiB:          100,
+		SnapshotType:     "automated",
+		SourceResourceID: "db-live",
+	}}
+	ApplyRDSRegionalCosts(automatedLive, RDSRegionContext{
+		FreePoolGiB:     50,
+		TotalBackupGiB:  500,
+		LiveInstanceIDs: map[string]struct{}{"db-live": {}},
+	})
+	if automatedLive[0].EstimatedMonthlyCostUSD != 0 {
+		t.Fatalf("automated live source cost = %v, want 0", automatedLive[0].EstimatedMonthlyCostUSD)
+	}
+}
+
+func TestGetRDSRegionContextWithClient(t *testing.T) {
+	client := &fakeRDS{
+		dbInstances: []rdstypes.DBInstance{
+			{DBInstanceIdentifier: aws.String("db-1"), AllocatedStorage: aws.Int32(100)},
+		},
+		dbClusters: []rdstypes.DBCluster{
+			{DBClusterIdentifier: aws.String("cluster-1"), AllocatedStorage: aws.Int32(50)},
+		},
+		dbSnapshots: []rdstypes.DBSnapshot{
+			{
+				DBInstanceIdentifier: aws.String("db-1"),
+				AllocatedStorage:     aws.Int32(80),
+				SnapshotType:         aws.String("automated"),
+			},
+			{
+				DBInstanceIdentifier: aws.String("db-1"),
+				AllocatedStorage:     aws.Int32(20),
+				SnapshotType:         aws.String("automated"),
+			},
+		},
+		clusterSnapshots: []rdstypes.DBClusterSnapshot{
+			{
+				DBClusterIdentifier: aws.String("cluster-1"),
+				AllocatedStorage:    aws.Int32(30),
+				SnapshotType:        aws.String("manual"),
+			},
+		},
+	}
+	ctx, err := getRDSRegionContextWithClient(context.Background(), client, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.FreePoolGiB != 150 {
+		t.Fatalf("free pool = %v, want 150", ctx.FreePoolGiB)
+	}
+	if ctx.TotalBackupGiB != 110 {
+		t.Fatalf("total backup = %v, want 110", ctx.TotalBackupGiB)
+	}
+	if _, ok := ctx.LiveInstanceIDs["db-1"]; !ok {
+		t.Fatalf("live instances = %#v", ctx.LiveInstanceIDs)
+	}
+}
+
+func TestProvisionedStorageSkipsClusterMembers(t *testing.T) {
+	instances := []rdstypes.DBInstance{
+		{
+			DBInstanceIdentifier: aws.String("aurora-1"),
+			DBClusterIdentifier:  aws.String("cluster-1"),
+			AllocatedStorage:     aws.Int32(100),
+		},
+	}
+	clusters := []rdstypes.DBCluster{
+		{DBClusterIdentifier: aws.String("cluster-1"), AllocatedStorage: aws.Int32(200)},
+	}
+	if got := provisionedStorageGiB(instances, clusters); got != 200 {
+		t.Fatalf("provisioned storage = %v, want 200", got)
+	}
+}
+
+func TestEstimateBackupStorageGiBUsesPerSourceIncrementalModel(t *testing.T) {
+	snapshots := []rdstypes.DBSnapshot{
+		{
+			DBInstanceIdentifier: aws.String("db-1"),
+			AllocatedStorage:     aws.Int32(100),
+			SnapshotType:         aws.String("automated"),
+		},
+		{
+			DBInstanceIdentifier: aws.String("db-1"),
+			AllocatedStorage:     aws.Int32(100),
+			SnapshotType:         aws.String("automated"),
+		},
+		{
+			DBInstanceIdentifier: aws.String("db-1"),
+			AllocatedStorage:     aws.Int32(100),
+			SnapshotType:         aws.String("manual"),
+		},
+	}
+	if got := estimateBackupStorageGiB(snapshots, nil); got != 200 {
+		t.Fatalf("backup estimate = %v, want 200", got)
+	}
 }
 
 func (f *fakeRDS) DescribeDBClusterSnapshots(

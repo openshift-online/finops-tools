@@ -62,6 +62,22 @@ type rdsClientWithErr struct {
 	err error
 }
 
+func (c *rdsClientWithErr) DescribeDBInstances(
+	_ context.Context,
+	_ *rds.DescribeDBInstancesInput,
+	_ ...func(*rds.Options),
+) (*rds.DescribeDBInstancesOutput, error) {
+	return nil, c.err
+}
+
+func (c *rdsClientWithErr) DescribeDBClusters(
+	_ context.Context,
+	_ *rds.DescribeDBClustersInput,
+	_ ...func(*rds.Options),
+) (*rds.DescribeDBClustersOutput, error) {
+	return nil, c.err
+}
+
 func (c *rdsClientWithErr) DescribeDBSnapshots(
 	_ context.Context,
 	_ *rds.DescribeDBSnapshotsInput,

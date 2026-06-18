@@ -38,7 +38,7 @@ type ebsLister interface {
 		region, accountID string,
 		cutoff time.Time,
 		minSizeGiB float64,
-	) ([]Record, error)
+	) ([]Record, float64, error)
 }
 
 type ec2EBSLister struct{}
@@ -49,7 +49,7 @@ func (ec2EBSLister) ListEBSSnapshots(
 	region, accountID string,
 	cutoff time.Time,
 	minSizeGiB float64,
-) ([]Record, error) {
+) ([]Record, float64, error) {
 	regionalCfg := cfg.Copy()
 	regionalCfg.Region = region
 	return listEBSSnapshotsWithClient(ctx, newEC2Client(regionalCfg), accountID, region, cutoff, minSizeGiB)
@@ -61,8 +61,8 @@ func listEBSSnapshotsWithClient(
 	accountID, region string,
 	cutoff time.Time,
 	minSizeGiB float64,
-) ([]Record, error) {
-	var records []Record
+) ([]Record, float64, error) {
+	var allSnapshots []ectypes.Snapshot
 	var token *string
 	for {
 		out, err := client.DescribeSnapshots(ctx, &ec2.DescribeSnapshotsInput{
@@ -70,20 +70,24 @@ func listEBSSnapshotsWithClient(
 			NextToken: token,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("describe ebs snapshots in %s: %w", region, err)
+			return nil, 0, fmt.Errorf("describe ebs snapshots in %s: %w", region, err)
 		}
-		for _, snap := range out.Snapshots {
-			rec, ok := ebsSnapshotRecord(snap, accountID, region, cutoff, minSizeGiB)
-			if ok {
-				records = append(records, rec)
-			}
-		}
+		allSnapshots = append(allSnapshots, out.Snapshots...)
 		if out.NextToken == nil || aws.ToString(out.NextToken) == "" {
 			break
 		}
 		token = out.NextToken
 	}
-	return records, nil
+
+	charges := computeEBSSnapshotCharges(allSnapshots)
+	var records []Record
+	for _, snap := range allSnapshots {
+		rec, ok := ebsSnapshotRecord(snap, accountID, region, cutoff, minSizeGiB, charges)
+		if ok {
+			records = append(records, rec)
+		}
+	}
+	return records, ebsRegionalMonthlyCostUSD(charges), nil
 }
 
 func ebsSnapshotRecord(
@@ -91,6 +95,7 @@ func ebsSnapshotRecord(
 	accountID, region string,
 	cutoff time.Time,
 	minSizeGiB float64,
+	charges map[string]ebsSnapshotCharge,
 ) (Record, bool) {
 	start := aws.ToTime(snap.StartTime)
 	if start.IsZero() || !start.Before(cutoff) {
@@ -100,7 +105,8 @@ func ebsSnapshotRecord(
 	if sizeGiB < minSizeGiB {
 		return Record{}, false
 	}
-	return Record{
+	tier := strings.TrimSpace(string(snap.StorageTier))
+	rec := Record{
 		AccountID:        accountID,
 		Region:           region,
 		Kind:             KindEBSSnapshot,
@@ -109,10 +115,13 @@ func ebsSnapshotRecord(
 		CreatedAt:        start.UTC(),
 		AgeDays:          ageDays(start),
 		SizeGiB:          sizeGiB,
-		StorageTier:      strings.TrimSpace(string(snap.StorageTier)),
+		StorageTier:      tier,
 		Description:      aws.ToString(snap.Description),
 		Tags:             tagMapFromEC2(snap.Tags),
-	}, true
+	}
+	charge, ok := charges[rec.ResourceID]
+	applyEBSChargeToRecord(&rec, charge, ok)
+	return rec, true
 }
 
 func tagMapFromEC2(tags []ectypes.Tag) map[string]string {

@@ -1,4 +1,4 @@
-// Package snapshot discovers stale AWS snapshot resources.
+// Package snapshot discovers stale AWS snapshot resources and estimates storage costs.
 package snapshot
 
 import (
@@ -13,9 +13,18 @@ import (
 type Kind string
 
 const (
-	KindEBSSnapshot        Kind = "ebs-snapshot"
-	KindRDSSnapshot        Kind = "rds-snapshot"
-	KindRDSClusterSnapshot Kind = "rds-cluster-snapshot"
+	KindEBSSnapshot         Kind = "ebs-snapshot"
+	KindRDSSnapshot         Kind = "rds-snapshot"
+	KindRDSClusterSnapshot  Kind = "rds-cluster-snapshot"
+)
+
+// CostBasis describes how estimated monthly cost was calculated.
+const (
+	CostBasisVolumeSizeEstimate = "volume_size_estimate"
+	CostBasisEBSIncrementalChain = "ebs_incremental_chain"
+	CostBasisEBSNoIncremental   = "ebs_no_incremental"
+	CostBasisRDSWithinFreeTier  = "rds_within_free_tier"
+	CostBasisRDSRegionalExcess  = "rds_regional_excess_share"
 )
 
 // DefaultOlderThanDays is the default --older-than-days value for snapshot list.
@@ -94,39 +103,49 @@ type Query struct {
 
 // Record is one old snapshot resource.
 type Record struct {
-	AccountID        string            `json:"account_id"`
-	Region           string            `json:"region"`
-	Kind             Kind              `json:"kind"`
-	ResourceID       string            `json:"resource_id"`
-	SourceResourceID string            `json:"source_resource_id"`
-	CreatedAt        time.Time         `json:"created_at"`
-	AgeDays          int               `json:"age_days"`
-	SizeGiB          float64           `json:"size_gib"`
-	StorageTier      string            `json:"storage_tier,omitempty"`
-	SnapshotType     string            `json:"snapshot_type,omitempty"`
-	Description      string            `json:"description,omitempty"`
-	Tags             map[string]string `json:"tags,omitempty"`
+	AccountID               string            `json:"account_id"`
+	Region                  string            `json:"region"`
+	Kind                    Kind              `json:"kind"`
+	ResourceID              string            `json:"resource_id"`
+	SourceResourceID        string            `json:"source_resource_id"`
+	CreatedAt               time.Time         `json:"created_at"`
+	AgeDays                 int               `json:"age_days"`
+	SizeGiB                 float64           `json:"size_gib"`
+	StorageTier             string            `json:"storage_tier,omitempty"`
+	SnapshotType            string            `json:"snapshot_type,omitempty"`
+	Description             string            `json:"description,omitempty"`
+	Tags                    map[string]string `json:"tags,omitempty"`
+	EstimatedMonthlyCostUSD float64           `json:"estimated_monthly_cost_usd"`
+	CostBasis               string            `json:"cost_basis"`
 }
 
 // KindSummary aggregates records by snapshot kind.
 type KindSummary struct {
-	Kind  Kind `json:"kind"`
-	Count int  `json:"count"`
+	Kind                    Kind    `json:"kind"`
+	Count                   int     `json:"count"`
+	EstimatedMonthlyCostUSD float64 `json:"estimated_monthly_cost_usd"`
 }
 
 // AccountSummary aggregates records by account.
 type AccountSummary struct {
-	AccountID string `json:"account_id"`
-	Count     int    `json:"count"`
+	AccountID               string  `json:"account_id"`
+	Count                   int     `json:"count"`
+	EstimatedMonthlyCostUSD float64 `json:"estimated_monthly_cost_usd"`
 }
 
 // Summary holds aggregate totals for a snapshot scan.
 type Summary struct {
-	TotalCount     int              `json:"total_count"`
-	OlderThanDays  int              `json:"older_than_days"`
-	ByKind         []KindSummary    `json:"by_kind"`
-	ByAccount      []AccountSummary `json:"by_account"`
-	SkippedRegions []RegionWarning  `json:"skipped_regions,omitempty"`
+	TotalCount              int              `json:"total_count"`
+	EstimatedMonthlyCostUSD float64          `json:"estimated_monthly_cost_usd"`
+	RDSBackupRegionalExcessGiB          float64                      `json:"rds_backup_regional_excess_gib,omitempty"`
+	RDSBackupEstimatedMonthlyRunRateUSD float64                      `json:"rds_backup_estimated_monthly_run_rate_usd,omitempty"`
+	EBSEstimatedMonthlyRunRateUSD       float64                      `json:"ebs_estimated_monthly_run_rate_usd,omitempty"`
+	BilledCosts                         []AccountBilledSnapshotCosts `json:"billed_costs,omitempty"`
+	OlderThanDays           int              `json:"older_than_days"`
+	ByKind                  []KindSummary    `json:"by_kind"`
+	ByAccount               []AccountSummary `json:"by_account"`
+	SkippedRegions          []RegionWarning  `json:"skipped_regions,omitempty"`
+	CostDisclaimer          string           `json:"cost_disclaimer"`
 }
 
 // Result is the output of Fetch.

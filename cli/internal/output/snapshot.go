@@ -36,7 +36,8 @@ func writeSnapshotCSV(w io.Writer, r snapshot.Result) error {
 
 	header := []string{
 		"account_id", "region", "kind", "resource_id", "source_resource_id",
-		"created_at", "age_days", "size_gib", "storage_tier", "snapshot_type", "description",
+		"created_at", "age_days", "size_gib", "storage_tier", "snapshot_type",
+		"estimated_monthly_cost_usd", "cost_basis", "description",
 	}
 	if err := cw.Write(header); err != nil {
 		return err
@@ -53,6 +54,8 @@ func writeSnapshotCSV(w io.Writer, r snapshot.Result) error {
 			strconv.FormatFloat(rec.SizeGiB, 'f', -1, 64),
 			sanitizeCSVField(rec.StorageTier),
 			sanitizeCSVField(rec.SnapshotType),
+			strconv.FormatFloat(rec.EstimatedMonthlyCostUSD, 'f', -1, 64),
+			sanitizeCSVField(rec.CostBasis),
 			sanitizeCSVField(rec.Description),
 		}
 		if err := cw.Write(row); err != nil {

@@ -30,9 +30,11 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	typeSet := kindSet(q.Types)
 
 	var (
-		mu       sync.Mutex
-		records  []Record
-		warnings []RegionWarning
+		mu          sync.Mutex
+		records     []Record
+		warnings    []RegionWarning
+		rdsContexts []RDSRegionContext
+		ebsRunRate  float64
 	)
 	for i, target := range q.Targets {
 		accountID := strings.TrimSpace(target.AccountID)
@@ -46,18 +48,20 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 			return Result{}, fmt.Errorf("%s: list regions: %w", accountID, err)
 		}
 
-		accountRecords, regionWarnings, err := scanAccountRegions(ctx, q, target, accountID, regions, cutoff, typeSet)
+		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, target, accountID, regions, cutoff, typeSet)
 		if err != nil {
 			return Result{}, err
 		}
 		mu.Lock()
 		records = append(records, accountRecords...)
 		warnings = append(warnings, regionWarnings...)
+		rdsContexts = append(rdsContexts, accountRDSContexts...)
+		ebsRunRate += accountEBSRunRate
 		mu.Unlock()
 	}
 
 	sortRecords(records)
-	summary := buildSummary(records, int(q.OlderThan/(24*time.Hour)))
+	summary := buildSummary(records, int(q.OlderThan/(24*time.Hour)), rdsContexts, ebsRunRate)
 	summary.SkippedRegions = sortRegionWarnings(warnings)
 	return Result{Records: records, Summary: summary}, nil
 }
@@ -100,14 +104,16 @@ func scanAccountRegions(
 	regions []string,
 	cutoff time.Time,
 	typeSet map[Kind]struct{},
-) ([]Record, []RegionWarning, error) {
+) ([]Record, []RDSRegionContext, float64, []RegionWarning, error) {
 	sem := make(chan struct{}, defaultRegionConcurrency)
 	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		records  []Record
-		warnings []RegionWarning
-		scanErr  error
+		wg          sync.WaitGroup
+		mu          sync.Mutex
+		records     []Record
+		rdsContexts []RDSRegionContext
+		ebsRunRate  float64
+		warnings    []RegionWarning
+		scanErr     error
 	)
 	for _, region := range regions {
 		wg.Add(1)
@@ -117,7 +123,7 @@ func scanAccountRegions(
 			defer func() { <-sem }()
 
 			q.reportProgress(fmt.Sprintf("Scanning account %s, region %s…", accountID, region))
-			regionRecords, err := scanRegion(ctx, q, target, accountID, region, cutoff, typeSet)
+			regionRecords, regionRDSContext, regionEBSRunRate, err := scanRegion(ctx, q, target, accountID, region, cutoff, typeSet)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -135,17 +141,21 @@ func scanAccountRegions(
 				return
 			}
 			records = append(records, regionRecords...)
+			if regionRDSContext != nil {
+				rdsContexts = append(rdsContexts, *regionRDSContext)
+			}
+			ebsRunRate += regionEBSRunRate
 		}(region)
 	}
 	wg.Wait()
 
 	if scanErr != nil {
-		return records, warnings, scanErr
+		return records, rdsContexts, ebsRunRate, warnings, scanErr
 	}
 	if len(regions) > 0 && len(warnings) == len(regions) {
-		return records, warnings, fmt.Errorf("%s: all %d region(s) failed; first: %s", accountID, len(regions), warnings[0].Message)
+		return records, rdsContexts, ebsRunRate, warnings, fmt.Errorf("%s: all %d region(s) failed; first: %s", accountID, len(regions), warnings[0].Message)
 	}
-	return records, warnings, nil
+	return records, rdsContexts, ebsRunRate, warnings, nil
 }
 
 func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
@@ -172,23 +182,34 @@ func scanRegion(
 	accountID, region string,
 	cutoff time.Time,
 	typeSet map[Kind]struct{},
-) ([]Record, error) {
+) ([]Record, *RDSRegionContext, float64, error) {
 	var records []Record
+	var regionRDSContext *RDSRegionContext
+	var ebsRunRate float64
 	if _, ok := typeSet[KindEBSSnapshot]; ok {
-		ebsRecords, err := q.ebsLister.ListEBSSnapshots(ctx, target.AWSConfig, region, accountID, cutoff, q.MinSizeGiB)
+		ebsRecords, regionalRunRate, err := q.ebsLister.ListEBSSnapshots(ctx, target.AWSConfig, region, accountID, cutoff, q.MinSizeGiB)
 		if err != nil {
-			return nil, err
+			return nil, nil, 0, err
 		}
 		records = append(records, ebsRecords...)
+		ebsRunRate += regionalRunRate
 	}
 	if typeSetHasRDS(typeSet) {
 		rdsRecords, err := q.rdsLister.ListRDSSnapshots(ctx, target.AWSConfig, region, accountID, cutoff, q.MinSizeGiB)
 		if err != nil {
-			return nil, err
+			return nil, nil, 0, err
 		}
-		records = append(records, filterRDSRecords(rdsRecords, typeSet)...)
+		rdsRecords = filterRDSRecords(rdsRecords, typeSet)
+		ctxData, err := q.rdsLister.GetRDSRegionContext(ctx, target.AWSConfig, region)
+		if err != nil {
+			ApplyRDSLegacyCosts(rdsRecords)
+		} else {
+			regionRDSContext = &ctxData
+			ApplyRDSRegionalCosts(rdsRecords, ctxData)
+		}
+		records = append(records, rdsRecords...)
 	}
-	return records, nil
+	return records, regionRDSContext, ebsRunRate, nil
 }
 
 func typeSetHasRDS(typeSet map[Kind]struct{}) bool {
@@ -209,26 +230,29 @@ func filterRDSRecords(records []Record, typeSet map[Kind]struct{}) []Record {
 
 func sortRecords(records []Record) {
 	sort.Slice(records, func(i, j int) bool {
+		if records[i].EstimatedMonthlyCostUSD != records[j].EstimatedMonthlyCostUSD {
+			return records[i].EstimatedMonthlyCostUSD > records[j].EstimatedMonthlyCostUSD
+		}
 		if records[i].AgeDays != records[j].AgeDays {
 			return records[i].AgeDays > records[j].AgeDays
-		}
-		if records[i].SizeGiB != records[j].SizeGiB {
-			return records[i].SizeGiB > records[j].SizeGiB
 		}
 		return records[i].ResourceID < records[j].ResourceID
 	})
 }
 
-func buildSummary(records []Record, olderThanDays int) Summary {
+func buildSummary(records []Record, olderThanDays int, rdsContexts []RDSRegionContext, ebsRunRateUSD float64) Summary {
 	byKind := make(map[Kind]*KindSummary)
 	byAccount := make(map[string]*AccountSummary)
+	var totalCost float64
 	for _, rec := range records {
+		totalCost += rec.EstimatedMonthlyCostUSD
 		ks := byKind[rec.Kind]
 		if ks == nil {
 			ks = &KindSummary{Kind: rec.Kind}
 			byKind[rec.Kind] = ks
 		}
 		ks.Count++
+		ks.EstimatedMonthlyCostUSD += rec.EstimatedMonthlyCostUSD
 
 		as := byAccount[rec.AccountID]
 		if as == nil {
@@ -236,6 +260,7 @@ func buildSummary(records []Record, olderThanDays int) Summary {
 			byAccount[rec.AccountID] = as
 		}
 		as.Count++
+		as.EstimatedMonthlyCostUSD += rec.EstimatedMonthlyCostUSD
 	}
 
 	kindSummaries := make([]KindSummary, 0, len(byKind))
@@ -243,8 +268,8 @@ func buildSummary(records []Record, olderThanDays int) Summary {
 		kindSummaries = append(kindSummaries, *ks)
 	}
 	sort.Slice(kindSummaries, func(i, j int) bool {
-		if kindSummaries[i].Count != kindSummaries[j].Count {
-			return kindSummaries[i].Count > kindSummaries[j].Count
+		if kindSummaries[i].EstimatedMonthlyCostUSD != kindSummaries[j].EstimatedMonthlyCostUSD {
+			return kindSummaries[i].EstimatedMonthlyCostUSD > kindSummaries[j].EstimatedMonthlyCostUSD
 		}
 		return kindSummaries[i].Kind < kindSummaries[j].Kind
 	})
@@ -254,17 +279,33 @@ func buildSummary(records []Record, olderThanDays int) Summary {
 		accountSummaries = append(accountSummaries, *as)
 	}
 	sort.Slice(accountSummaries, func(i, j int) bool {
-		if accountSummaries[i].Count != accountSummaries[j].Count {
-			return accountSummaries[i].Count > accountSummaries[j].Count
+		if accountSummaries[i].EstimatedMonthlyCostUSD != accountSummaries[j].EstimatedMonthlyCostUSD {
+			return accountSummaries[i].EstimatedMonthlyCostUSD > accountSummaries[j].EstimatedMonthlyCostUSD
 		}
 		return accountSummaries[i].AccountID < accountSummaries[j].AccountID
 	})
 
+	var rdsExcessGiB float64
+	var rdsRunRateUSD float64
+	for _, ctx := range rdsContexts {
+		excess := ctx.TotalBackupGiB - ctx.FreePoolGiB
+		if excess < 0 {
+			excess = 0
+		}
+		rdsExcessGiB += excess
+		rdsRunRateUSD += RDSMonthlyBackupRunRateUSD(excess)
+	}
+
 	return Summary{
-		TotalCount:    len(records),
-		OlderThanDays: olderThanDays,
-		ByKind:        kindSummaries,
-		ByAccount:     accountSummaries,
+		TotalCount:                          len(records),
+		EstimatedMonthlyCostUSD:             totalCost,
+		RDSBackupRegionalExcessGiB:          rdsExcessGiB,
+		RDSBackupEstimatedMonthlyRunRateUSD: rdsRunRateUSD,
+		EBSEstimatedMonthlyRunRateUSD:       ebsRunRateUSD,
+		OlderThanDays:                       olderThanDays,
+		ByKind:                              kindSummaries,
+		ByAccount:                           accountSummaries,
+		CostDisclaimer:                      "When Cost Explorer data is available, summary storage lines show actual billed spend for the account. $/MO allocates billed EBS cost to snapshots with incremental storage; — means no incremental blocks (deleting it alone may not reduce spend). RDS estimates are gross before per-instance credits.",
 	}
 }
 

@@ -4,9 +4,11 @@ package output
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/openshift-online/finops-tools/cli/internal/format"
 	"github.com/openshift-online/finops-tools/core/snapshot"
 )
 
@@ -21,16 +23,12 @@ func writeSnapshotPretty(w io.Writer, r snapshot.Result) error {
 	if len(r.Records) == 0 {
 		return nil
 	}
-	return writeSnapshotDetailTable(w, s, r.Records)
+	return writeSnapshotDetailTable(w, s, r.Summary, r.Records)
 }
 
 func writeSnapshotSummary(w io.Writer, s styler, r snapshot.Result) error {
-	lines := []struct{ label, value string }{
-		{
-			fmt.Sprintf("Snapshots (older than %d days)", r.Summary.OlderThanDays),
-			fmt.Sprintf("%d", r.Summary.TotalCount),
-		},
-	}
+	costCtx := newSnapshotCostContext(r.Summary)
+	lines := buildSnapshotSummaryLines(r.Summary, costCtx)
 	labelWidth := 0
 	for _, ln := range lines {
 		if len(ln.label) > labelWidth {
@@ -42,7 +40,11 @@ func writeSnapshotSummary(w io.Writer, s styler, r snapshot.Result) error {
 		if s.enabled {
 			label = s.dim(label)
 		}
-		if _, err := fmt.Fprintf(w, "  %-*s  %s\n", labelWidth, label+":", ln.value); err != nil {
+		value := ln.value
+		if ln.emphasize && s.enabled {
+			value = s.bold(s.yellow(value))
+		}
+		if _, err := fmt.Fprintf(w, "  %-*s  %s\n", labelWidth, label+":", value); err != nil {
 			return err
 		}
 	}
@@ -59,10 +61,24 @@ func writeSnapshotSummary(w io.Writer, s styler, r snapshot.Result) error {
 			return err
 		}
 		for _, ks := range r.Summary.ByKind {
-			line := fmt.Sprintf("  %-24s  %4d", ks.Kind, ks.Count)
+			kindCost := scaleEBSCost(ks.EstimatedMonthlyCostUSD, ks.Kind, costCtx)
+			line := fmt.Sprintf("  %-24s  %4d    %s", ks.Kind, ks.Count, format.FormatMoney(kindCost, "USD"))
 			if _, err := fmt.Fprintln(w, line); err != nil {
 				return err
 			}
+		}
+	}
+
+	if r.Summary.CostDisclaimer != "" {
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+		note := r.Summary.CostDisclaimer
+		if s.enabled {
+			note = s.dim(note)
+		}
+		if _, err := fmt.Fprintf(w, "  %s\n", note); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -96,7 +112,8 @@ func writeSnapshotRegionWarnings(w io.Writer, s styler, warnings []snapshot.Regi
 	return nil
 }
 
-func writeSnapshotDetailTable(w io.Writer, s styler, records []snapshot.Record) error {
+func writeSnapshotDetailTable(w io.Writer, s styler, summary snapshot.Summary, records []snapshot.Record) error {
+	costCtx := newSnapshotCostContext(summary)
 	if _, err := fmt.Fprintln(w); err != nil {
 		return err
 	}
@@ -117,6 +134,7 @@ func writeSnapshotDetailTable(w io.Writer, s styler, records []snapshot.Record) 
 		cell(s, s.bold, "SOURCE"),
 		cell(s, s.bold, "AGE"),
 		cell(s, s.bold, "SIZE"),
+		cell(s, s.bold, snapshotMonthlyCostColumnHeader(costCtx)),
 		cell(s, s.bold, "CREATED"),
 	})
 
@@ -133,6 +151,7 @@ func writeSnapshotDetailTable(w io.Writer, s styler, records []snapshot.Record) 
 			snapshotSourceLabel(rec),
 			fmt.Sprintf("%dd", rec.AgeDays),
 			fmt.Sprintf("%.0fGiB", rec.SizeGiB),
+			snapshotRecordMonthlyCost(rec, costCtx),
 			created,
 		})
 	}
@@ -156,4 +175,156 @@ func snapshotSourceLabel(rec snapshot.Record) string {
 		return rec.SourceResourceID
 	}
 	return "-"
+}
+
+func snapshotBillingPeriodLabel(period snapshot.BilledSnapshotPeriod) string {
+	start := strings.TrimSpace(period.StartDate)
+	if start == "" {
+		return "last complete month"
+	}
+	t, err := time.Parse("2006-01-02", start)
+	if err != nil {
+		return start
+	}
+	return t.Format("January 2006")
+}
+
+type snapshotSummaryLine struct {
+	label     string
+	value     string
+	emphasize bool
+}
+
+type snapshotCostContext struct {
+	billedEBS    float64
+	billedRDS    float64
+	billedPeriod string
+	ebsCEScale   float64
+}
+
+func newSnapshotCostContext(summary snapshot.Summary) snapshotCostContext {
+	ctx := snapshotCostContext{
+		billedEBS: sumBilledEBSSnapshotUSD(summary.BilledCosts),
+		billedRDS: sumBilledRDSBackupUSD(summary.BilledCosts),
+	}
+	if len(summary.BilledCosts) > 0 {
+		ctx.billedPeriod = snapshotBillingPeriodLabel(summary.BilledCosts[0].Period)
+	}
+	if ctx.billedEBS > 0 && summary.EBSEstimatedMonthlyRunRateUSD > 0 {
+		ctx.ebsCEScale = ctx.billedEBS / summary.EBSEstimatedMonthlyRunRateUSD
+	}
+	return ctx
+}
+
+func buildSnapshotSummaryLines(summary snapshot.Summary, ctx snapshotCostContext) []snapshotSummaryLine {
+	lines := []snapshotSummaryLine{{
+		label: fmt.Sprintf("Snapshots (older than %d days)", summary.OlderThanDays),
+		value: fmt.Sprintf("%d", summary.TotalCount),
+	}}
+
+	if ctx.billedEBS > 0 {
+		label := fmt.Sprintf("EBS snapshot storage (%s)", ctx.billedPeriod)
+		if len(summary.BilledCosts) > 1 {
+			label = "EBS snapshot storage, all accounts (" + ctx.billedPeriod + ")"
+		}
+		lines = append(lines, snapshotSummaryLine{
+			label:     label,
+			value:     format.FormatMoney(ctx.billedEBS, "USD"),
+			emphasize: true,
+		})
+	} else if summary.EBSEstimatedMonthlyRunRateUSD > 0 {
+		lines = append(lines, snapshotSummaryLine{
+			label: "EBS snapshot storage (estimated)",
+			value: format.FormatMoney(summary.EBSEstimatedMonthlyRunRateUSD, "USD"),
+		})
+	}
+
+	attributed := attributedListedSnapshotCostUSD(summary, ctx)
+	if attributed > 0 && shouldShowAttributedCost(attributed, ctx) {
+		lines = append(lines, snapshotSummaryLine{
+			label: "Estimated cost (listed snapshots only)",
+			value: format.FormatMoney(attributed, "USD"),
+		})
+	} else if ctx.billedEBS == 0 && summary.EstimatedMonthlyCostUSD > 0 {
+		lines = append(lines, snapshotSummaryLine{
+			label: "Estimated monthly cost (listed snapshots)",
+			value: format.FormatMoney(summary.EstimatedMonthlyCostUSD, "USD"),
+			emphasize: true,
+		})
+	}
+
+	if ctx.billedRDS > 0 {
+		label := fmt.Sprintf("RDS backup storage (%s)", ctx.billedPeriod)
+		if len(summary.BilledCosts) > 1 {
+			label = "RDS backup storage, all accounts (" + ctx.billedPeriod + ")"
+		}
+		lines = append(lines, snapshotSummaryLine{
+			label:     label,
+			value:     format.FormatMoney(ctx.billedRDS, "USD"),
+			emphasize: true,
+		})
+	} else if summary.RDSBackupEstimatedMonthlyRunRateUSD > 0 {
+		lines = append(lines, snapshotSummaryLine{
+			label: "RDS backup storage (estimated, gross)",
+			value: format.FormatMoney(summary.RDSBackupEstimatedMonthlyRunRateUSD, "USD"),
+		})
+	}
+
+	return lines
+}
+
+func attributedListedSnapshotCostUSD(summary snapshot.Summary, ctx snapshotCostContext) float64 {
+	if ctx.billedEBS > 0 && ctx.ebsCEScale > 0 && summary.RDSBackupEstimatedMonthlyRunRateUSD == 0 && summary.RDSBackupRegionalExcessGiB == 0 {
+		return summary.EstimatedMonthlyCostUSD * ctx.ebsCEScale
+	}
+	return summary.EstimatedMonthlyCostUSD
+}
+
+func shouldShowAttributedCost(attributed float64, ctx snapshotCostContext) bool {
+	if ctx.billedEBS <= 0 {
+		return false
+	}
+	// Hide when listed snapshots account for essentially all billed EBS storage.
+	return attributed < ctx.billedEBS*0.95
+}
+
+func sumBilledEBSSnapshotUSD(costs []snapshot.AccountBilledSnapshotCosts) float64 {
+	var total float64
+	for _, row := range costs {
+		total += row.EBSSnapshotUSD
+	}
+	return total
+}
+
+func sumBilledRDSBackupUSD(costs []snapshot.AccountBilledSnapshotCosts) float64 {
+	var total float64
+	for _, row := range costs {
+		total += row.RDSBackupUSD
+	}
+	return total
+}
+
+func snapshotMonthlyCostColumnHeader(ctx snapshotCostContext) string {
+	if ctx.ebsCEScale > 0 {
+		return "$/MO"
+	}
+	return "EST/MO"
+}
+
+func snapshotRecordMonthlyCost(rec snapshot.Record, ctx snapshotCostContext) string {
+	cost := rec.EstimatedMonthlyCostUSD
+	if rec.Kind == snapshot.KindEBSSnapshot {
+		cost = scaleEBSCost(cost, rec.Kind, ctx)
+		if cost <= 0 {
+			return "—"
+		}
+	}
+	return format.FormatMoney(cost, "USD")
+}
+
+func scaleEBSCost(apiCost float64, kind snapshot.Kind, ctx snapshotCostContext) float64 {
+	if kind != snapshot.KindEBSSnapshot || apiCost <= 0 || ctx.ebsCEScale <= 0 {
+		return apiCost
+	}
+	return apiCost * ctx.ebsCEScale
 }

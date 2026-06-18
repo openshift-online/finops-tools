@@ -561,7 +561,7 @@ finops report generate costs --payer rh-control --tag-key env --tag-value prod -
 
 ### Snapshot (AWS)
 
-Find **EBS and RDS snapshots** older than a cutoff. Account selection matches `finops cost get` (`--account`, `--account-alias`, `--ou`, `--tag-key` with `--payer`). Linked member accounts are scanned via role assumption from the payer.
+Find **EBS and RDS snapshots** older than a cutoff and estimate monthly storage cost. Account selection matches `finops cost get` (`--account`, `--account-alias`, `--ou`, `--tag-key` with `--payer`). Linked member accounts are scanned via role assumption from the payer.
 
 ```bash
 finops snapshot list --account-alias rh-control
@@ -581,6 +581,8 @@ finops snapshot list --account 333333333333 --payer rhc --older-than-days 90 --f
 | `--role` | Linked-account IAM role name (default: `defaults.aws.linked_role` in config) |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr |
+
+When Cost Explorer data is available, the summary shows **actual billed** EBS/RDS snapshot storage for the last complete calendar month (`EBS:SnapshotUsage`, `RDS:ChargedBackupUsage`). Per-snapshot **$/MO** allocates billed EBS cost to snapshots with incremental storage; **—** means no incremental blocks. Without CE data, summary falls back to API estimates. Payer credentials need `ce:GetCostAndUsage` with `LINKED_ACCOUNT` scope.
 
 ### Reports
 

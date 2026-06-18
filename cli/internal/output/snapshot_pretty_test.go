@@ -14,22 +14,26 @@ func TestWriteSnapshotListResultPretty(t *testing.T) {
 	r := snapshot.Result{
 		Records: []snapshot.Record{
 			{
-				AccountID:        "111111111111",
-				Region:           "us-east-1",
-				Kind:             snapshot.KindEBSSnapshot,
-				ResourceID:       "snap-abc",
-				SourceResourceID: "vol-1",
-				CreatedAt:        time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-				AgeDays:          400,
-				SizeGiB:          100,
+				AccountID:               "111111111111",
+				Region:                  "us-east-1",
+				Kind:                    snapshot.KindEBSSnapshot,
+				ResourceID:              "snap-abc",
+				SourceResourceID:        "vol-1",
+				CreatedAt:               time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+				AgeDays:                 400,
+				SizeGiB:                 100,
+				EstimatedMonthlyCostUSD: 5,
+				CostBasis:               snapshot.CostBasisVolumeSizeEstimate,
 			},
 		},
 		Summary: snapshot.Summary{
-			TotalCount:    1,
-			OlderThanDays: 365,
+			TotalCount:              1,
+			EstimatedMonthlyCostUSD: 5,
+			OlderThanDays:           365,
 			ByKind: []snapshot.KindSummary{
-				{Kind: snapshot.KindEBSSnapshot, Count: 1},
+				{Kind: snapshot.KindEBSSnapshot, Count: 1, EstimatedMonthlyCostUSD: 5},
 			},
+			CostDisclaimer: "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
 		},
 	}
 	if err := WriteSnapshotListResult(&buf, FormatPrettyPrint, r); err != nil {
@@ -41,17 +45,14 @@ func TestWriteSnapshotListResultPretty(t *testing.T) {
 		"ACCOUNT",
 		"REGION",
 		"SNAPSHOT ID",
+		"USD 5.00",
 		"ebs-snapshot",
 		"snap-abc",
 		"400d",
-		"100GiB",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\n%s", want, out)
 		}
-	}
-	if strings.Contains(out, "EST/MO") {
-		t.Errorf("output should not include cost column\n%s", out)
 	}
 }
 
@@ -71,13 +72,15 @@ func TestWriteSnapshotListResultCSV(t *testing.T) {
 	r := snapshot.Result{
 		Records: []snapshot.Record{
 			{
-				AccountID:  "111111111111",
-				Region:     "us-east-1",
-				Kind:       snapshot.KindEBSSnapshot,
-				ResourceID: "snap-abc",
-				CreatedAt:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-				AgeDays:    10,
-				SizeGiB:    1,
+				AccountID:               "111111111111",
+				Region:                  "us-east-1",
+				Kind:                    snapshot.KindEBSSnapshot,
+				ResourceID:              "snap-abc",
+				CreatedAt:               time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+				AgeDays:                 10,
+				SizeGiB:                 1,
+				EstimatedMonthlyCostUSD: 0.05,
+				CostBasis:               snapshot.CostBasisVolumeSizeEstimate,
 			},
 		},
 	}

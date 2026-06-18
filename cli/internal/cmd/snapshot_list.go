@@ -13,38 +13,44 @@ import (
 )
 
 var (
-	snapshotListAccount         string
-	snapshotListAccountAliases  string
-	snapshotListFormat          string
-	snapshotListMinSizeGiB      float64
-	snapshotListOlderThanDays   int
-	snapshotListOU              string
-	snapshotListOUDirect        bool
-	snapshotListPayer           string
-	snapshotListQuiet           bool
-	snapshotListRegions         string
-	snapshotListRole            string
-	snapshotListSkipOrgCache    bool
+	snapshotListAccount        string
+	snapshotListAccountAliases string
+	snapshotListFormat         string
+	snapshotListMinSizeGiB     float64
+	snapshotListOlderThanDays  int
+	snapshotListOU             string
+	snapshotListOUDirect       bool
+	snapshotListPayer          string
+	snapshotListQuiet          bool
+	snapshotListRegions        string
+	snapshotListRole           string
+	snapshotListSkipOrgCache   bool
 	snapshotListRefreshOrgCache bool
-	snapshotListTagKey          string
-	snapshotListTagValue        string
-	snapshotListTypes           string
-	snapshotListFetch           = snapshot.Fetch
+	snapshotListTagKey         string
+	snapshotListTagValue       string
+	snapshotListTypes          string
+	snapshotListFetch          = snapshot.Fetch
 )
 
 var snapshotListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List EBS and RDS snapshots older than a cutoff",
-	Long: `Discover EBS and RDS snapshots older than a cutoff.
+	Short: "List EBS and RDS snapshots with estimated storage costs",
+	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
 Account selection matches finops cost get: --account, --account-alias, --ou, or --tag-key with --payer.
 Linked member accounts are scanned using role assumption from the payer.
 
+Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
+When Cost Explorer data is available, summary shows actual billed EBS/RDS snapshot storage for the
+last complete calendar month. Per-snapshot $/MO allocates billed EBS cost across snapshots with
+incremental storage.
+
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions, ec2:DescribeSnapshots
-  rds:DescribeDBSnapshots, rds:DescribeDBClusterSnapshots
+  rds:DescribeDBInstances, rds:DescribeDBClusters, rds:DescribeDBSnapshots, rds:DescribeDBClusterSnapshots
 
-Payer credentials also need sts:AssumeRole into the configured linked-account role.
+Payer credentials also need sts:AssumeRole into the configured linked-account role and
+ce:GetCostAndUsage with LINKED_ACCOUNT scope for billed cost lines.
 
 Examples:
   finops snapshot list --account-alias rh-control
@@ -149,7 +155,10 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 	if len(targets) == 0 {
 		return output.WriteSnapshotListResult(cmd.OutOrStdout(), format, snapshot.Result{
-			Summary: snapshot.Summary{OlderThanDays: snapshotListOlderThanDays},
+			Summary: snapshot.Summary{
+				OlderThanDays:  snapshotListOlderThanDays,
+				CostDisclaimer: "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
+			},
 		})
 	}
 
@@ -183,6 +192,14 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	status.Step("Fetching billed snapshot costs from Cost Explorer…")
+	billed, err := fetchSnapshotBilledCosts(cmd.Context(), cfg, targets, awsFlags.CredentialsFile, time.Now().UTC())
+	if err != nil {
+		status.Step(fmt.Sprintf("Warning: billed snapshot costs unavailable: %v", err))
+	} else {
+		result.Summary.BilledCosts = billed
 	}
 
 	return output.WriteSnapshotListResult(cmd.OutOrStdout(), format, result)

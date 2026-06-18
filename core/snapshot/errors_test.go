@@ -22,9 +22,9 @@ func (f flakyEBSLister) ListEBSSnapshots(
 	region, accountID string,
 	_ time.Time,
 	_ float64,
-) ([]Record, error) {
+) ([]Record, float64, error) {
 	if err, ok := f.failRegions[region]; ok {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]Record, 0, len(f.records))
 	for _, rec := range f.records {
@@ -32,16 +32,17 @@ func (f flakyEBSLister) ListEBSSnapshots(
 			out = append(out, rec)
 		}
 	}
-	return out, nil
+	return out, 0, nil
 }
 
 func TestFetchContinuesWhenRegionFails(t *testing.T) {
 	timeoutErr := fmt.Errorf(`describe ebs snapshots in me-south-1: operation error EC2: DescribeSnapshots, exceeded maximum number of attempts, 3, request send failed, Post "https://ec2.me-south-1.amazonaws.com/": dial tcp 99.82.136.87:443: i/o timeout`)
 	ebs := Record{
-		AccountID:  "111111111111",
-		Region:     "us-east-1",
-		Kind:       KindEBSSnapshot,
-		ResourceID: "snap-old",
+		AccountID:               "111111111111",
+		Region:                  "us-east-1",
+		Kind:                    KindEBSSnapshot,
+		ResourceID:              "snap-old",
+		EstimatedMonthlyCostUSD: 5,
 	}
 
 	result, err := Fetch(context.Background(), Query{

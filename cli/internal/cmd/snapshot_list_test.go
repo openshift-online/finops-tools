@@ -9,8 +9,8 @@ import (
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
-	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/openshift-online/finops-tools/core/snapshot"
+	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
 )
 
@@ -68,10 +68,12 @@ func TestRunSnapshotListUsesFetchHook(t *testing.T) {
 	prevFetch := snapshotListFetch
 	prevPrepare := prepareSnapshotTargets
 	prevEnsure := ensureSnapshotCredentials
+	prevBilled := fetchSnapshotBilledCosts
 	t.Cleanup(func() {
 		snapshotListFetch = prevFetch
 		prepareSnapshotTargets = prevPrepare
 		ensureSnapshotCredentials = prevEnsure
+		fetchSnapshotBilledCosts = prevBilled
 		awsFlags.ConfigPath = ""
 	})
 
@@ -84,13 +86,18 @@ func TestRunSnapshotListUsesFetchHook(t *testing.T) {
 		}
 		return snapshot.Result{
 			Summary: snapshot.Summary{
-				TotalCount:    1,
-				OlderThanDays: 90,
+				TotalCount:              1,
+				EstimatedMonthlyCostUSD: 5,
+				OlderThanDays:           90,
+				CostDisclaimer:          "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
 			},
 		}, nil
 	}
 	ensureSnapshotCredentials = func(_ context.Context, _ *cobra.Command, _ configstore.File, _ []cost.AccountTarget, _, _, _ string) error {
 		return nil
+	}
+	fetchSnapshotBilledCosts = func(_ context.Context, _ configstore.File, _ []cost.AccountTarget, _ string, _ time.Time) ([]snapshot.AccountBilledSnapshotCosts, error) {
+		return nil, nil
 	}
 	prepareSnapshotTargets = func(_ context.Context, _ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ costStepper) ([]snapshot.AccountTarget, error) {
 		out := make([]snapshot.AccountTarget, 0, len(targets))
