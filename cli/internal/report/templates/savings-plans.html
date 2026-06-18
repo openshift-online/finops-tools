@@ -1,15 +1,242 @@
 {{ define "title" }}Savings Plans Report — {{ .AccountSummary }}{{ end }}
 
 {{ define "content" }}
-<header>
-  <h1>Savings Plans Report</h1>
-  <p class="meta">
-    <strong>Accounts:</strong><br>
-    {{ range .Accounts }}{{ .AccountName }}<br>{{ end }}
-    <strong>Period:</strong> {{ .StartDate }} — {{ .EndDate }}<br>
-    <strong>Generated:</strong> {{ .GeneratedAt }}
-  </p>
+<style>
+  .container { max-width: 1280px; }
+  .sp-header { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 1.5rem; }
+  .sp-header-icon {
+    width: 36px; height: 36px; border-radius: 8px; background: #e8f0fe;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    color: #1a73e8; font-size: 1.1rem;
+  }
+  .sp-header h1 { margin: 0 0 0.35rem; font-size: 1.65rem; color: #1a237e; }
+  .sp-header-meta { color: var(--muted); font-size: 0.92rem; margin: 0; }
+  .sp-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 960px) { .sp-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .sp-kpi-grid { grid-template-columns: 1fr; } }
+  .sp-kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+  }
+  .sp-kpi-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .sp-kpi-icon {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; font-size: 0.85rem;
+  }
+  .sp-kpi-icon-green { background: #e8f5e9; color: #2e7d32; }
+  .sp-kpi-icon-blue { background: #e8f0fe; color: #1a73e8; }
+  .sp-kpi-icon-purple { background: #f3e5f5; color: #7b1fa2; }
+  .sp-kpi-icon-yellow { background: #fff8e1; color: #f9a825; }
+  .sp-kpi-label { font-size: 0.82rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+  .sp-kpi-value { font-size: 1.75rem; font-weight: 700; margin: 0.15rem 0; line-height: 1.2; }
+  .sp-kpi-sub { font-size: 0.82rem; color: var(--muted); margin: 0; }
+  .sp-kpi-trend { font-size: 0.82rem; font-weight: 600; color: #2e7d32; margin-top: 0.25rem; }
+  .sp-main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.15fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 960px) { .sp-main-grid { grid-template-columns: 1fr; } }
+  .sp-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem 1.25rem;
+  }
+  .sp-panel h2 { margin: 0 0 0.25rem; font-size: 1.05rem; color: var(--text); }
+  .sp-panel-sub { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--muted); }
+  .sp-bubble-chart { width: 100%; height: auto; display: block; }
+  .sp-chart-grid { stroke: #e8eaed; stroke-width: 1; }
+  .sp-chart-ref { stroke: #9aa0a6; stroke-width: 1; stroke-dasharray: 4 3; }
+  .sp-chart-axis { fill: var(--muted); font-size: 10px; font-family: inherit; }
+  .sp-chart-axis-title { fill: var(--muted); font-size: 10px; font-weight: 600; font-family: inherit; letter-spacing: 0.04em; }
+  .sp-bubble-callout-bg { fill: rgba(255,255,255,0.96); stroke: #d0d7de; stroke-width: 0.5; }
+  .sp-bubble-leader { stroke: #9aa0a6; stroke-width: 1; stroke-dasharray: 3 2; }
+  .sp-bubble-label { font-size: 11px; font-weight: 700; font-family: inherit; pointer-events: none; }
+  .sp-bubble-sublabel { fill: var(--muted); font-size: 9px; font-family: inherit; pointer-events: none; }
+  .sp-legend { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); }
+  .sp-legend-item { display: flex; align-items: center; gap: 0.35rem; }
+  .sp-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .sp-perf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .sp-perf-table th {
+    text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border);
+    color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .sp-th-goal { font-weight: 400; text-transform: none; }
+  .sp-perf-table td { padding: 0.75rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .sp-perf-table tr:last-child td { border-bottom: none; }
+  .sp-account-cell { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+  .sp-account-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .sp-metric-cell { display: flex; align-items: center; gap: 0.5rem; }
+  .sp-ring { display: block; flex-shrink: 0; }
+  .sp-ring-value { fill: var(--text); font-size: 11px; font-weight: 700; font-family: inherit; }
+  .sp-status {
+    display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.1rem 0.45rem;
+    border-radius: 10px; white-space: nowrap;
+  }
+  .status-good { background: #e8f5e9; color: #2e7d32; }
+  .status-watch { background: #fff3e0; color: #ed6c02; }
+  .status-poor { background: #ffebee; color: #d32f2f; }
+  .sp-savings-cell { min-width: 140px; }
+  .sp-savings-amount { font-weight: 600; white-space: nowrap; margin-bottom: 0.3rem; }
+  .sp-savings-bar-wrap { height: 6px; background: #e8eaed; border-radius: 3px; overflow: hidden; }
+  .sp-savings-bar { height: 100%; border-radius: 3px; min-width: 2px; }
+  .sp-pct-cell { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+  .sp-donut { display: block; flex-shrink: 0; }
+  .sp-detail-divider {
+    margin: 2rem 0 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid var(--border);
+  }
+  .sp-detail-divider h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.15rem;
+    color: var(--accent);
+  }
+  .sp-detail-divider p { margin: 0; }
+  section.account-section h2 { color: var(--accent); }
+  section.account-section section h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+</style>
+
+<header class="sp-header">
+  <div class="sp-header-icon" aria-hidden="true">&#x1F4C8;</div>
+  <div>
+    <h1>Savings Plans Report</h1>
+    <p class="sp-header-meta">
+      {{ .StartDate }} — {{ .EndDate }} &nbsp;·&nbsp;
+      Accounts: {{ .AccountCount }} &nbsp;·&nbsp;
+      Generated: {{ .GeneratedAt }}
+    </p>
+  </div>
 </header>
+
+<section class="sp-kpi-grid">
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-green" aria-hidden="true">$</span>
+      <span class="sp-kpi-label">Total Savings</span>
+    </div>
+    <p class="sp-kpi-value">{{ if .TotalSavingsCompact }}{{ .TotalSavingsCompact }}{{ else }}—{{ end }}</p>
+    <p class="sp-kpi-sub">vs. On-Demand</p>
+    {{ if .TotalSavingsPctFormatted }}
+    <p class="sp-kpi-trend">{{ .TotalSavingsPctFormatted }} reduction</p>
+    {{ end }}
+  </div>
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-blue" aria-hidden="true">&#x25C9;</span>
+      <span class="sp-kpi-label">Avg Coverage</span>
+    </div>
+    <p class="sp-kpi-value">{{ if .AvgCoverageFormatted }}{{ .AvgCoverageFormatted }}{{ else }}—{{ end }}</p>
+    <p class="sp-kpi-sub">of eligible on-demand spend covered</p>
+    {{ if .AvgCoverageStatusHTML }}<p class="sp-kpi-sub">{{ .AvgCoverageStatusHTML }}</p>{{ end }}
+  </div>
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-purple" aria-hidden="true">&#x25CE;</span>
+      <span class="sp-kpi-label">Avg Utilization</span>
+    </div>
+    <p class="sp-kpi-value">{{ if .AvgUtilizationFormatted }}{{ .AvgUtilizationFormatted }}{{ else }}—{{ end }}</p>
+    <p class="sp-kpi-sub">of Savings Plans commitment used</p>
+    {{ if .AvgUtilizationStatusHTML }}<p class="sp-kpi-sub">{{ .AvgUtilizationStatusHTML }}</p>{{ end }}
+  </div>
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-yellow" aria-hidden="true">&#x2261;</span>
+      <span class="sp-kpi-label">Total On-Demand Spend</span>
+    </div>
+    <p class="sp-kpi-value">{{ if .TotalOnDemandCompact }}{{ .TotalOnDemandCompact }}{{ else }}—{{ end }}</p>
+    <p class="sp-kpi-sub">covered spend</p>
+  </div>
+</section>
+
+<div class="sp-main-grid">
+  <div class="sp-panel">
+    <h2>Coverage vs. Utilization</h2>
+    <p class="sp-panel-sub">Each bubble represents an account. Size = Total Savings.</p>
+    <div class="chart-wrap">
+      {{ .BubbleChartSVG }}
+    </div>
+    {{ if .AccountRows }}
+    <div class="sp-legend">
+      {{ range .AccountRows }}
+      <span class="sp-legend-item">
+        <span class="sp-legend-dot" style="background:{{ .Color }}"></span>
+        {{ .AccountName }}
+      </span>
+      {{ end }}
+    </div>
+    {{ end }}
+  </div>
+
+  <div class="sp-panel">
+    <h2>Performance &amp; Savings by Account</h2>
+    {{ if .AccountRows }}
+    <table class="sp-perf-table">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Coverage <span class="sp-th-goal">(Goal: ≥ 95%)</span></th>
+          <th>Utilization <span class="sp-th-goal">(Goal: 95–100%)</span></th>
+          <th>Total Savings</th>
+          <th>Savings vs. On-Demand</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .AccountRows }}
+        <tr>
+          <td>
+            <span class="sp-account-cell">
+              <span class="sp-account-dot" style="background:{{ .Color }}"></span>
+              {{ .AccountName }}
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              {{ .CoverageRingSVG }}
+              <span class="sp-status {{ .CoverageStatusClass }}">{{ .CoverageStatus }}</span>
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              {{ .UtilizationRingSVG }}
+              <span class="sp-status {{ .UtilizationStatusClass }}">{{ .UtilizationStatus }}</span>
+            </span>
+          </td>
+          <td class="sp-savings-cell">
+            <div class="sp-savings-amount">{{ .SavingsFormatted }}</div>
+            <div class="sp-savings-bar-wrap">
+              <div class="sp-savings-bar" style="width:{{ .SavingsBarWidthPct }}%;background:{{ .Color }}"></div>
+            </div>
+          </td>
+          <td>
+            <span class="sp-pct-cell">
+              {{ .SavingsDonutSVG }}
+              {{ .SavingsPctFormatted }}
+            </span>
+          </td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+    {{ else }}
+    <p class="meta">No account data available for this period.</p>
+    {{ end }}
+  </div>
+</div>
+
+<div class="sp-detail-divider">
+  <h2>Account Detail</h2>
+  <p class="meta">Monthly coverage, utilization, and savings by account.</p>
+</div>
 
 {{ range .Accounts }}{{ $acct := . }}
 <section class="account-section">
@@ -84,6 +311,42 @@
     </table>
     {{ else }}
     <p class="meta">No utilization data available for this period.</p>
+    {{ end }}
+  </section>
+
+  <section>
+    <h3>Savings</h3>
+    <p class="meta">Net savings from Savings Plans compared to on-demand pricing for covered usage</p>
+    {{ if .Savings }}
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Saved</th>
+          <th>Savings</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .Savings }}
+        <tr>
+          <td>{{ .Month }}</td>
+          <td>{{ .NetSavingsFormatted }}</td>
+          <td>{{ .PercentageFormatted }}</td>
+        </tr>
+        {{ end }}
+      </tbody>
+      {{ if .SavingsTotal.NetSavingsFormatted }}
+      <tfoot>
+        <tr>
+          <td><strong>Period total</strong></td>
+          <td><strong>{{ .SavingsTotal.NetSavingsFormatted }}</strong></td>
+          <td><strong>{{ .SavingsTotal.PercentageFormatted }}</strong></td>
+        </tr>
+      </tfoot>
+      {{ end }}
+    </table>
+    {{ else }}
+    <p class="meta">No savings data available for this period.</p>
     {{ end }}
   </section>
 </section>

@@ -1,0 +1,1001 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Savings Plans Report — Service Delivery Production Org, osd staging 1, osd staging 2</title>
+  <style>
+    :root {
+      --bg: #f6f8fa;
+      --card: #ffffff;
+      --text: #1f2328;
+      --muted: #656d76;
+      --border: #d0d7de;
+      --accent: #0969da;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { margin-bottom: 2rem; }
+    header h1 { margin: 0 0 0.5rem; font-size: 1.75rem; }
+    .meta { color: var(--muted); font-size: 0.95rem; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    section h2 {
+      margin: 0 0 1rem;
+      font-size: 1.15rem;
+      color: var(--accent);
+    }
+    .total-amount {
+      font-size: 2rem;
+      font-weight: 600;
+      margin: 0.25rem 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 600; }
+    td.amount, td.percent { text-align: right; white-space: nowrap; }
+    .chart-wrap { position: relative; min-height: 300px; overflow: visible; }
+    .daily-chart { width: 100%; height: auto; display: block; overflow: visible; }
+    .chart-grid { stroke: var(--border); stroke-width: 1; }
+    .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+    .chart-area { fill: rgba(9, 105, 218, 0.12); stroke: none; }
+    .chart-point { fill: var(--accent); stroke: #fff; stroke-width: 1; }
+    .chart-axis { fill: var(--muted); font-size: 11px; font-family: inherit; }
+    footer {
+      margin-top: 2rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+<style>
+  .container { max-width: 1280px; }
+  .sp-header { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 1.5rem; }
+  .sp-header-icon {
+    width: 36px; height: 36px; border-radius: 8px; background: #e8f0fe;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    color: #1a73e8; font-size: 1.1rem;
+  }
+  .sp-header h1 { margin: 0 0 0.35rem; font-size: 1.65rem; color: #1a237e; }
+  .sp-header-meta { color: var(--muted); font-size: 0.92rem; margin: 0; }
+  .sp-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 960px) { .sp-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .sp-kpi-grid { grid-template-columns: 1fr; } }
+  .sp-kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+  }
+  .sp-kpi-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .sp-kpi-icon {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; font-size: 0.85rem;
+  }
+  .sp-kpi-icon-green { background: #e8f5e9; color: #2e7d32; }
+  .sp-kpi-icon-blue { background: #e8f0fe; color: #1a73e8; }
+  .sp-kpi-icon-purple { background: #f3e5f5; color: #7b1fa2; }
+  .sp-kpi-icon-yellow { background: #fff8e1; color: #f9a825; }
+  .sp-kpi-label { font-size: 0.82rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+  .sp-kpi-value { font-size: 1.75rem; font-weight: 700; margin: 0.15rem 0; line-height: 1.2; }
+  .sp-kpi-sub { font-size: 0.82rem; color: var(--muted); margin: 0; }
+  .sp-kpi-trend { font-size: 0.82rem; font-weight: 600; color: #2e7d32; margin-top: 0.25rem; }
+  .sp-main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.15fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 960px) { .sp-main-grid { grid-template-columns: 1fr; } }
+  .sp-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem 1.25rem;
+  }
+  .sp-panel h2 { margin: 0 0 0.25rem; font-size: 1.05rem; color: var(--text); }
+  .sp-panel-sub { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--muted); }
+  .sp-bubble-chart { width: 100%; height: auto; display: block; }
+  .sp-chart-grid { stroke: #e8eaed; stroke-width: 1; }
+  .sp-chart-ref { stroke: #9aa0a6; stroke-width: 1; stroke-dasharray: 4 3; }
+  .sp-chart-axis { fill: var(--muted); font-size: 10px; font-family: inherit; }
+  .sp-chart-axis-title { fill: var(--muted); font-size: 10px; font-weight: 600; font-family: inherit; letter-spacing: 0.04em; }
+  .sp-bubble-callout-bg { fill: rgba(255,255,255,0.96); stroke: #d0d7de; stroke-width: 0.5; }
+  .sp-bubble-leader { stroke: #9aa0a6; stroke-width: 1; stroke-dasharray: 3 2; }
+  .sp-bubble-label { font-size: 11px; font-weight: 700; font-family: inherit; pointer-events: none; }
+  .sp-bubble-sublabel { fill: var(--muted); font-size: 9px; font-family: inherit; pointer-events: none; }
+  .sp-legend { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; margin-top: 0.5rem; font-size: 0.82rem; color: var(--muted); }
+  .sp-legend-item { display: flex; align-items: center; gap: 0.35rem; }
+  .sp-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .sp-perf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .sp-perf-table th {
+    text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border);
+    color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .sp-th-goal { font-weight: 400; text-transform: none; }
+  .sp-perf-table td { padding: 0.75rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .sp-perf-table tr:last-child td { border-bottom: none; }
+  .sp-account-cell { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+  .sp-account-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .sp-metric-cell { display: flex; align-items: center; gap: 0.5rem; }
+  .sp-ring { display: block; flex-shrink: 0; }
+  .sp-ring-value { fill: var(--text); font-size: 11px; font-weight: 700; font-family: inherit; }
+  .sp-status {
+    display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.1rem 0.45rem;
+    border-radius: 10px; white-space: nowrap;
+  }
+  .status-good { background: #e8f5e9; color: #2e7d32; }
+  .status-watch { background: #fff3e0; color: #ed6c02; }
+  .status-poor { background: #ffebee; color: #d32f2f; }
+  .sp-savings-cell { min-width: 140px; }
+  .sp-savings-amount { font-weight: 600; white-space: nowrap; margin-bottom: 0.3rem; }
+  .sp-savings-bar-wrap { height: 6px; background: #e8eaed; border-radius: 3px; overflow: hidden; }
+  .sp-savings-bar { height: 100%; border-radius: 3px; min-width: 2px; }
+  .sp-pct-cell { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+  .sp-donut { display: block; flex-shrink: 0; }
+  .sp-detail-divider {
+    margin: 2rem 0 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid var(--border);
+  }
+  .sp-detail-divider h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.15rem;
+    color: var(--accent);
+  }
+  .sp-detail-divider p { margin: 0; }
+  section.account-section h2 { color: var(--accent); }
+  section.account-section section h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+</style>
+
+<header class="sp-header">
+  <div class="sp-header-icon" aria-hidden="true">&#x1F4C8;</div>
+  <div>
+    <h1>Savings Plans Report</h1>
+    <p class="sp-header-meta">
+      2026-01-01 — 2026-06-21 &nbsp;·&nbsp;
+      Accounts: 3 &nbsp;·&nbsp;
+      Generated: 2026-06-22 09:43:56 UTC
+    </p>
+  </div>
+</header>
+
+<section class="sp-kpi-grid">
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-green" aria-hidden="true">$</span>
+      <span class="sp-kpi-label">Total Savings</span>
+    </div>
+    <p class="sp-kpi-value">$9.06M</p>
+    <p class="sp-kpi-sub">vs. On-Demand</p>
+    
+    <p class="sp-kpi-trend">44.4% reduction</p>
+    
+  </div>
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-blue" aria-hidden="true">&#x25C9;</span>
+      <span class="sp-kpi-label">Avg Coverage</span>
+    </div>
+    <p class="sp-kpi-value">95.2%</p>
+    <p class="sp-kpi-sub">of eligible on-demand spend covered</p>
+    <p class="sp-kpi-sub"><span style="color:#2e7d32">&#x2713; Good</span></p>
+  </div>
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-purple" aria-hidden="true">&#x25CE;</span>
+      <span class="sp-kpi-label">Avg Utilization</span>
+    </div>
+    <p class="sp-kpi-value">96.7%</p>
+    <p class="sp-kpi-sub">of Savings Plans commitment used</p>
+    <p class="sp-kpi-sub"><span style="color:#2e7d32">&#x2713; Good</span></p>
+  </div>
+  <div class="sp-kpi-card">
+    <div class="sp-kpi-head">
+      <span class="sp-kpi-icon sp-kpi-icon-yellow" aria-hidden="true">&#x2261;</span>
+      <span class="sp-kpi-label">Total On-Demand Spend</span>
+    </div>
+    <p class="sp-kpi-value">$20.41M</p>
+    <p class="sp-kpi-sub">covered spend</p>
+  </div>
+</section>
+
+<div class="sp-main-grid">
+  <div class="sp-panel">
+    <h2>Coverage vs. Utilization</h2>
+    <p class="sp-panel-sub">Each bubble represents an account. Size = Total Savings.</p>
+    <div class="chart-wrap">
+      <svg class="sp-bubble-chart" overflow="visible" viewBox="-16 -16 552 412" role="img" aria-label="Coverage vs utilization by account"><g transform="translate(0,0)"><rect x="441" y="28" width="55" height="75" fill="rgba(237,108,2,0.08)" rx="2"/><line class="sp-chart-grid" x1="56" y1="28" x2="56" y2="328"/><text class="sp-chart-axis" x="56" y="368" text-anchor="middle">60%</text><line class="sp-chart-grid" x1="166" y1="28" x2="166" y2="328"/><text class="sp-chart-axis" x="166" y="368" text-anchor="middle">70%</text><line class="sp-chart-grid" x1="276" y1="28" x2="276" y2="328"/><text class="sp-chart-axis" x="276" y="368" text-anchor="middle">80%</text><line class="sp-chart-grid" x1="386" y1="28" x2="386" y2="328"/><text class="sp-chart-axis" x="386" y="368" text-anchor="middle">90%</text><line class="sp-chart-grid" x1="496" y1="28" x2="496" y2="328"/><text class="sp-chart-axis" x="496" y="368" text-anchor="middle">100%</text><line class="sp-chart-grid" x1="56" y1="328" x2="496" y2="328"/><text class="sp-chart-axis" x="48" y="328" text-anchor="end" dominant-baseline="middle">80%</text><line class="sp-chart-grid" x1="56" y1="253" x2="496" y2="253"/><text class="sp-chart-axis" x="48" y="253" text-anchor="end" dominant-baseline="middle">85%</text><line class="sp-chart-grid" x1="56" y1="178" x2="496" y2="178"/><text class="sp-chart-axis" x="48" y="178" text-anchor="end" dominant-baseline="middle">90%</text><line class="sp-chart-grid" x1="56" y1="103" x2="496" y2="103"/><text class="sp-chart-axis" x="48" y="103" text-anchor="end" dominant-baseline="middle">95%</text><line class="sp-chart-grid" x1="56" y1="28" x2="496" y2="28"/><text class="sp-chart-axis" x="48" y="28" text-anchor="end" dominant-baseline="middle">100%</text><line class="sp-chart-ref" x1="441" y1="28" x2="441" y2="328"/><line class="sp-chart-ref" x1="56" y1="103" x2="496" y2="103"/><text class="sp-chart-axis-title" x="276" y="378" text-anchor="middle">COVERAGE</text><text class="sp-chart-axis-title" x="14" y="178" text-anchor="middle" transform="rotate(-90 14 178)">UTILIZATION</text><circle cx="445" cy="29" r="52.0" fill="#1a73e8" fill-opacity="0.82" stroke="#fff" stroke-width="2"><title>Service Delivery Production Org: 95.4% coverage, 99.9% utilization, $7.74M saved</title></circle><circle cx="439" cy="144" r="31.7" fill="#ed6c02" fill-opacity="0.82" stroke="#fff" stroke-width="2"><title>osd staging 1: 94.9% coverage, 92.3% utilization, $1.26M saved</title></circle><circle cx="239" cy="57" r="21.1" fill="#2e7d32" fill-opacity="0.82" stroke="#fff" stroke-width="2"><title>osd staging 2: 76.7% coverage, 98.0% utilization, $62.3K saved</title></circle><line class="sp-bubble-leader" x1="218.5" y1="52.1" x2="201.2" y2="48.0"/><rect class="sp-bubble-callout-bg" x="137.8" y="32.0" width="67.4" height="26.0" rx="4"/><text class="sp-bubble-label" x="201.2" y="42.0" text-anchor="end" fill="#2e7d32">Staging 2</text><text class="sp-bubble-sublabel" x="201.2" y="54.0" text-anchor="end">$62.3K</text><line class="sp-bubble-leader" x1="431.0" y1="113.3" x2="428.6" y2="104.2"/><rect class="sp-bubble-callout-bg" x="424.6" y="88.2" width="67.4" height="26.0" rx="4"/><text class="sp-bubble-label" x="428.6" y="98.2" text-anchor="start" fill="#ed6c02">Staging 1</text><text class="sp-bubble-sublabel" x="428.6" y="110.2" text-anchor="start">$1.26M</text><rect class="sp-bubble-callout-bg" x="418.2" y="32.0" width="73.8" height="26.0" rx="4"/><text class="sp-bubble-label" x="422.2" y="42.0" text-anchor="start" fill="#1a73e8">Production</text><text class="sp-bubble-sublabel" x="422.2" y="54.0" text-anchor="start">$7.74M</text></g></svg>
+    </div>
+    
+    <div class="sp-legend">
+      
+      <span class="sp-legend-item">
+        <span class="sp-legend-dot" style="background:#1a73e8"></span>
+        Service Delivery Production Org
+      </span>
+      
+      <span class="sp-legend-item">
+        <span class="sp-legend-dot" style="background:#ed6c02"></span>
+        osd staging 1
+      </span>
+      
+      <span class="sp-legend-item">
+        <span class="sp-legend-dot" style="background:#2e7d32"></span>
+        osd staging 2
+      </span>
+      
+    </div>
+    
+  </div>
+
+  <div class="sp-panel">
+    <h2>Performance &amp; Savings by Account</h2>
+    
+    <table class="sp-perf-table">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Coverage <span class="sp-th-goal">(Goal: ≥ 95%)</span></th>
+          <th>Utilization <span class="sp-th-goal">(Goal: 95–100%)</span></th>
+          <th>Total Savings</th>
+          <th>Savings vs. On-Demand</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>
+            <span class="sp-account-cell">
+              <span class="sp-account-dot" style="background:#1a73e8"></span>
+              Service Delivery Production Org
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              <svg class="sp-ring" width="72" height="72" viewBox="0 0 72 72" role="img" aria-hidden="true"><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#2e7d32" stroke-width="6" stroke-linecap="round" transform="rotate(-90 36.0 36.0)" stroke-dasharray="182.21" stroke-dashoffset="8.34"/><text class="sp-ring-value" x="36.0" y="36.0" text-anchor="middle" dominant-baseline="middle">95.4%</text></svg>
+              <span class="sp-status status-good">Good</span>
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              <svg class="sp-ring" width="72" height="72" viewBox="0 0 72 72" role="img" aria-hidden="true"><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#2e7d32" stroke-width="6" stroke-linecap="round" transform="rotate(-90 36.0 36.0)" stroke-dasharray="182.21" stroke-dashoffset="0.18"/><text class="sp-ring-value" x="36.0" y="36.0" text-anchor="middle" dominant-baseline="middle">99.9%</text></svg>
+              <span class="sp-status status-good">Good</span>
+            </span>
+          </td>
+          <td class="sp-savings-cell">
+            <div class="sp-savings-amount">USD 7,739,072.55</div>
+            <div class="sp-savings-bar-wrap">
+              <div class="sp-savings-bar" style="width:100%;background:#1a73e8"></div>
+            </div>
+          </td>
+          <td>
+            <span class="sp-pct-cell">
+              <svg class="sp-donut" width="36" height="36" viewBox="0 0 36 36" role="img" aria-hidden="true"><circle cx="18.0" cy="18.0" r="14.0" fill="none" stroke="#e8eaed" stroke-width="5"/><circle cx="18.0" cy="18.0" r="14.0" fill="none" stroke="#1a73e8" stroke-width="5" stroke-linecap="round" transform="rotate(-90 18.0 18.0)" stroke-dasharray="87.96" stroke-dashoffset="48.39"/></svg>
+              45.0%
+            </span>
+          </td>
+        </tr>
+        
+        <tr>
+          <td>
+            <span class="sp-account-cell">
+              <span class="sp-account-dot" style="background:#ed6c02"></span>
+              osd staging 1
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              <svg class="sp-ring" width="72" height="72" viewBox="0 0 72 72" role="img" aria-hidden="true"><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#ed6c02" stroke-width="6" stroke-linecap="round" transform="rotate(-90 36.0 36.0)" stroke-dasharray="182.21" stroke-dashoffset="9.33"/><text class="sp-ring-value" x="36.0" y="36.0" text-anchor="middle" dominant-baseline="middle">94.9%</text></svg>
+              <span class="sp-status status-watch">Watch</span>
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              <svg class="sp-ring" width="72" height="72" viewBox="0 0 72 72" role="img" aria-hidden="true"><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#ed6c02" stroke-width="6" stroke-linecap="round" transform="rotate(-90 36.0 36.0)" stroke-dasharray="182.21" stroke-dashoffset="14.10"/><text class="sp-ring-value" x="36.0" y="36.0" text-anchor="middle" dominant-baseline="middle">92.3%</text></svg>
+              <span class="sp-status status-watch">Watch</span>
+            </span>
+          </td>
+          <td class="sp-savings-cell">
+            <div class="sp-savings-amount">USD 1,258,983.63</div>
+            <div class="sp-savings-bar-wrap">
+              <div class="sp-savings-bar" style="width:16%;background:#ed6c02"></div>
+            </div>
+          </td>
+          <td>
+            <span class="sp-pct-cell">
+              <svg class="sp-donut" width="36" height="36" viewBox="0 0 36 36" role="img" aria-hidden="true"><circle cx="18.0" cy="18.0" r="14.0" fill="none" stroke="#e8eaed" stroke-width="5"/><circle cx="18.0" cy="18.0" r="14.0" fill="none" stroke="#ed6c02" stroke-width="5" stroke-linecap="round" transform="rotate(-90 18.0 18.0)" stroke-dasharray="87.96" stroke-dashoffset="50.99"/></svg>
+              42.0%
+            </span>
+          </td>
+        </tr>
+        
+        <tr>
+          <td>
+            <span class="sp-account-cell">
+              <span class="sp-account-dot" style="background:#2e7d32"></span>
+              osd staging 2
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              <svg class="sp-ring" width="72" height="72" viewBox="0 0 72 72" role="img" aria-hidden="true"><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#d32f2f" stroke-width="6" stroke-linecap="round" transform="rotate(-90 36.0 36.0)" stroke-dasharray="182.21" stroke-dashoffset="42.41"/><text class="sp-ring-value" x="36.0" y="36.0" text-anchor="middle" dominant-baseline="middle">76.7%</text></svg>
+              <span class="sp-status status-poor">Poor</span>
+            </span>
+          </td>
+          <td>
+            <span class="sp-metric-cell">
+              <svg class="sp-ring" width="72" height="72" viewBox="0 0 72 72" role="img" aria-hidden="true"><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="36.0" cy="36.0" r="29.0" fill="none" stroke="#2e7d32" stroke-width="6" stroke-linecap="round" transform="rotate(-90 36.0 36.0)" stroke-dasharray="182.21" stroke-dashoffset="3.57"/><text class="sp-ring-value" x="36.0" y="36.0" text-anchor="middle" dominant-baseline="middle">98.0%</text></svg>
+              <span class="sp-status status-good">Good</span>
+            </span>
+          </td>
+          <td class="sp-savings-cell">
+            <div class="sp-savings-amount">USD 62,345.38</div>
+            <div class="sp-savings-bar-wrap">
+              <div class="sp-savings-bar" style="width:4%;background:#2e7d32"></div>
+            </div>
+          </td>
+          <td>
+            <span class="sp-pct-cell">
+              <svg class="sp-donut" width="36" height="36" viewBox="0 0 36 36" role="img" aria-hidden="true"><circle cx="18.0" cy="18.0" r="14.0" fill="none" stroke="#e8eaed" stroke-width="5"/><circle cx="18.0" cy="18.0" r="14.0" fill="none" stroke="#2e7d32" stroke-width="5" stroke-linecap="round" transform="rotate(-90 18.0 18.0)" stroke-dasharray="87.96" stroke-dashoffset="61.34"/></svg>
+              30.3%
+            </span>
+          </td>
+        </tr>
+        
+      </tbody>
+    </table>
+    
+  </div>
+</div>
+
+<div class="sp-detail-divider">
+  <h2>Account Detail</h2>
+  <p class="meta">Monthly coverage, utilization, and savings by account.</p>
+</div>
+
+
+<section class="account-section">
+  <h2>Service Delivery Production Org</h2>
+
+  <section>
+    <h3>Coverage</h3>
+    <p class="meta">Percentage of eligible on-demand spend covered by Savings Plans</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Coverage</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>94.3%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>94.6%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>97.1%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>96.6%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>96.1%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>96.7%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>92.8%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>95.4%</strong></td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+
+  <section>
+    <h3>Utilization</h3>
+    <p class="meta">Percentage of purchased Savings Plans commitment that was used</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Utilization</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>100.0%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>100.0%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>99.7%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>100.0%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>99.9%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>100.0%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>99.9%</strong></td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+
+  <section>
+    <h3>Savings</h3>
+    <p class="meta">Net savings from Savings Plans compared to on-demand pricing for covered usage</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Saved</th>
+          <th>Savings</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>USD 1,210,049.75</td>
+          <td>43.5%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>USD 1,169,483.56</td>
+          <td>43.7%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>USD 1,421,963.80</td>
+          <td>44.9%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>USD 1,411,925.27</td>
+          <td>45.5%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>USD 1,528,896.92</td>
+          <td>45.9%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>USD 996,753.25</td>
+          <td>46.3%</td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period total</strong></td>
+          <td><strong>USD 7,739,072.55</strong></td>
+          <td><strong>45.0%</strong></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+</section>
+
+<section class="account-section">
+  <h2>osd staging 1</h2>
+
+  <section>
+    <h3>Coverage</h3>
+    <p class="meta">Percentage of eligible on-demand spend covered by Savings Plans</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Coverage</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>82.4%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>92.7%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>99.2%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>99.2%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>99.2%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>99.1%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>98.9%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>94.9%</strong></td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+
+  <section>
+    <h3>Utilization</h3>
+    <p class="meta">Percentage of purchased Savings Plans commitment that was used</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Utilization</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>100.0%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>96.9%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>88.4%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>89.2%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>91.2%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>87.8%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>92.3%</strong></td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+
+  <section>
+    <h3>Savings</h3>
+    <p class="meta">Net savings from Savings Plans compared to on-demand pricing for covered usage</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Saved</th>
+          <th>Savings</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>USD 207,666.23</td>
+          <td>42.4%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>USD 220,193.25</td>
+          <td>44.1%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>USD 225,460.07</td>
+          <td>40.9%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>USD 222,413.60</td>
+          <td>41.4%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>USD 239,645.05</td>
+          <td>42.4%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>USD 143,605.43</td>
+          <td>40.6%</td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period total</strong></td>
+          <td><strong>USD 1,258,983.63</strong></td>
+          <td><strong>42.0%</strong></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+</section>
+
+<section class="account-section">
+  <h2>osd staging 2</h2>
+
+  <section>
+    <h3>Coverage</h3>
+    <p class="meta">Percentage of eligible on-demand spend covered by Savings Plans</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Coverage</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>81.8%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>75.5%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>78.9%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>84.6%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>64.9%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>79.9%</td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>83.7%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>76.7%</strong></td>
+          <td><span style="color:#f59e0b">&#x26A0; Low</span></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+
+  <section>
+    <h3>Utilization</h3>
+    <p class="meta">Percentage of purchased Savings Plans commitment that was used</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Utilization</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>95.1%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>97.8%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>99.8%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>97.7%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>99.6%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>98.5%</td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>98.0%</strong></td>
+          <td><span style="color:#22c55e">&#x2713; Good</span></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+
+  <section>
+    <h3>Savings</h3>
+    <p class="meta">Net savings from Savings Plans compared to on-demand pricing for covered usage</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Saved</th>
+          <th>Savings</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td>2026-01</td>
+          <td>USD 10,035.40</td>
+          <td>27.8%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-02</td>
+          <td>USD 10,089.35</td>
+          <td>30.0%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-03</td>
+          <td>USD 11,977.29</td>
+          <td>31.5%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-04</td>
+          <td>USD 10,863.28</td>
+          <td>30.1%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-05</td>
+          <td>USD 11,954.27</td>
+          <td>31.5%</td>
+        </tr>
+        
+        <tr>
+          <td>2026-06 (through 21)</td>
+          <td>USD 7,425.79</td>
+          <td>30.7%</td>
+        </tr>
+        
+      </tbody>
+      
+      <tfoot>
+        <tr>
+          <td><strong>Period total</strong></td>
+          <td><strong>USD 62,345.38</strong></td>
+          <td><strong>30.3%</strong></td>
+        </tr>
+      </tfoot>
+      
+    </table>
+    
+  </section>
+</section>
+
+
+    <footer>Generated by finops-tools</footer>
+  </div>
+</body>
+</html>
+

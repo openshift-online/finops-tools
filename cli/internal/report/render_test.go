@@ -79,6 +79,11 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 					{Month: "2026-06", Percentage: 81.0},
 				},
 				UtilizationAverage: coresp.PeriodAverage{Percentage: 79.1, OK: true},
+				Savings: []coresp.MonthlySavings{
+					{Month: "2026-01", NetSavings: 10000, OnDemandCostEquivalent: 50000},
+					{Month: "2026-02", NetSavings: 5000, OnDemandCostEquivalent: 25000},
+				},
+				SavingsTotal: coresp.PeriodSavings{NetSavings: 15000, OnDemandCostEquivalent: 75000, OK: true},
 			},
 			{
 				AccountName: "Member One",
@@ -90,6 +95,10 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 					{Month: "2026-01", Percentage: 88.0},
 				},
 				UtilizationAverage: coresp.PeriodAverage{Percentage: 88.0, OK: true},
+				Savings: []coresp.MonthlySavings{
+					{Month: "2026-01", NetSavings: 250, OnDemandCostEquivalent: 1000},
+				},
+				SavingsTotal: coresp.PeriodSavings{NetSavings: 250, OnDemandCostEquivalent: 1000, OK: true},
 			},
 		},
 	})
@@ -101,8 +110,21 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 		"Savings Plans Report",
 		"RH Control Production",
 		"Member One",
+		"Total Savings",
+		"Avg Coverage",
+		"Avg Utilization",
+		"Coverage vs. Utilization",
+		"Performance &amp; Savings by Account",
+		"Account Detail",
 		"Coverage",
 		"Utilization",
+		"Savings",
+		"Period total",
+		"USD 10,000.00",
+		"USD 15,000.00",
+		"USD 250.00",
+		"20.0%",
+		"25.0%",
 		"2026-01 (from 15)",
 		"2026-03",
 		"2026-06 (through 8)",
@@ -113,19 +135,23 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 		"72.0%",
 		"88.0%",
 		"Period average",
+		`<svg class="sp-bubble-chart"`,
+		`<svg class="sp-ring"`,
 		"76.2%",
 		"79.1%",
+		"Watch",
+		"Poor",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q", want)
 		}
 	}
-	if !strings.Contains(out, "<strong>Period:</strong> 2026-01-15 — 2026-06-08") {
-		t.Errorf("period line should use full dates from Build(); got excerpt around Period:\n%s", excerptAround(out, "Period:"))
+	if !strings.Contains(out, "2026-01-15 — 2026-06-08") {
+		t.Errorf("period line should use full dates from Build(); got excerpt around Period:\n%s", excerptAround(out, "2026-01-15"))
 	}
 	for _, want := range []string{"Good", "Low", "Critical"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("output missing status %q", want)
+			t.Errorf("output missing detail status %q", want)
 		}
 	}
 }
@@ -150,6 +176,32 @@ func TestNewSavingsPlansReportView_linkedOmitsStatus(t *testing.T) {
 	}
 }
 
+func TestNewSavingsPlansReportView_dashboard(t *testing.T) {
+	view := NewSavingsPlansReportView(coresp.Report{
+		StartDate: "2026-01-01",
+		EndDate:   "2026-03-31",
+		Accounts: []coresp.AccountReport{{
+			AccountName:        "test",
+			CoverageAverage:    coresp.PeriodAverage{Percentage: 71.5, OK: true},
+			UtilizationAverage: coresp.PeriodAverage{Percentage: 82.0, OK: true},
+			SavingsTotal:       coresp.PeriodSavings{NetSavings: 1234.5, OnDemandCostEquivalent: 5000, OK: true},
+		}},
+	})
+	if len(view.AccountRows) != 1 {
+		t.Fatalf("AccountRows len = %d, want 1", len(view.AccountRows))
+	}
+	row := view.AccountRows[0]
+	if row.CoverageFormatted != "71.5%" {
+		t.Errorf("coverage = %q", row.CoverageFormatted)
+	}
+	if row.SavingsFormatted != "USD 1,234.50" {
+		t.Errorf("savings = %q", row.SavingsFormatted)
+	}
+	if row.CoverageStatus != "Poor" {
+		t.Errorf("coverage status = %q, want Poor", row.CoverageStatus)
+	}
+}
+
 func TestRenderSavingsPlansHTML_linkedOmitsStatusColumn(t *testing.T) {
 	var buf bytes.Buffer
 	err := RenderSavingsPlansHTML(&buf, coresp.Report{
@@ -159,6 +211,8 @@ func TestRenderSavingsPlansHTML_linkedOmitsStatusColumn(t *testing.T) {
 		Accounts: []coresp.AccountReport{{
 			AccountName: "Linked Member",
 			IsLinked:    true,
+			CoverageAverage: coresp.PeriodAverage{Percentage: 72.0, OK: true},
+			UtilizationAverage: coresp.PeriodAverage{Percentage: 88.0, OK: true},
 			Coverage: []coresp.MonthlyMetric{
 				{Month: "2026-01", Percentage: 72.0},
 			},
@@ -168,74 +222,84 @@ func TestRenderSavingsPlansHTML_linkedOmitsStatusColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
+	if !strings.Contains(out, "Linked Member") {
+		t.Fatal("output missing Linked Member")
+	}
+	if !strings.Contains(out, "Performance &amp; Savings by Account") {
+		t.Error("expected dashboard performance table")
+	}
 	linkedSection := accountSectionHTML(out, "Linked Member")
 	if linkedSection == "" {
-		t.Fatal("output missing Linked Member account section")
+		t.Fatal("output missing Linked Member account detail section")
 	}
 	if strings.Contains(linkedSection, "Critical") || strings.Contains(linkedSection, "Good") || strings.Contains(linkedSection, "Low") {
-		t.Errorf("linked account section should not include status labels; got:\n%s", linkedSection)
+		t.Errorf("linked account detail should not include status labels; got:\n%s", linkedSection)
 	}
 	if strings.Count(linkedSection, "<th>Status</th>") != 0 {
-		t.Errorf("linked account should not render Status column header; got:\n%s", linkedSection)
+		t.Errorf("linked account detail should not render Status column header; got:\n%s", linkedSection)
 	}
 }
 
-func TestNewSavingsPlansReportView_statusThresholds(t *testing.T) {
+func TestMetricsToView_statusThresholds(t *testing.T) {
+	coverage := metricsToView([]coresp.MonthlyMetric{
+		{Month: "2026-01", Percentage: 85.0},
+		{Month: "2026-02", Percentage: 65.0},
+		{Month: "2026-03", Percentage: 50.0},
+	}, "2026-01-01", "2026-03-31", coverageStatusHTML, true)
+	utilization := metricsToView([]coresp.MonthlyMetric{
+		{Month: "2026-01", Percentage: 92.0},
+		{Month: "2026-02", Percentage: 75.0},
+		{Month: "2026-03", Percentage: 55.0},
+	}, "2026-01-01", "2026-03-31", utilizationStatusHTML, true)
+
+	assertStatusLabel(t, coverage[0].StatusHTML, "Good")
+	assertStatusLabel(t, coverage[1].StatusHTML, "Low")
+	assertStatusLabel(t, coverage[2].StatusHTML, "Critical")
+	assertStatusLabel(t, utilization[0].StatusHTML, "Good")
+	assertStatusLabel(t, utilization[1].StatusHTML, "Low")
+	assertStatusLabel(t, utilization[2].StatusHTML, "Critical")
+}
+
+func TestPeriodAverageToView(t *testing.T) {
+	cov := periodAverageToView(coresp.PeriodAverage{Percentage: 71.5, OK: true}, coverageStatusHTML, true)
+	util := periodAverageToView(coresp.PeriodAverage{Percentage: 82.0, OK: true}, utilizationStatusHTML, true)
+	if cov.PercentageFormatted != "71.5%" {
+		t.Errorf("coverage average = %q, want 71.5%%", cov.PercentageFormatted)
+	}
+	if util.PercentageFormatted != "82.0%" {
+		t.Errorf("utilization average = %q, want 82.0%%", util.PercentageFormatted)
+	}
+	assertStatusLabel(t, cov.StatusHTML, "Low")
+	assertStatusLabel(t, util.StatusHTML, "Low")
+}
+
+func TestSavingsToView(t *testing.T) {
+	rows := savingsToView([]coresp.MonthlySavings{
+		{Month: "2026-01", NetSavings: 1234.5, OnDemandCostEquivalent: 5000},
+	}, "2026-01-01", "2026-03-31")
+	if rows[0].NetSavingsFormatted != "USD 1,234.50" {
+		t.Errorf("monthly savings = %q, want USD 1,234.50", rows[0].NetSavingsFormatted)
+	}
+	if rows[0].PercentageFormatted != "24.7%" {
+		t.Errorf("monthly savings pct = %q, want 24.7%%", rows[0].PercentageFormatted)
+	}
+	total := savingsTotalToView(coresp.PeriodSavings{NetSavings: 1234.5, OnDemandCostEquivalent: 5000, OK: true})
+	if total.NetSavingsFormatted != "USD 1,234.50" {
+		t.Errorf("period savings = %q, want USD 1,234.50", total.NetSavingsFormatted)
+	}
+}
+
+func TestNewSavingsPlansReportView_savingsEmpty(t *testing.T) {
 	view := NewSavingsPlansReportView(coresp.Report{
 		StartDate: "2026-01-01",
 		EndDate:   "2026-03-31",
 		Accounts: []coresp.AccountReport{{
 			AccountName: "test",
-			Coverage: []coresp.MonthlyMetric{
-				{Month: "2026-01", Percentage: 85.0},
-				{Month: "2026-02", Percentage: 65.0},
-				{Month: "2026-03", Percentage: 50.0},
-			},
-			Utilization: []coresp.MonthlyMetric{
-				{Month: "2026-01", Percentage: 92.0},
-				{Month: "2026-02", Percentage: 75.0},
-				{Month: "2026-03", Percentage: 55.0},
-			},
 		}},
 	})
-
-	acct := view.Accounts[0]
-	assertStatusLabel(t, acct.Coverage[0].StatusHTML, "Good")
-	assertStatusLabel(t, acct.Coverage[1].StatusHTML, "Low")
-	assertStatusLabel(t, acct.Coverage[2].StatusHTML, "Critical")
-	assertStatusLabel(t, acct.Utilization[0].StatusHTML, "Good")
-	assertStatusLabel(t, acct.Utilization[1].StatusHTML, "Low")
-	assertStatusLabel(t, acct.Utilization[2].StatusHTML, "Critical")
-}
-
-func TestNewSavingsPlansReportView_periodAverage(t *testing.T) {
-	view := NewSavingsPlansReportView(coresp.Report{
-		StartDate: "2026-01-01",
-		EndDate:   "2026-03-31",
-		Accounts: []coresp.AccountReport{{
-			AccountName: "test",
-			Coverage: []coresp.MonthlyMetric{
-				{Month: "2026-01", Percentage: 80.0},
-				{Month: "2026-02", Percentage: 60.0},
-			},
-			CoverageAverage: coresp.PeriodAverage{Percentage: 71.5, OK: true},
-			Utilization: []coresp.MonthlyMetric{
-				{Month: "2026-01", Percentage: 90.0},
-				{Month: "2026-02", Percentage: 70.0},
-			},
-			UtilizationAverage: coresp.PeriodAverage{Percentage: 82.0, OK: true},
-		}},
-	})
-
-	acct := view.Accounts[0]
-	if acct.CoverageAverage.PercentageFormatted != "71.5%" {
-		t.Errorf("coverage average = %q, want 71.5%%", acct.CoverageAverage.PercentageFormatted)
+	if view.TotalSavingsFormatted != "" {
+		t.Errorf("empty savings total = %q, want empty", view.TotalSavingsFormatted)
 	}
-	if acct.UtilizationAverage.PercentageFormatted != "82.0%" {
-		t.Errorf("utilization average = %q, want 82.0%%", acct.UtilizationAverage.PercentageFormatted)
-	}
-	assertStatusLabel(t, acct.CoverageAverage.StatusHTML, "Low")
-	assertStatusLabel(t, acct.UtilizationAverage.StatusHTML, "Low")
 }
 
 func TestNewSavingsPlansReportView_periodAverageEmpty(t *testing.T) {
@@ -246,12 +310,11 @@ func TestNewSavingsPlansReportView_periodAverageEmpty(t *testing.T) {
 			AccountName: "test",
 		}},
 	})
-	acct := view.Accounts[0]
-	if acct.CoverageAverage.PercentageFormatted != "" {
-		t.Errorf("empty coverage average = %q, want empty", acct.CoverageAverage.PercentageFormatted)
+	if view.AvgCoverageFormatted != "" {
+		t.Errorf("empty coverage average = %q, want empty", view.AvgCoverageFormatted)
 	}
-	if acct.UtilizationAverage.PercentageFormatted != "" {
-		t.Errorf("empty utilization average = %q, want empty", acct.UtilizationAverage.PercentageFormatted)
+	if view.AvgUtilizationFormatted != "" {
+		t.Errorf("empty utilization average = %q, want empty", view.AvgUtilizationFormatted)
 	}
 }
 

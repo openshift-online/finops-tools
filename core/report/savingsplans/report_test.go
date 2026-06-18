@@ -254,6 +254,57 @@ func TestBuildAccountWith_CoveragePagination(t *testing.T) {
 	}
 }
 
+func TestParsePeriodSavings(t *testing.T) {
+	total := parsePeriodSavings(periodUtilizationRespWithSavings("88.0", "1234.56", "5000.00"))
+	if !total.OK || total.NetSavings != 1234.56 || total.OnDemandCostEquivalent != 5000.0 {
+		t.Errorf("parsePeriodSavings = %+v, want net=1234.56 onDemand=5000", total)
+	}
+	if got, want := total.SavingsPercentage(), 24.6912; (got-want)*(got-want) > 0.0001 {
+		t.Errorf("SavingsPercentage = %f, want ~%f", got, want)
+	}
+	if parsePeriodSavings(nil).OK {
+		t.Error("expected empty period savings")
+	}
+}
+
+func TestParseSavingsMetrics(t *testing.T) {
+	input := []types.SavingsPlansUtilizationByTime{
+		{
+			TimePeriod:  &types.DateInterval{Start: aws.String("2026-02-01"), End: aws.String("2026-03-01")},
+			Utilization: &types.SavingsPlansUtilization{UtilizationPercentage: aws.String("90.0")},
+			Savings: &types.SavingsPlansSavings{
+				NetSavings:             aws.String("200.00"),
+				OnDemandCostEquivalent: aws.String("1000.00"),
+			},
+		},
+		{
+			TimePeriod:  &types.DateInterval{Start: aws.String("2026-01-01"), End: aws.String("2026-02-01")},
+			Utilization: &types.SavingsPlansUtilization{UtilizationPercentage: aws.String("85.0")},
+			Savings: &types.SavingsPlansSavings{
+				NetSavings:             aws.String("150.00"),
+				OnDemandCostEquivalent: aws.String("750.00"),
+			},
+		},
+	}
+
+	metrics := parseSavingsMetrics(input)
+	if len(metrics) != 2 {
+		t.Fatalf("expected 2 metrics, got %d", len(metrics))
+	}
+	if metrics[0].Month != "2026-01" || metrics[0].NetSavings != 150.0 {
+		t.Errorf("metrics[0] = %+v, want 2026-01 at 150", metrics[0])
+	}
+	if metrics[1].Month != "2026-02" || metrics[1].SavingsPercentage() != 20.0 {
+		t.Errorf("metrics[1] = %+v, want 2026-02 at 20%%", metrics[1])
+	}
+}
+
+func TestSavingsPercentage_ZeroOnDemand(t *testing.T) {
+	if got := (MonthlySavings{NetSavings: 100}).SavingsPercentage(); got != 0 {
+		t.Errorf("SavingsPercentage with zero on-demand = %f, want 0", got)
+	}
+}
+
 func TestBuildAccountWith_HappyPath(t *testing.T) {
 	fake := &fakeSavingsPlansClient{
 		coverageResp: &costexplorer.GetSavingsPlansCoverageOutput{
@@ -279,11 +330,15 @@ func TestBuildAccountWith_HappyPath(t *testing.T) {
 				{
 					TimePeriod:  &types.DateInterval{Start: aws.String("2026-01-01"), End: aws.String("2026-02-01")},
 					Utilization: &types.SavingsPlansUtilization{UtilizationPercentage: aws.String("85.5")},
+					Savings: &types.SavingsPlansSavings{
+						NetSavings:             aws.String("500.00"),
+						OnDemandCostEquivalent: aws.String("2000.00"),
+					},
 				},
 			},
 		},
 		utilizationPeriodByAccount: map[string]*costexplorer.GetSavingsPlansUtilizationOutput{
-			"": periodUtilizationResp("88.0"),
+			"": periodUtilizationRespWithSavings("88.0", "500.00", "2000.00"),
 		},
 	}
 
@@ -316,6 +371,12 @@ func TestBuildAccountWith_HappyPath(t *testing.T) {
 	if !metrics.UtilizationAverage.OK || metrics.UtilizationAverage.Percentage != 88.0 {
 		t.Errorf("UtilizationAverage = %+v, want 88.0 from AWS period query", metrics.UtilizationAverage)
 	}
+	if len(metrics.Savings) != 1 || metrics.Savings[0].NetSavings != 500.0 {
+		t.Errorf("Savings = %+v, want one month at 500", metrics.Savings)
+	}
+	if !metrics.SavingsTotal.OK || metrics.SavingsTotal.NetSavings != 500.0 {
+		t.Errorf("SavingsTotal = %+v, want 500 from AWS period query", metrics.SavingsTotal)
+	}
 }
 
 func TestParsePeriodCoverage(t *testing.T) {
@@ -333,7 +394,7 @@ func TestParsePeriodCoverage(t *testing.T) {
 }
 
 func TestParsePeriodUtilization(t *testing.T) {
-	avg := parsePeriodUtilization(periodUtilizationResp("93.4"))
+	avg := parsePeriodUtilization(periodUtilizationResp("93.4", nil))
 	if !avg.OK || avg.Percentage != 93.4 {
 		t.Errorf("parsePeriodUtilization = %+v, want 93.4", avg)
 	}
@@ -342,14 +403,22 @@ func TestParsePeriodUtilization(t *testing.T) {
 	}
 }
 
-func periodUtilizationResp(pct string) *costexplorer.GetSavingsPlansUtilizationOutput {
+func periodUtilizationResp(utilPct string, savings *types.SavingsPlansSavings) *costexplorer.GetSavingsPlansUtilizationOutput {
 	return &costexplorer.GetSavingsPlansUtilizationOutput{
 		Total: &types.SavingsPlansUtilizationAggregates{
 			Utilization: &types.SavingsPlansUtilization{
-				UtilizationPercentage: aws.String(pct),
+				UtilizationPercentage: aws.String(utilPct),
 			},
+			Savings: savings,
 		},
 	}
+}
+
+func periodUtilizationRespWithSavings(utilPct, netSavings, onDemand string) *costexplorer.GetSavingsPlansUtilizationOutput {
+	return periodUtilizationResp(utilPct, &types.SavingsPlansSavings{
+		NetSavings:             aws.String(netSavings),
+		OnDemandCostEquivalent: aws.String(onDemand),
+	})
 }
 
 func TestBuild_LinkedWithPayer_NoBorrowedUtilization(t *testing.T) {

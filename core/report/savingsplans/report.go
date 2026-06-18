@@ -45,6 +45,30 @@ type PeriodAverage struct {
 	OK         bool
 }
 
+// MonthlySavings holds net savings from Savings Plans for one calendar month.
+type MonthlySavings struct {
+	Month                  string  // YYYY-MM
+	NetSavings             float64 // absolute savings vs on-demand
+	OnDemandCostEquivalent float64
+}
+
+// SavingsPercentage returns net savings as a percentage of on-demand equivalent (0–100).
+func (s MonthlySavings) SavingsPercentage() float64 {
+	return savingsPercentage(s.NetSavings, s.OnDemandCostEquivalent)
+}
+
+// PeriodSavings is AWS-reported net savings for the full requested period.
+type PeriodSavings struct {
+	NetSavings             float64
+	OnDemandCostEquivalent float64
+	OK                     bool
+}
+
+// SavingsPercentage returns net savings as a percentage of on-demand equivalent (0–100).
+func (s PeriodSavings) SavingsPercentage() float64 {
+	return savingsPercentage(s.NetSavings, s.OnDemandCostEquivalent)
+}
+
 // AccountReport holds Savings Plans coverage and utilization for one account.
 type AccountReport struct {
 	AccountID            string
@@ -54,6 +78,8 @@ type AccountReport struct {
 	CoverageAverage      PeriodAverage
 	Utilization          []MonthlyMetric
 	UtilizationAverage   PeriodAverage
+	Savings              []MonthlySavings
+	SavingsTotal         PeriodSavings
 }
 
 // Report holds Savings Plans coverage and utilization ready for HTML rendering.
@@ -111,6 +137,8 @@ func buildWith(ctx context.Context, newClient ceClientFactory, accounts []cost.A
 			CoverageAverage:    metrics.CoverageAverage,
 			Utilization:        metrics.Utilization,
 			UtilizationAverage: metrics.UtilizationAverage,
+			Savings:            metrics.Savings,
+			SavingsTotal:       metrics.SavingsTotal,
 		})
 	}
 
@@ -127,6 +155,8 @@ type accountMetrics struct {
 	CoverageAverage    PeriodAverage
 	Utilization        []MonthlyMetric
 	UtilizationAverage PeriodAverage
+	Savings            []MonthlySavings
+	SavingsTotal       PeriodSavings
 }
 
 // buildAccountWith is the testable core for one account scope.
@@ -179,6 +209,7 @@ func buildAccountWith(
 		Filter:     filter,
 	})
 	var periodUtil PeriodAverage
+	var periodSavings PeriodSavings
 	if err != nil {
 		if !isDataUnavailable(err) {
 			return accountMetrics{}, fmt.Errorf("fetch SP period utilization: %w", err)
@@ -188,6 +219,7 @@ func buildAccountWith(
 			return accountMetrics{}, fmt.Errorf("nil response from GetSavingsPlansUtilization")
 		}
 		periodUtil = parsePeriodUtilization(periodUtilResp)
+		periodSavings = parsePeriodSavings(periodUtilResp)
 	}
 
 	return accountMetrics{
@@ -195,6 +227,8 @@ func buildAccountWith(
 		CoverageAverage:    parsePeriodCoverage(periodCoverages),
 		Utilization:        parseUtilizationMetrics(utils),
 		UtilizationAverage: periodUtil,
+		Savings:            parseSavingsMetrics(utils),
+		SavingsTotal:       periodSavings,
 	}, nil
 }
 
@@ -317,6 +351,55 @@ func parsePeriodUtilization(resp *costexplorer.GetSavingsPlansUtilizationOutput)
 		Percentage: parseFloatPtr(resp.Total.Utilization.UtilizationPercentage),
 		OK:         true,
 	}
+}
+
+func parsePeriodSavings(resp *costexplorer.GetSavingsPlansUtilizationOutput) PeriodSavings {
+	if resp == nil || resp.Total == nil || resp.Total.Savings == nil {
+		return PeriodSavings{}
+	}
+	return savingsFromData(resp.Total.Savings)
+}
+
+func parseSavingsMetrics(utils []types.SavingsPlansUtilizationByTime) []MonthlySavings {
+	metrics := make([]MonthlySavings, 0, len(utils))
+	for _, u := range utils {
+		if u.TimePeriod == nil || u.Savings == nil {
+			continue
+		}
+		s := savingsFromData(u.Savings)
+		if !s.OK {
+			continue
+		}
+		metrics = append(metrics, MonthlySavings{
+			Month:                  monthLabel(aws.ToString(u.TimePeriod.Start)),
+			NetSavings:             s.NetSavings,
+			OnDemandCostEquivalent: s.OnDemandCostEquivalent,
+		})
+	}
+	sortSavings(metrics)
+	return metrics
+}
+
+func savingsFromData(s *types.SavingsPlansSavings) PeriodSavings {
+	if s == nil {
+		return PeriodSavings{}
+	}
+	return PeriodSavings{
+		NetSavings:             parseFloatPtr(s.NetSavings),
+		OnDemandCostEquivalent: parseFloatPtr(s.OnDemandCostEquivalent),
+		OK:                     true,
+	}
+}
+
+func savingsPercentage(netSavings, onDemandEquivalent float64) float64 {
+	if onDemandEquivalent <= 0 {
+		return 0
+	}
+	return netSavings / onDemandEquivalent * 100
+}
+
+func sortSavings(m []MonthlySavings) {
+	sort.Slice(m, func(i, j int) bool { return m[i].Month < m[j].Month })
 }
 
 // parseUtilizationMetrics converts AWS SavingsPlansUtilizationsByTime to sorted MonthlyMetric slice.

@@ -8,8 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openshift-online/finops-tools/cli/internal/format"
 	coresp "github.com/openshift-online/finops-tools/core/report/savingsplans"
 )
+
+const savingsPlansCurrency = "USD"
 
 const savingsPlansTemplate = "savings-plans"
 
@@ -43,14 +46,48 @@ type SavingsPlansMetricAverage struct {
 	StatusHTML          template.HTML
 }
 
-// SavingsPlansAccountView is coverage and utilization for one account.
+// SavingsPlansSavingsView is one row in the savings table.
+type SavingsPlansSavingsView struct {
+	Month               string
+	NetSavingsFormatted string
+	PercentageFormatted string
+}
+
+// SavingsPlansSavingsTotal is AWS-reported net savings for the full period.
+type SavingsPlansSavingsTotal struct {
+	NetSavingsFormatted string
+	PercentageFormatted string
+}
+
+// SavingsPlansAccountView is coverage, utilization, and savings for one account.
 type SavingsPlansAccountView struct {
+	AccountName        string
+	IsLinked           bool
+	Coverage           []SavingsPlansMetricView
+	CoverageAverage    SavingsPlansMetricAverage
+	Utilization        []SavingsPlansMetricView
+	UtilizationAverage SavingsPlansMetricAverage
+	Savings            []SavingsPlansSavingsView
+	SavingsTotal       SavingsPlansSavingsTotal
+}
+
+// SavingsPlansDashboardAccountView is one row in the performance summary table.
+type SavingsPlansDashboardAccountView struct {
 	AccountName         string
-	IsLinked            bool
-	Coverage            []SavingsPlansMetricView
-	CoverageAverage     SavingsPlansMetricAverage
-	Utilization         []SavingsPlansMetricView
-	UtilizationAverage  SavingsPlansMetricAverage
+	Color               string
+	CoverageFormatted   string
+	CoverageRingSVG     template.HTML
+	CoverageStatus      string
+	CoverageStatusClass string
+	UtilizationFormatted string
+	UtilizationRingSVG  template.HTML
+	UtilizationStatus   string
+	UtilizationStatusClass string
+	SavingsFormatted    string
+	SavingsCompact      string
+	SavingsBarWidthPct  int
+	SavingsPctFormatted string
+	SavingsDonutSVG     template.HTML
 }
 
 // SavingsPlansReportView is the template context for savings-plans.html.
@@ -59,6 +96,20 @@ type SavingsPlansReportView struct {
 	AccountSummary string
 	StartDate      string
 	EndDate        string
+	AccountCount   int
+
+	TotalSavingsFormatted    string
+	TotalSavingsCompact      string
+	TotalSavingsPctFormatted string
+	AvgCoverageFormatted     string
+	AvgCoverageStatusHTML    template.HTML
+	AvgUtilizationFormatted  string
+	AvgUtilizationStatusHTML template.HTML
+	TotalOnDemandFormatted   string
+	TotalOnDemandCompact     string
+
+	BubbleChartSVG template.HTML
+	AccountRows    []SavingsPlansDashboardAccountView
 	Accounts       []SavingsPlansAccountView
 }
 
@@ -76,15 +127,191 @@ func NewSavingsPlansReportView(r coresp.Report) SavingsPlansReportView {
 			CoverageAverage:    periodAverageToView(acct.CoverageAverage, coverageStatusHTML, showStatus),
 			Utilization:        metricsToView(acct.Utilization, r.StartDate, r.EndDate, utilizationStatusHTML, showStatus),
 			UtilizationAverage: periodAverageToView(acct.UtilizationAverage, utilizationStatusHTML, showStatus),
+			Savings:            savingsToView(acct.Savings, r.StartDate, r.EndDate),
+			SavingsTotal:       savingsTotalToView(acct.SavingsTotal),
 		})
 	}
-	return SavingsPlansReportView{
+
+	view := SavingsPlansReportView{
 		GeneratedAt:    r.GeneratedAt.UTC().Format("2006-01-02 15:04:05 UTC"),
 		AccountSummary: strings.Join(names, ", "),
 		StartDate:      r.StartDate,
 		EndDate:        r.EndDate,
+		AccountCount:   len(r.Accounts),
 		Accounts:       accounts,
 	}
+	populateDashboard(&view, r.Accounts)
+	return view
+}
+
+func populateDashboard(view *SavingsPlansReportView, accounts []coresp.AccountReport) {
+	var (
+		totalSavings   float64
+		totalOnDemand  float64
+		coverageSum      float64
+		coverageWeight   float64
+		coverageOnDemand float64
+		coverageCount    int
+		utilSum        float64
+		utilCount      int
+	)
+
+	bubbles := make([]spBubblePoint, 0, len(accounts))
+	dashboardRows := make([]SavingsPlansDashboardAccountView, 0, len(accounts))
+	maxSavings := 0.0
+
+	for i, acct := range accounts {
+		color := spAccountColors[i%len(spAccountColors)]
+
+		covPct := 0.0
+		if acct.CoverageAverage.OK {
+			covPct = acct.CoverageAverage.Percentage
+			coverageSum += covPct
+			coverageCount++
+			if acct.SavingsTotal.OK && acct.SavingsTotal.OnDemandCostEquivalent > 0 {
+				onDemand := acct.SavingsTotal.OnDemandCostEquivalent
+				coverageWeight += covPct * onDemand
+				coverageOnDemand += onDemand
+			}
+		}
+
+		utilPct := 0.0
+		if acct.UtilizationAverage.OK {
+			utilPct = acct.UtilizationAverage.Percentage
+			utilSum += utilPct
+			utilCount++
+		}
+
+		savings := 0.0
+		onDemand := 0.0
+		savingsPct := 0.0
+		if acct.SavingsTotal.OK {
+			savings = acct.SavingsTotal.NetSavings
+			onDemand = acct.SavingsTotal.OnDemandCostEquivalent
+			savingsPct = acct.SavingsTotal.SavingsPercentage()
+			totalSavings += savings
+			totalOnDemand += onDemand
+			if savings > maxSavings {
+				maxSavings = savings
+			}
+		}
+
+		covStatus, covClass := dashboardCoverageStatus(covPct)
+		utilStatus, utilClass := dashboardUtilizationStatus(utilPct)
+
+		row := SavingsPlansDashboardAccountView{
+			AccountName:            acct.AccountName,
+			Color:                  color,
+			CoverageFormatted:      fmt.Sprintf("%.1f%%", covPct),
+			CoverageRingSVG:        template.HTML(spProgressRingSVG(covPct, covClass, 72)),
+			CoverageStatus:         covStatus,
+			CoverageStatusClass:    covClass,
+			UtilizationFormatted:   fmt.Sprintf("%.1f%%", utilPct),
+			UtilizationRingSVG:     template.HTML(spProgressRingSVG(utilPct, utilClass, 72)),
+			UtilizationStatus:      utilStatus,
+			UtilizationStatusClass: utilClass,
+			SavingsFormatted:       format.FormatMoney(savings, savingsPlansCurrency),
+			SavingsCompact:         formatCompactUSD(savings),
+			SavingsPctFormatted:    fmt.Sprintf("%.1f%%", savingsPct),
+			SavingsDonutSVG:        template.HTML(spSavingsDonutSVG(savingsPct, color, 36)),
+		}
+		dashboardRows = append(dashboardRows, row)
+
+		if acct.CoverageAverage.OK && acct.UtilizationAverage.OK {
+			bubbles = append(bubbles, spBubblePoint{
+				Label:          acct.AccountName,
+				Coverage:       covPct,
+				Utilization:    utilPct,
+				Savings:        savings,
+				SavingsCompact: formatCompactUSD(savings),
+				Color:          color,
+			})
+		}
+	}
+
+	for i := range dashboardRows {
+		if maxSavings > 0 && accounts[i].SavingsTotal.OK {
+			net := accounts[i].SavingsTotal.NetSavings
+			pct := 0
+			if net > 0 {
+				pct = int(net / maxSavings * 100)
+				if pct < 4 {
+					pct = 4
+				}
+			}
+			dashboardRows[i].SavingsBarWidthPct = pct
+		}
+	}
+
+	view.AccountRows = dashboardRows
+	view.BubbleChartSVG = template.HTML(spBubbleChartSVG(bubbles))
+
+	if totalSavings > 0 || totalOnDemand > 0 {
+		view.TotalSavingsFormatted = format.FormatMoney(totalSavings, savingsPlansCurrency)
+		view.TotalSavingsCompact = formatCompactUSD(totalSavings)
+		view.TotalOnDemandFormatted = format.FormatMoney(totalOnDemand, savingsPlansCurrency)
+		view.TotalOnDemandCompact = formatCompactUSD(totalOnDemand)
+		if totalOnDemand > 0 {
+			view.TotalSavingsPctFormatted = fmt.Sprintf("%.1f%%", totalSavings/totalOnDemand*100)
+		}
+	}
+
+	avgCov := 0.0
+	if coverageWeight > 0 && coverageOnDemand > 0 {
+		avgCov = coverageWeight / coverageOnDemand
+	} else if coverageCount > 0 {
+		avgCov = coverageSum / float64(coverageCount)
+	}
+	if coverageCount > 0 {
+		view.AvgCoverageFormatted = fmt.Sprintf("%.1f%%", avgCov)
+		view.AvgCoverageStatusHTML = dashboardStatusHTML(avgCov, true)
+	}
+
+	avgUtil := 0.0
+	if utilCount > 0 {
+		avgUtil = utilSum / float64(utilCount)
+		view.AvgUtilizationFormatted = fmt.Sprintf("%.1f%%", avgUtil)
+		view.AvgUtilizationStatusHTML = dashboardStatusHTML(avgUtil, false)
+	}
+}
+
+func dashboardCoverageStatus(pct float64) (label, class string) {
+	switch {
+	case pct >= 95:
+		return "Good", "status-good"
+	case pct >= 80:
+		return "Watch", "status-watch"
+	default:
+		return "Poor", "status-poor"
+	}
+}
+
+func dashboardUtilizationStatus(pct float64) (label, class string) {
+	switch {
+	case pct >= 95 && pct <= 100:
+		return "Good", "status-good"
+	case pct >= 70:
+		return "Watch", "status-watch"
+	default:
+		return "Poor", "status-poor"
+	}
+}
+
+func dashboardStatusHTML(pct float64, isCoverage bool) template.HTML {
+	var label, class string
+	if isCoverage {
+		label, class = dashboardCoverageStatus(pct)
+	} else {
+		label, class = dashboardUtilizationStatus(pct)
+	}
+	color := spStatusColor(class)
+	icon := "&#x2713;"
+	if class == "status-watch" {
+		icon = "&#x26A0;"
+	} else if class == "status-poor" {
+		icon = "&#x2717;"
+	}
+	return template.HTML(fmt.Sprintf(`<span style="color:%s">%s %s</span>`, color, icon, label))
 }
 
 func metricsToView(
@@ -124,6 +351,31 @@ func periodAverageToView(
 	return SavingsPlansMetricAverage{
 		PercentageFormatted: fmt.Sprintf("%.1f%%", avg.Percentage),
 		StatusHTML:          status,
+	}
+}
+
+func savingsToView(
+	savings []coresp.MonthlySavings,
+	rangeStart, rangeEnd string,
+) []SavingsPlansSavingsView {
+	rows := make([]SavingsPlansSavingsView, 0, len(savings))
+	for _, s := range savings {
+		rows = append(rows, SavingsPlansSavingsView{
+			Month:               monthDisplayLabel(s.Month, rangeStart, rangeEnd),
+			NetSavingsFormatted: format.FormatMoney(s.NetSavings, savingsPlansCurrency),
+			PercentageFormatted: fmt.Sprintf("%.1f%%", s.SavingsPercentage()),
+		})
+	}
+	return rows
+}
+
+func savingsTotalToView(total coresp.PeriodSavings) SavingsPlansSavingsTotal {
+	if !total.OK {
+		return SavingsPlansSavingsTotal{}
+	}
+	return SavingsPlansSavingsTotal{
+		NetSavingsFormatted: format.FormatMoney(total.NetSavings, savingsPlansCurrency),
+		PercentageFormatted: fmt.Sprintf("%.1f%%", total.SavingsPercentage()),
 	}
 }
 
