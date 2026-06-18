@@ -92,3 +92,41 @@ func TestWriteSnapshotListResultCSV(t *testing.T) {
 		t.Fatalf("csv row missing snapshot: %s", out)
 	}
 }
+
+func TestWriteSnapshotListResultCSVFormulaInjection(t *testing.T) {
+	var buf bytes.Buffer
+	r := snapshot.Result{
+		Records: []snapshot.Record{
+			{
+				AccountID:        "=cmd",
+				Region:           "+evil",
+				Kind:             snapshot.KindEBSSnapshot,
+				ResourceID:       "-snap",
+				SourceResourceID: "@src",
+				CreatedAt:        time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+				AgeDays:          1,
+				SizeGiB:          1,
+				StorageTier:      "=tier",
+				SnapshotType:     "+type",
+				Description:      "@desc",
+			},
+		},
+	}
+	if err := WriteSnapshotListResult(&buf, FormatCSV, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"'=cmd",
+		"'+evil",
+		"'-snap",
+		"'@src",
+		"'=tier",
+		"'+type",
+		"'@desc",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("csv missing escaped field %q\n%s", want, out)
+		}
+	}
+}

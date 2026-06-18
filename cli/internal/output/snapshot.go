@@ -33,7 +33,6 @@ func writeSnapshotJSON(w io.Writer, r snapshot.Result) error {
 
 func writeSnapshotCSV(w io.Writer, r snapshot.Result) error {
 	cw := csv.NewWriter(w)
-	defer cw.Flush()
 
 	header := []string{
 		"account_id", "region", "kind", "resource_id", "source_resource_id",
@@ -44,21 +43,22 @@ func writeSnapshotCSV(w io.Writer, r snapshot.Result) error {
 	}
 	for _, rec := range r.Records {
 		row := []string{
-			rec.AccountID,
-			rec.Region,
+			sanitizeCSVField(rec.AccountID),
+			sanitizeCSVField(rec.Region),
 			string(rec.Kind),
-			rec.ResourceID,
-			rec.SourceResourceID,
+			sanitizeCSVField(rec.ResourceID),
+			sanitizeCSVField(rec.SourceResourceID),
 			rec.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			strconv.Itoa(rec.AgeDays),
 			strconv.FormatFloat(rec.SizeGiB, 'f', -1, 64),
-			rec.StorageTier,
-			rec.SnapshotType,
-			rec.Description,
+			sanitizeCSVField(rec.StorageTier),
+			sanitizeCSVField(rec.SnapshotType),
+			sanitizeCSVField(rec.Description),
 		}
 		if err := cw.Write(row); err != nil {
 			return err
 		}
 	}
-	return nil
+	cw.Flush()
+	return cw.Error()
 }

@@ -189,7 +189,5 @@ func isRDSRegionUnsupported(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "invalidparametervalue") ||
-		strings.Contains(msg, "not available in this region") ||
-		strings.Contains(msg, "could not connect to the endpoint")
+	return strings.Contains(msg, "not available in this region")
 }

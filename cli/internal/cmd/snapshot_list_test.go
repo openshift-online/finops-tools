@@ -44,8 +44,10 @@ func TestSnapshotListPreRunRejectsUnknownType(t *testing.T) {
 	snapshotListAccountAliases = ""
 	snapshotListFormat = string(output.FormatPrettyPrint)
 	t.Cleanup(func() {
+		snapshotListOlderThanDays = snapshot.DefaultOlderThanDays
 		snapshotListTypes = "ebs,rds"
 		snapshotListAccount = ""
+		snapshotListFormat = string(output.FormatPrettyPrint)
 	})
 
 	cmd := snapshotListCmd
