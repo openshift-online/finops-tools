@@ -559,6 +559,29 @@ finops report generate costs --payer rh-control --tag-key env --tag-value prod -
 
 `pretty-print` uses colors and Unicode bars when stdout is a TTY. Set `NO_COLOR=1` to disable; `FORCE_COLOR=1` forces colors when piping to a capable viewer.
 
+### Snapshot (AWS)
+
+Find **EBS and RDS snapshots** older than a cutoff. Account selection matches `finops cost get` (`--account`, `--account-alias`, `--ou`, `--tag-key` with `--payer`). Linked member accounts are scanned via role assumption from the payer.
+
+```bash
+finops snapshot list --account-alias rh-control
+finops snapshot list --account-alias rh-control --older-than-days 365 --format json
+finops snapshot list --payer rh-control --tag-key organization
+finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs
+finops snapshot list --account 333333333333 --payer rhc --older-than-days 90 --format csv
+```
+
+| Flag | Description |
+|------|-------------|
+| `--older-than-days` | List snapshots older than this many days (default: `365`) |
+| `--types` | Snapshot types to scan: `ebs`, `rds`, or comma-separated (default: `ebs,rds`) |
+| `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
+| `--min-size-gib` | Skip snapshots smaller than this size in GiB (default: `0`) |
+| `--account` / `--account-alias` / `--ou` / `--tag-key` / `--payer` | Same account selection as `finops cost get` |
+| `--role` | Linked-account IAM role name (default: `defaults.aws.linked_role` in config) |
+| `--format` | `pretty-print` (default), `json`, or `csv` |
+| `--quiet` | Suppress progress messages on stderr |
+
 ### Reports
 
 Generate HTML reports from configured accounts. Templates use Go's **`html/template`**, embedded in the CLI binary under `cli/internal/report/templates/`.

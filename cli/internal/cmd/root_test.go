@@ -23,6 +23,7 @@ func TestRootHelpGroups(t *testing.T) {
 		"Setup & Extra:",
 		"cost",
 		"report",
+		"snapshot",
 		"config",
 		"account",
 		"demo",
