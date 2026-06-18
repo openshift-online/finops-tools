@@ -36,6 +36,15 @@
         </tr>
         {{ end }}
       </tbody>
+      {{ if .CoverageAverage.PercentageFormatted }}
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>{{ .CoverageAverage.PercentageFormatted }}</strong></td>
+          {{ if not $acct.IsLinked }}<td>{{ .CoverageAverage.StatusHTML }}</td>{{ end }}
+        </tr>
+      </tfoot>
+      {{ end }}
     </table>
     {{ else }}
     <p class="meta">No coverage data available for this period.</p>
@@ -63,6 +72,15 @@
         </tr>
         {{ end }}
       </tbody>
+      {{ if .UtilizationAverage.PercentageFormatted }}
+      <tfoot>
+        <tr>
+          <td><strong>Period average</strong></td>
+          <td><strong>{{ .UtilizationAverage.PercentageFormatted }}</strong></td>
+          {{ if not $acct.IsLinked }}<td>{{ .UtilizationAverage.StatusHTML }}</td>{{ end }}
+        </tr>
+      </tfoot>
+      {{ end }}
     </table>
     {{ else }}
     <p class="meta">No utilization data available for this period.</p>

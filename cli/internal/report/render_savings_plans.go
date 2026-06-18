@@ -37,12 +37,20 @@ type SavingsPlansMetricView struct {
 	StatusHTML          template.HTML
 }
 
+// SavingsPlansMetricAverage is AWS-reported coverage or utilization for the full period.
+type SavingsPlansMetricAverage struct {
+	PercentageFormatted string
+	StatusHTML          template.HTML
+}
+
 // SavingsPlansAccountView is coverage and utilization for one account.
 type SavingsPlansAccountView struct {
-	AccountName string
-	IsLinked    bool
-	Coverage    []SavingsPlansMetricView
-	Utilization []SavingsPlansMetricView
+	AccountName         string
+	IsLinked            bool
+	Coverage            []SavingsPlansMetricView
+	CoverageAverage     SavingsPlansMetricAverage
+	Utilization         []SavingsPlansMetricView
+	UtilizationAverage  SavingsPlansMetricAverage
 }
 
 // SavingsPlansReportView is the template context for savings-plans.html.
@@ -62,10 +70,12 @@ func NewSavingsPlansReportView(r coresp.Report) SavingsPlansReportView {
 		names = append(names, acct.AccountName)
 		showStatus := !acct.IsLinked
 		accounts = append(accounts, SavingsPlansAccountView{
-			AccountName: acct.AccountName,
-			IsLinked:    acct.IsLinked,
-			Coverage:    metricsToView(acct.Coverage, r.StartDate, r.EndDate, coverageStatusHTML, showStatus),
-			Utilization: metricsToView(acct.Utilization, r.StartDate, r.EndDate, utilizationStatusHTML, showStatus),
+			AccountName:        acct.AccountName,
+			IsLinked:           acct.IsLinked,
+			Coverage:           metricsToView(acct.Coverage, r.StartDate, r.EndDate, coverageStatusHTML, showStatus),
+			CoverageAverage:    periodAverageToView(acct.CoverageAverage, coverageStatusHTML, showStatus),
+			Utilization:        metricsToView(acct.Utilization, r.StartDate, r.EndDate, utilizationStatusHTML, showStatus),
+			UtilizationAverage: periodAverageToView(acct.UtilizationAverage, utilizationStatusHTML, showStatus),
 		})
 	}
 	return SavingsPlansReportView{
@@ -97,6 +107,24 @@ func metricsToView(
 		})
 	}
 	return rows
+}
+
+func periodAverageToView(
+	avg coresp.PeriodAverage,
+	statusFn func(float64) template.HTML,
+	showStatus bool,
+) SavingsPlansMetricAverage {
+	if !avg.OK {
+		return SavingsPlansMetricAverage{}
+	}
+	var status template.HTML
+	if showStatus {
+		status = statusFn(avg.Percentage)
+	}
+	return SavingsPlansMetricAverage{
+		PercentageFormatted: fmt.Sprintf("%.1f%%", avg.Percentage),
+		StatusHTML:          status,
+	}
 }
 
 // monthDisplayLabel annotates YYYY-MM when the report period only covers part of that month.

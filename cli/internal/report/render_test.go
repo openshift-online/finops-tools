@@ -72,20 +72,24 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 					{Month: "2026-03", Percentage: 70.0},
 					{Month: "2026-06", Percentage: 78.0},
 				},
+				CoverageAverage: coresp.PeriodAverage{Percentage: 76.2, OK: true},
 				Utilization: []coresp.MonthlyMetric{
 					{Month: "2026-01", Percentage: 92.0},
 					{Month: "2026-02", Percentage: 55.0},
 					{Month: "2026-06", Percentage: 81.0},
 				},
+				UtilizationAverage: coresp.PeriodAverage{Percentage: 79.1, OK: true},
 			},
 			{
 				AccountName: "Member One",
 				Coverage: []coresp.MonthlyMetric{
 					{Month: "2026-01", Percentage: 72.0},
 				},
+				CoverageAverage: coresp.PeriodAverage{Percentage: 72.0, OK: true},
 				Utilization: []coresp.MonthlyMetric{
 					{Month: "2026-01", Percentage: 88.0},
 				},
+				UtilizationAverage: coresp.PeriodAverage{Percentage: 88.0, OK: true},
 			},
 		},
 	})
@@ -108,6 +112,9 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 		"55.0%",
 		"72.0%",
 		"88.0%",
+		"Period average",
+		"76.2%",
+		"79.1%",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q", want)
@@ -199,6 +206,53 @@ func TestNewSavingsPlansReportView_statusThresholds(t *testing.T) {
 	assertStatusLabel(t, acct.Utilization[0].StatusHTML, "Good")
 	assertStatusLabel(t, acct.Utilization[1].StatusHTML, "Low")
 	assertStatusLabel(t, acct.Utilization[2].StatusHTML, "Critical")
+}
+
+func TestNewSavingsPlansReportView_periodAverage(t *testing.T) {
+	view := NewSavingsPlansReportView(coresp.Report{
+		StartDate: "2026-01-01",
+		EndDate:   "2026-03-31",
+		Accounts: []coresp.AccountReport{{
+			AccountName: "test",
+			Coverage: []coresp.MonthlyMetric{
+				{Month: "2026-01", Percentage: 80.0},
+				{Month: "2026-02", Percentage: 60.0},
+			},
+			CoverageAverage: coresp.PeriodAverage{Percentage: 71.5, OK: true},
+			Utilization: []coresp.MonthlyMetric{
+				{Month: "2026-01", Percentage: 90.0},
+				{Month: "2026-02", Percentage: 70.0},
+			},
+			UtilizationAverage: coresp.PeriodAverage{Percentage: 82.0, OK: true},
+		}},
+	})
+
+	acct := view.Accounts[0]
+	if acct.CoverageAverage.PercentageFormatted != "71.5%" {
+		t.Errorf("coverage average = %q, want 71.5%%", acct.CoverageAverage.PercentageFormatted)
+	}
+	if acct.UtilizationAverage.PercentageFormatted != "82.0%" {
+		t.Errorf("utilization average = %q, want 82.0%%", acct.UtilizationAverage.PercentageFormatted)
+	}
+	assertStatusLabel(t, acct.CoverageAverage.StatusHTML, "Low")
+	assertStatusLabel(t, acct.UtilizationAverage.StatusHTML, "Low")
+}
+
+func TestNewSavingsPlansReportView_periodAverageEmpty(t *testing.T) {
+	view := NewSavingsPlansReportView(coresp.Report{
+		StartDate: "2026-01-01",
+		EndDate:   "2026-03-31",
+		Accounts: []coresp.AccountReport{{
+			AccountName: "test",
+		}},
+	})
+	acct := view.Accounts[0]
+	if acct.CoverageAverage.PercentageFormatted != "" {
+		t.Errorf("empty coverage average = %q, want empty", acct.CoverageAverage.PercentageFormatted)
+	}
+	if acct.UtilizationAverage.PercentageFormatted != "" {
+		t.Errorf("empty utilization average = %q, want empty", acct.UtilizationAverage.PercentageFormatted)
+	}
 }
 
 func assertStatusLabel(t *testing.T, html template.HTML, want string) {

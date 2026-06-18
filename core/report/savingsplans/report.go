@@ -39,13 +39,21 @@ type MonthlyMetric struct {
 	Percentage float64 // 0–100
 }
 
+// PeriodAverage is AWS-reported coverage or utilization for the full requested period.
+type PeriodAverage struct {
+	Percentage float64 // 0–100
+	OK         bool
+}
+
 // AccountReport holds Savings Plans coverage and utilization for one account.
 type AccountReport struct {
-	AccountID   string
-	AccountName string
-	IsLinked    bool
-	Coverage    []MonthlyMetric
-	Utilization []MonthlyMetric
+	AccountID            string
+	AccountName          string
+	IsLinked             bool
+	Coverage             []MonthlyMetric
+	CoverageAverage      PeriodAverage
+	Utilization          []MonthlyMetric
+	UtilizationAverage   PeriodAverage
 }
 
 // Report holds Savings Plans coverage and utilization ready for HTML rendering.
@@ -91,16 +99,18 @@ func buildWith(ctx context.Context, newClient ceClientFactory, accounts []cost.A
 			ceClients[credID] = ce
 		}
 
-		coverage, utilization, err := buildAccountWith(ctx, ce, ceDR, acct)
+		metrics, err := buildAccountWith(ctx, ce, dr, ceDR, acct)
 		if err != nil {
 			return Report{}, fmt.Errorf("%s: %w", accountDisplayName(acct), err)
 		}
 		sections = append(sections, AccountReport{
-			AccountID:   acct.AccountID,
-			AccountName: accountDisplayName(acct),
-			IsLinked:    acct.IsLinked(),
-			Coverage:    coverage,
-			Utilization: utilization,
+			AccountID:          acct.AccountID,
+			AccountName:        accountDisplayName(acct),
+			IsLinked:           acct.IsLinked(),
+			Coverage:           metrics.Coverage,
+			CoverageAverage:    metrics.CoverageAverage,
+			Utilization:        metrics.Utilization,
+			UtilizationAverage: metrics.UtilizationAverage,
 		})
 	}
 
@@ -112,49 +122,87 @@ func buildWith(ctx context.Context, newClient ceClientFactory, accounts []cost.A
 	}, nil
 }
 
+type accountMetrics struct {
+	Coverage           []MonthlyMetric
+	CoverageAverage    PeriodAverage
+	Utilization        []MonthlyMetric
+	UtilizationAverage PeriodAverage
+}
+
 // buildAccountWith is the testable core for one account scope.
 func buildAccountWith(
 	ctx context.Context,
 	ce SavingsPlansAPI,
 	dr cost.DateRange,
+	ceDR cost.DateRange,
 	acct cost.AccountTarget,
-) ([]MonthlyMetric, []MonthlyMetric, error) {
-	ceDR := monthlyCERange(dr)
+) (accountMetrics, error) {
 	filter := linkedAccountFilter(acct)
-	interval := &types.DateInterval{
+	monthlyInterval := &types.DateInterval{
 		Start: aws.String(ceDR.Start.Format("2006-01-02")),
 		End:   aws.String(ceDR.End.Format("2006-01-02")),
 	}
+	periodInterval := &types.DateInterval{
+		Start: aws.String(dr.Start.Format("2006-01-02")),
+		End:   aws.String(dr.End.Format("2006-01-02")),
+	}
 
-	coverages, err := fetchSavingsPlansCoverage(ctx, ce, interval, filter)
+	coverages, err := fetchSavingsPlansCoverage(ctx, ce, monthlyInterval, types.GranularityMonthly, filter)
 	if err != nil {
-		return nil, nil, err
+		return accountMetrics{}, err
 	}
 
 	utilizationResp, err := ce.GetSavingsPlansUtilization(ctx, &costexplorer.GetSavingsPlansUtilizationInput{
-		TimePeriod:  interval,
+		TimePeriod:  monthlyInterval,
 		Granularity: types.GranularityMonthly,
 		Filter:      filter,
 	})
 	var utils []types.SavingsPlansUtilizationByTime
 	if err != nil {
 		if !isDataUnavailable(err) {
-			return nil, nil, fmt.Errorf("fetch SP utilization: %w", err)
+			return accountMetrics{}, fmt.Errorf("fetch SP utilization: %w", err)
 		}
 	} else {
 		if utilizationResp == nil {
-			return nil, nil, fmt.Errorf("nil response from GetSavingsPlansUtilization")
+			return accountMetrics{}, fmt.Errorf("nil response from GetSavingsPlansUtilization")
 		}
 		utils = utilizationResp.SavingsPlansUtilizationsByTime
 	}
 
-	return parseCoverageMetrics(coverages), parseUtilizationMetrics(utils), nil
+	periodCoverages, err := fetchSavingsPlansCoverage(ctx, ce, periodInterval, "", filter)
+	if err != nil {
+		return accountMetrics{}, err
+	}
+
+	periodUtilResp, err := ce.GetSavingsPlansUtilization(ctx, &costexplorer.GetSavingsPlansUtilizationInput{
+		TimePeriod: periodInterval,
+		Filter:     filter,
+	})
+	var periodUtil PeriodAverage
+	if err != nil {
+		if !isDataUnavailable(err) {
+			return accountMetrics{}, fmt.Errorf("fetch SP period utilization: %w", err)
+		}
+	} else {
+		if periodUtilResp == nil {
+			return accountMetrics{}, fmt.Errorf("nil response from GetSavingsPlansUtilization")
+		}
+		periodUtil = parsePeriodUtilization(periodUtilResp)
+	}
+
+	return accountMetrics{
+		Coverage:           parseCoverageMetrics(coverages),
+		CoverageAverage:    parsePeriodCoverage(periodCoverages),
+		Utilization:        parseUtilizationMetrics(utils),
+		UtilizationAverage: periodUtil,
+	}, nil
 }
 
 func fetchSavingsPlansCoverage(
 	ctx context.Context,
 	ce SavingsPlansAPI,
 	interval *types.DateInterval,
+	granularity types.Granularity,
 	filter *types.Expression,
 ) ([]types.SavingsPlansCoverage, error) {
 	var (
@@ -165,7 +213,7 @@ func fetchSavingsPlansCoverage(
 	for {
 		out, err := ce.GetSavingsPlansCoverage(ctx, &costexplorer.GetSavingsPlansCoverageInput{
 			TimePeriod:  interval,
-			Granularity: types.GranularityMonthly,
+			Granularity: granularity,
 			Filter:      filter,
 			NextToken:   token,
 		})
@@ -245,6 +293,30 @@ func parseCoverageMetrics(coverages []types.SavingsPlansCoverage) []MonthlyMetri
 	}
 	sortMetrics(metrics)
 	return metrics
+}
+
+func parsePeriodCoverage(coverages []types.SavingsPlansCoverage) PeriodAverage {
+	if len(coverages) == 0 {
+		return PeriodAverage{}
+	}
+	c := coverages[0]
+	if c.Coverage == nil {
+		return PeriodAverage{}
+	}
+	return PeriodAverage{
+		Percentage: parseFloatPtr(c.Coverage.CoveragePercentage),
+		OK:         true,
+	}
+}
+
+func parsePeriodUtilization(resp *costexplorer.GetSavingsPlansUtilizationOutput) PeriodAverage {
+	if resp == nil || resp.Total == nil || resp.Total.Utilization == nil {
+		return PeriodAverage{}
+	}
+	return PeriodAverage{
+		Percentage: parseFloatPtr(resp.Total.Utilization.UtilizationPercentage),
+		OK:         true,
+	}
 }
 
 // parseUtilizationMetrics converts AWS SavingsPlansUtilizationsByTime to sorted MonthlyMetric slice.

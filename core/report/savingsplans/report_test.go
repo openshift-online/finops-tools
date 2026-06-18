@@ -19,11 +19,14 @@ type fakeSavingsPlansClient struct {
 	coverageErr     error
 	utilizationErr  error
 
-	coverageByAccount         map[string]*costexplorer.GetSavingsPlansCoverageOutput
-	coveragePages             []*costexplorer.GetSavingsPlansCoverageOutput
-	coveragePageIdx           int
-	utilizationByAccount      map[string]*costexplorer.GetSavingsPlansUtilizationOutput
-	utilizationErrByAccount   map[string]error
+	coverageByAccount           map[string]*costexplorer.GetSavingsPlansCoverageOutput
+	coveragePeriodByAccount     map[string]*costexplorer.GetSavingsPlansCoverageOutput
+	coveragePages               []*costexplorer.GetSavingsPlansCoverageOutput
+	coveragePageIdx             int
+	utilizationByAccount        map[string]*costexplorer.GetSavingsPlansUtilizationOutput
+	utilizationPeriodByAccount  map[string]*costexplorer.GetSavingsPlansUtilizationOutput
+	utilizationErrByAccount     map[string]error
+	utilizationPeriodErrByAccount map[string]error
 }
 
 func (f *fakeSavingsPlansClient) GetSavingsPlansCoverage(
@@ -42,8 +45,17 @@ func (f *fakeSavingsPlansClient) GetSavingsPlansCoverage(
 		f.coveragePageIdx++
 		return resp, nil
 	}
+	acctKey := linkedAccountFromFilter(in.Filter)
+	if in.Granularity == "" {
+		if f.coveragePeriodByAccount != nil {
+			if resp, ok := f.coveragePeriodByAccount[acctKey]; ok {
+				return resp, nil
+			}
+		}
+		return &costexplorer.GetSavingsPlansCoverageOutput{}, nil
+	}
 	if f.coverageByAccount != nil {
-		if resp, ok := f.coverageByAccount[linkedAccountFromFilter(in.Filter)]; ok {
+		if resp, ok := f.coverageByAccount[acctKey]; ok {
 			return resp, nil
 		}
 	}
@@ -56,6 +68,19 @@ func (f *fakeSavingsPlansClient) GetSavingsPlansUtilization(
 	_ ...func(*costexplorer.Options),
 ) (*costexplorer.GetSavingsPlansUtilizationOutput, error) {
 	acctKey := linkedAccountFromFilter(in.Filter)
+	if in.Granularity == "" {
+		if f.utilizationPeriodErrByAccount != nil {
+			if err, ok := f.utilizationPeriodErrByAccount[acctKey]; ok {
+				return nil, err
+			}
+		}
+		if f.utilizationPeriodByAccount != nil {
+			if resp, ok := f.utilizationPeriodByAccount[acctKey]; ok {
+				return resp, nil
+			}
+		}
+		return &costexplorer.GetSavingsPlansUtilizationOutput{}, nil
+	}
 	if f.utilizationErrByAccount != nil {
 		if err, ok := f.utilizationErrByAccount[acctKey]; ok {
 			return nil, err
@@ -206,10 +231,12 @@ func TestBuildAccountWith_CoveragePagination(t *testing.T) {
 		End:   time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 	}
 
-	coverage, utilization, err := buildAccountWith(context.Background(), fake, dr, cost.AccountTarget{})
+	metrics, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), cost.AccountTarget{})
 	if err != nil {
 		t.Fatalf("buildAccountWith returned error: %v", err)
 	}
+	coverage := metrics.Coverage
+	utilization := metrics.Utilization
 	if len(utilization) != 0 {
 		t.Fatalf("Utilization len = %d, want 0", len(utilization))
 	}
@@ -237,6 +264,16 @@ func TestBuildAccountWith_HappyPath(t *testing.T) {
 				},
 			},
 		},
+		coveragePeriodByAccount: map[string]*costexplorer.GetSavingsPlansCoverageOutput{
+			"": {
+				SavingsPlansCoverages: []types.SavingsPlansCoverage{
+					{
+						TimePeriod: &types.DateInterval{Start: aws.String("2026-01-01"), End: aws.String("2026-02-01")},
+						Coverage:   &types.SavingsPlansCoverageData{CoveragePercentage: aws.String("74.5")},
+					},
+				},
+			},
+		},
 		utilizationResp: &costexplorer.GetSavingsPlansUtilizationOutput{
 			SavingsPlansUtilizationsByTime: []types.SavingsPlansUtilizationByTime{
 				{
@@ -245,6 +282,9 @@ func TestBuildAccountWith_HappyPath(t *testing.T) {
 				},
 			},
 		},
+		utilizationPeriodByAccount: map[string]*costexplorer.GetSavingsPlansUtilizationOutput{
+			"": periodUtilizationResp("88.0"),
+		},
 	}
 
 	dr := cost.DateRange{
@@ -252,10 +292,12 @@ func TestBuildAccountWith_HappyPath(t *testing.T) {
 		End:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
 	}
 
-	coverage, utilization, err := buildAccountWith(context.Background(), fake, dr, cost.AccountTarget{})
+	metrics, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), cost.AccountTarget{})
 	if err != nil {
 		t.Fatalf("buildAccountWith returned error: %v", err)
 	}
+	coverage := metrics.Coverage
+	utilization := metrics.Utilization
 	if len(coverage) != 1 {
 		t.Fatalf("Coverage len = %d, want 1", len(coverage))
 	}
@@ -267,6 +309,46 @@ func TestBuildAccountWith_HappyPath(t *testing.T) {
 	}
 	if utilization[0].Percentage != 85.5 {
 		t.Errorf("Utilization[0].Percentage = %f, want 85.5", utilization[0].Percentage)
+	}
+	if !metrics.CoverageAverage.OK || metrics.CoverageAverage.Percentage != 74.5 {
+		t.Errorf("CoverageAverage = %+v, want 74.5 from AWS period query", metrics.CoverageAverage)
+	}
+	if !metrics.UtilizationAverage.OK || metrics.UtilizationAverage.Percentage != 88.0 {
+		t.Errorf("UtilizationAverage = %+v, want 88.0 from AWS period query", metrics.UtilizationAverage)
+	}
+}
+
+func TestParsePeriodCoverage(t *testing.T) {
+	avg := parsePeriodCoverage([]types.SavingsPlansCoverage{
+		{
+			Coverage: &types.SavingsPlansCoverageData{CoveragePercentage: aws.String("91.2")},
+		},
+	})
+	if !avg.OK || avg.Percentage != 91.2 {
+		t.Errorf("parsePeriodCoverage = %+v, want 91.2", avg)
+	}
+	if parsePeriodCoverage(nil).OK {
+		t.Error("expected empty coverage period average")
+	}
+}
+
+func TestParsePeriodUtilization(t *testing.T) {
+	avg := parsePeriodUtilization(periodUtilizationResp("93.4"))
+	if !avg.OK || avg.Percentage != 93.4 {
+		t.Errorf("parsePeriodUtilization = %+v, want 93.4", avg)
+	}
+	if parsePeriodUtilization(nil).OK {
+		t.Error("expected empty utilization period average")
+	}
+}
+
+func periodUtilizationResp(pct string) *costexplorer.GetSavingsPlansUtilizationOutput {
+	return &costexplorer.GetSavingsPlansUtilizationOutput{
+		Total: &types.SavingsPlansUtilizationAggregates{
+			Utilization: &types.SavingsPlansUtilization{
+				UtilizationPercentage: aws.String(pct),
+			},
+		},
 	}
 }
 
@@ -449,10 +531,11 @@ func TestBuildAccountWith_CoverageAPIError(t *testing.T) {
 	fake := &fakeSavingsPlansClient{
 		coverageErr: fmt.Errorf("access denied"),
 	}
-	_, _, err := buildAccountWith(context.Background(), fake, cost.DateRange{
+	dr := cost.DateRange{
 		Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-	}, cost.AccountTarget{})
+	}
+	_, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), cost.AccountTarget{})
 	if err == nil {
 		t.Fatal("expected error from coverage API failure, got nil")
 	}
@@ -495,13 +578,16 @@ func TestBuildAccountWith_DataUnavailableUtilization(t *testing.T) {
 		utilizationErr: &types.DataUnavailableException{Message: aws.String("unavailable")},
 	}
 	linked := cost.AccountTarget{AccountID: "111111111111", PayerAccountID: "123456789012"}
-	coverage, utilization, err := buildAccountWith(context.Background(), fake, cost.DateRange{
+	dr := cost.DateRange{
 		Start: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-	}, linked)
+	}
+	metrics, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), linked)
 	if err != nil {
 		t.Fatalf("buildAccountWith returned error: %v", err)
 	}
+	coverage := metrics.Coverage
+	utilization := metrics.Utilization
 	if len(coverage) != 1 {
 		t.Fatalf("Coverage len = %d, want 1", len(coverage))
 	}
@@ -514,10 +600,11 @@ func TestBuildAccountWith_NilCoverageResponse(t *testing.T) {
 	fake := &fakeSavingsPlansClient{
 		coverageResp: nil,
 	}
-	_, _, err := buildAccountWith(context.Background(), fake, cost.DateRange{
+	dr := cost.DateRange{
 		Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-	}, cost.AccountTarget{})
+	}
+	_, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), cost.AccountTarget{})
 	if err == nil {
 		t.Fatal("expected error for nil coverage response, got nil")
 	}
@@ -528,10 +615,11 @@ func TestBuildAccountWith_NilUtilizationResponse(t *testing.T) {
 		coverageResp:    &costexplorer.GetSavingsPlansCoverageOutput{},
 		utilizationResp: nil,
 	}
-	_, _, err := buildAccountWith(context.Background(), fake, cost.DateRange{
+	dr := cost.DateRange{
 		Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-	}, cost.AccountTarget{})
+	}
+	_, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), cost.AccountTarget{})
 	if err == nil {
 		t.Fatal("expected error for nil utilization response, got nil")
 	}
@@ -542,10 +630,11 @@ func TestBuildAccountWith_UtilizationAPIError(t *testing.T) {
 		coverageResp:   &costexplorer.GetSavingsPlansCoverageOutput{},
 		utilizationErr: fmt.Errorf("throttled"),
 	}
-	_, _, err := buildAccountWith(context.Background(), fake, cost.DateRange{
+	dr := cost.DateRange{
 		Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-	}, cost.AccountTarget{})
+	}
+	_, err := buildAccountWith(context.Background(), fake, dr, monthlyCERange(dr), cost.AccountTarget{})
 	if err == nil {
 		t.Fatal("expected error from utilization API failure, got nil")
 	}
