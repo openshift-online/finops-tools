@@ -85,32 +85,43 @@ func (l *LazyService) Check(ctx context.Context) error {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
 	defer cancel()
 
-	l.mu.Lock()
-	switch {
-	case l.svc != nil:
-		db := l.db
-		l.mu.Unlock()
-		if err := coresnowflake.Ping(ctxWithTimeout, db); err == nil {
-			return nil
-		}
+	for {
 		l.mu.Lock()
 		if l.svc == nil {
+			if l.init && l.initErr != nil {
+				l.clearInitFailureLocked()
+			}
 			l.mu.Unlock()
 			_, err := l.serviceWithContext(ctxWithTimeout)
 			return err
+		}
+		db := l.db
+		l.mu.Unlock()
+
+		if err := coresnowflake.Ping(ctxWithTimeout, db); err == nil {
+			return nil
+		}
+
+		l.mu.Lock()
+		if l.svc == nil {
+			l.mu.Unlock()
+			continue
+		}
+		if l.db != db {
+			// Pool was replaced while we pinged a stale handle; re-validate the current one.
+			l.mu.Unlock()
+			continue
 		}
 		_ = l.db.Close()
 		l.db = nil
 		l.svc = nil
 		l.init = false
 		l.initErr = nil
-	case l.init && l.initErr != nil:
-		l.clearInitFailureLocked()
-	}
-	l.mu.Unlock()
+		l.mu.Unlock()
 
-	_, err := l.serviceWithContext(ctxWithTimeout)
-	return err
+		_, err := l.serviceWithContext(ctxWithTimeout)
+		return err
+	}
 }
 
 // Close releases the Snowflake handle when connected.
