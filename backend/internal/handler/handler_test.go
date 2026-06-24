@@ -250,6 +250,10 @@ func TestValidateSQL(t *testing.T) {
 		{name: "delete", sql: "DELETE FROM t", wantErr: true},
 		{name: "create", sql: "CREATE TABLE t (id INT)", wantErr: true},
 		{name: "comment bypass", sql: "/*x*/ DELETE FROM t", wantErr: true},
+		{name: "with insert", sql: "WITH cte AS (SELECT 1) INSERT INTO t SELECT * FROM cte", wantErr: true},
+		{name: "with update", sql: "WITH cte AS (SELECT 1) UPDATE t SET col = 1 WHERE id IN (SELECT 1 FROM cte)", wantErr: true},
+		{name: "with delete", sql: "WITH cte AS (SELECT 1) DELETE FROM t WHERE id IN (SELECT 1 FROM cte)", wantErr: true},
+		{name: "with merge", sql: "WITH cte AS (SELECT 1 AS id) MERGE INTO t USING cte ON t.id = cte.id WHEN MATCHED THEN DELETE", wantErr: true},
 	}
 
 	for _, tc := range tests {

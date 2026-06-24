@@ -14,13 +14,12 @@ import (
 )
 
 var allowedReadOnlySQL = map[string]struct{}{
-	"SELECT":    {},
-	"WITH":      {},
-	"SHOW":      {},
-	"DESCRIBE":  {},
-	"DESC":      {},
-	"EXPLAIN":   {},
-	"LIST":      {},
+	"SELECT":   {},
+	"SHOW":     {},
+	"DESCRIBE": {},
+	"DESC":     {},
+	"EXPLAIN":  {},
+	"LIST":     {},
 }
 
 const snowflakeConnectionHeader = "X-FinOps-Snowflake-Connection"
@@ -132,18 +131,42 @@ func validateSQL(sqlText string) (string, error) {
 	if strings.Contains(trimmed, ";") {
 		return "", errors.New("multi-statement SQL is not allowed")
 	}
-	keyword, err := firstReadOnlyKeyword(trimmed)
+	keyword, err := effectiveStatementKeyword(trimmed)
 	if err != nil {
 		return "", err
 	}
 	if _, ok := allowedReadOnlySQL[keyword]; !ok {
-		return "", errors.New("only read-only SQL is allowed (SELECT, WITH, SHOW, DESCRIBE, DESC, EXPLAIN, LIST)")
+		return "", errors.New("only read-only SQL is allowed (SELECT, WITH ... SELECT, SHOW, DESCRIBE, DESC, EXPLAIN, LIST)")
 	}
 	return trimmed, nil
 }
 
-func firstReadOnlyKeyword(sqlText string) (string, error) {
-	s := strings.TrimSpace(stripSQLComments(sqlText))
+// effectiveStatementKeyword returns the top-level statement keyword, skipping
+// leading WITH ... AS (...) CTE definitions so "WITH cte AS (...) INSERT ..."
+// is recognized as INSERT, not WITH.
+func effectiveStatementKeyword(sqlText string) (string, error) {
+	s := trimSQLPrefix(sqlText)
+	if s == "" {
+		return "", errors.New("sql is required")
+	}
+
+	keyword, rest, err := readSQLKeyword(s)
+	if err != nil {
+		return "", err
+	}
+	if keyword != "WITH" {
+		return keyword, nil
+	}
+
+	rest, err = skipCTEDefinitions(rest)
+	if err != nil {
+		return "", err
+	}
+	return effectiveStatementKeyword(rest)
+}
+
+func trimSQLPrefix(s string) string {
+	s = strings.TrimSpace(stripSQLComments(s))
 	for len(s) > 0 {
 		switch s[0] {
 		case '(', ' ', '\t', '\n', '\r':
@@ -152,8 +175,13 @@ func firstReadOnlyKeyword(sqlText string) (string, error) {
 		}
 		break
 	}
+	return s
+}
+
+func readSQLKeyword(s string) (keyword, rest string, err error) {
+	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", errors.New("sql is required")
+		return "", "", errors.New("sql is required")
 	}
 
 	end := 0
@@ -166,9 +194,100 @@ func firstReadOnlyKeyword(sqlText string) (string, error) {
 		break
 	}
 	if end == 0 {
+		return "", "", errors.New("invalid SQL")
+	}
+	return strings.ToUpper(s[:end]), strings.TrimSpace(s[end:]), nil
+}
+
+func skipCTEDefinitions(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if kw, after, ok := matchSQLKeywordPrefix(s, "RECURSIVE"); ok {
+		s = after
+		_ = kw
+	}
+
+	for {
+		var err error
+		_, s, err = readSQLKeyword(s)
+		if err != nil {
+			return "", err
+		}
+		var ok bool
+		_, s, ok = matchSQLKeywordPrefix(s, "AS")
+		if !ok {
+			return "", errors.New("invalid SQL")
+		}
+		s, err = skipBalancedParens(s)
+		if err != nil {
+			return "", err
+		}
+		s = strings.TrimSpace(s)
+		if len(s) > 0 && s[0] == ',' {
+			s = strings.TrimSpace(s[1:])
+			continue
+		}
+		return s, nil
+	}
+}
+
+func matchSQLKeywordPrefix(s, word string) (keyword, rest string, ok bool) {
+	keyword, rest, err := readSQLKeyword(s)
+	if err != nil {
+		return "", s, false
+	}
+	if keyword != word {
+		return "", s, false
+	}
+	return keyword, rest, true
+}
+
+func skipBalancedParens(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if len(s) == 0 || s[0] != '(' {
 		return "", errors.New("invalid SQL")
 	}
-	return strings.ToUpper(s[:end]), nil
+
+	depth := 0
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inSingle {
+			if c == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				inSingle = false
+			}
+			continue
+		}
+		if inDouble {
+			if c == '"' {
+				if i+1 < len(s) && s[i+1] == '"' {
+					i++
+					continue
+				}
+				inDouble = false
+			}
+			continue
+		}
+
+		switch c {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(s[i+1:]), nil
+			}
+		}
+	}
+	return "", errors.New("invalid SQL")
 }
 
 func stripSQLComments(s string) string {
