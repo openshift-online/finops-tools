@@ -128,11 +128,9 @@ func linkedAWSConfigForSnapshotTarget(
 	accountID := strings.TrimSpace(target.AccountID)
 	payerID := target.CredentialsAccountID()
 
-	payerCfg, err := cachedOrLoadConfig(ctx, cfg, payerID, credentialsFile, configCache)
-	if err != nil {
+	if _, err := cachedOrLoadConfig(ctx, cfg, payerID, credentialsFile, configCache); err != nil {
 		return aws.Config{}, err
 	}
-	_ = payerCfg
 
 	roleARN, err := resolveSnapshotLinkedRoleARN(cmd, cfg, target, flagRole)
 	if err != nil {
