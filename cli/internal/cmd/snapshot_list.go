@@ -41,9 +41,9 @@ Account selection matches finops cost get: --account, --account-alias, --ou, or 
 Linked member accounts are scanned using role assumption from the payer.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
-When Cost Explorer data is available, summary shows actual billed EBS/RDS snapshot storage for the
-last complete calendar month. Per-snapshot $/MO allocates billed EBS cost across snapshots with
-incremental storage.
+When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots.
+Per-snapshot $/MO allocates billed cost proportionally; — on EBS means no incremental blocks.
+Account-wide billed snapshot storage is included in JSON output only.
 
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions, ec2:DescribeSnapshots

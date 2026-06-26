@@ -305,7 +305,7 @@ func buildSummary(records []Record, olderThanDays int, rdsContexts []RDSRegionCo
 		OlderThanDays:                       olderThanDays,
 		ByKind:                              kindSummaries,
 		ByAccount:                           accountSummaries,
-		CostDisclaimer:                      "When Cost Explorer data is available, summary storage lines show actual billed spend for the account. $/MO allocates billed EBS cost to snapshots with incremental storage; — means no incremental blocks (deleting it alone may not reduce spend). RDS estimates are gross before per-instance credits.",
+		CostDisclaimer:                      "Attributed costs apply to listed snapshots only. Per-snapshot $/MO is a proportional share of billed storage when Cost Explorer data is available; — on EBS means no incremental blocks. Account-wide billed snapshot storage is in JSON (summary.billed_costs).",
 	}
 }
 

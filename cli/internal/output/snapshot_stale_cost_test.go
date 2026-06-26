@@ -1,12 +1,14 @@
 package output
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/openshift-online/finops-tools/core/snapshot"
 )
 
-func TestBuildSnapshotSummaryLinesHidesRedundantEBSLines(t *testing.T) {
+func TestBuildSnapshotSummaryLinesShowsAttributedWhenListedIsMostOfAccount(t *testing.T) {
 	summary := snapshot.Summary{
 		EstimatedMonthlyCostUSD:       1263.28,
 		EBSEstimatedMonthlyRunRateUSD: 1263.28,
@@ -25,9 +27,9 @@ func TestBuildSnapshotSummaryLinesHidesRedundantEBSLines(t *testing.T) {
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
 
 	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want count + billed only", len(lines))
+		t.Fatalf("lines = %d, want count + attributed only", len(lines))
 	}
-	if lines[1].label != "EBS snapshot storage (May 2026)" {
+	if lines[1].label != "Attributed cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
 	}
 	if lines[1].value != "USD 4,798.21" {
@@ -49,14 +51,14 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenPartial(t *testing.T) {
 		},
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
-	if len(lines) != 3 {
-		t.Fatalf("lines = %d, want 3", len(lines))
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
 	}
-	if lines[2].label != "Estimated cost (listed snapshots only)" {
-		t.Fatalf("label = %q", lines[2].label)
+	if lines[1].label != "Attributed cost (listed snapshots, May 2026)" {
+		t.Fatalf("label = %q", lines[1].label)
 	}
-	if lines[2].value != "USD 1,000.00" {
-		t.Fatalf("value = %q", lines[2].value)
+	if lines[1].value != "USD 1,000.00" {
+		t.Fatalf("value = %q", lines[1].value)
 	}
 }
 
@@ -73,5 +75,52 @@ func TestSnapshotRecordMonthlyCostUsesDashForZeroIncremental(t *testing.T) {
 	}, ctx)
 	if got != "—" {
 		t.Fatalf("got = %q, want dash", got)
+	}
+}
+
+func TestScaleRDSCostUsesBilledRunRate(t *testing.T) {
+	summary := snapshot.Summary{
+		RDSBackupEstimatedMonthlyRunRateUSD: 342,
+		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{RDSBackupUSD: 0.77},
+		},
+	}
+	ctx := newSnapshotCostContext(summary)
+	if ctx.rdsCEScale <= 0 {
+		t.Fatal("expected RDS CE scale")
+	}
+	got := scaleRDSCost(342, snapshot.KindRDSSnapshot, ctx)
+	if got < 0.76 || got > 0.78 {
+		t.Fatalf("scaled RDS cost = %v, want ~0.77", got)
+	}
+}
+
+func TestWriteSnapshotByTypeScalesRDSWithCE(t *testing.T) {
+	var buf bytes.Buffer
+	r := snapshot.Result{
+		Summary: snapshot.Summary{
+			OlderThanDays:                       365,
+			TotalCount:                          6,
+			RDSBackupEstimatedMonthlyRunRateUSD: 342,
+			BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+				{
+					Period:       snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+					RDSBackupUSD: 0.77,
+				},
+			},
+			ByKind: []snapshot.KindSummary{
+				{Kind: snapshot.KindRDSSnapshot, Count: 6, EstimatedMonthlyCostUSD: 342},
+			},
+		},
+	}
+	if err := WriteSnapshotListResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	if !strings.Contains(out, "USD 0.77 attributed") {
+		t.Fatalf("output missing scaled RDS by-type total:\n%s", out)
+	}
+	if strings.Contains(out, "USD 342.00") {
+		t.Fatalf("output still shows unscaled RDS estimate:\n%s", out)
 	}
 }

@@ -31,10 +31,11 @@ func EstimateMonthlyCost(kind Kind, sizeGiB float64, storageTier, _ string) floa
 
 // RDSRegionContext holds regional inputs for RDS backup free-tier pricing.
 type RDSRegionContext struct {
-	FreePoolGiB     float64
-	TotalBackupGiB  float64
-	LiveInstanceIDs map[string]struct{}
-	LiveClusterIDs  map[string]struct{}
+	FreePoolGiB       float64
+	TotalBackupGiB    float64
+	BillableBackupGiB float64
+	LiveInstanceIDs   map[string]struct{}
+	LiveClusterIDs    map[string]struct{}
 }
 
 // RDSMonthlyBackupRunRateUSD estimates gross monthly RDS backup storage spend for
@@ -64,12 +65,7 @@ func ApplyRDSRegionalCosts(records []Record, ctx RDSRegionContext) {
 	}
 
 	excessCost := RDSMonthlyBackupRunRateUSD(excessGiB)
-	var billableGiB float64
-	for _, rec := range records {
-		if isRDSKind(rec.Kind) && rdsSnapshotIsBillable(rec, ctx) {
-			billableGiB += rec.SizeGiB
-		}
-	}
+	billableGiB := ctx.BillableBackupGiB
 	if billableGiB <= 0 {
 		for i := range records {
 			if !isRDSKind(records[i].Kind) {

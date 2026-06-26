@@ -582,7 +582,7 @@ finops snapshot list --account 333333333333 --payer rhc --older-than-days 90 --f
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr |
 
-When Cost Explorer data is available, the summary shows **actual billed** EBS/RDS snapshot storage for the last complete calendar month (`EBS:SnapshotUsage`, `RDS:ChargedBackupUsage`). Per-snapshot **$/MO** allocates billed EBS cost to snapshots with incremental storage; **—** means no incremental blocks. Without CE data, summary falls back to API estimates. Payer credentials need `ce:GetCostAndUsage` with `LINKED_ACCOUNT` scope.
+When Cost Explorer data is available, the summary shows **attributed** storage cost for listed snapshots (scaled to billed `EBS:SnapshotUsage` and `RDS:ChargedBackupUsage` for the last complete calendar month). Account-wide billed amounts are in JSON only (`summary.billed_costs`). Per-snapshot **$/MO** is each snapshot's share of that attributed cost; **—** on EBS means no incremental blocks. Without CE data, summary falls back to API estimates. Payer credentials need `ce:GetCostAndUsage` with `LINKED_ACCOUNT` scope.
 
 ### Reports
 

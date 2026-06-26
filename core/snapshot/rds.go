@@ -112,12 +112,45 @@ func getRDSRegionContextWithClient(
 		return RDSRegionContext{}, err
 	}
 	liveInstances, liveClusters := liveSourceIDs(instances, clusters)
-	return RDSRegionContext{
-		FreePoolGiB:     provisionedStorageGiB(instances, clusters),
-		TotalBackupGiB:  estimateBackupStorageGiB(dbSnapshots, clusterSnapshots),
+	regionCtx := RDSRegionContext{
 		LiveInstanceIDs: liveInstances,
 		LiveClusterIDs:  liveClusters,
-	}, nil
+	}
+	regionCtx.FreePoolGiB = provisionedStorageGiB(instances, clusters)
+	regionCtx.TotalBackupGiB = estimateBackupStorageGiB(dbSnapshots, clusterSnapshots)
+	regionCtx.BillableBackupGiB = billableBackupGiB(dbSnapshots, clusterSnapshots, regionCtx)
+	return regionCtx, nil
+}
+
+func billableBackupGiB(
+	dbSnapshots []rdstypes.DBSnapshot,
+	clusterSnapshots []rdstypes.DBClusterSnapshot,
+	ctx RDSRegionContext,
+) float64 {
+	var total float64
+	for _, snap := range dbSnapshots {
+		rec := Record{
+			Kind:             KindRDSSnapshot,
+			SizeGiB:          float64(aws.ToInt32(snap.AllocatedStorage)),
+			SnapshotType:     aws.ToString(snap.SnapshotType),
+			SourceResourceID: aws.ToString(snap.DBInstanceIdentifier),
+		}
+		if rdsSnapshotIsBillable(rec, ctx) {
+			total += rec.SizeGiB
+		}
+	}
+	for _, snap := range clusterSnapshots {
+		rec := Record{
+			Kind:             KindRDSClusterSnapshot,
+			SizeGiB:          float64(aws.ToInt32(snap.AllocatedStorage)),
+			SnapshotType:     aws.ToString(snap.SnapshotType),
+			SourceResourceID: aws.ToString(snap.DBClusterIdentifier),
+		}
+		if rdsSnapshotIsBillable(rec, ctx) {
+			total += rec.SizeGiB
+		}
+	}
+	return total
 }
 
 func listDBInstances(ctx context.Context, client RDSAPI, region string) ([]rdstypes.DBInstance, error) {

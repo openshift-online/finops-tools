@@ -326,7 +326,7 @@ func TestApplyRDSRegionalCosts(t *testing.T) {
 		{Kind: KindRDSSnapshot, SizeGiB: 100, SnapshotType: "manual"},
 		{Kind: KindEBSSnapshot, SizeGiB: 50, EstimatedMonthlyCostUSD: 2.5},
 	}
-	ApplyRDSRegionalCosts(records, RDSRegionContext{FreePoolGiB: 150, TotalBackupGiB: 300})
+	ApplyRDSRegionalCosts(records, RDSRegionContext{FreePoolGiB: 150, TotalBackupGiB: 300, BillableBackupGiB: 200})
 	if records[0].EstimatedMonthlyCostUSD != 213.75 {
 		t.Fatalf("snapshot 0 cost = %v, want 213.75", records[0].EstimatedMonthlyCostUSD)
 	}
@@ -356,12 +356,29 @@ func TestApplyRDSRegionalCosts(t *testing.T) {
 		SourceResourceID: "db-live",
 	}}
 	ApplyRDSRegionalCosts(automatedLive, RDSRegionContext{
-		FreePoolGiB:     50,
-		TotalBackupGiB:  500,
-		LiveInstanceIDs: map[string]struct{}{"db-live": {}},
+		FreePoolGiB:       50,
+		TotalBackupGiB:    500,
+		BillableBackupGiB: 500,
+		LiveInstanceIDs:   map[string]struct{}{"db-live": {}},
 	})
 	if automatedLive[0].EstimatedMonthlyCostUSD != 0 {
 		t.Fatalf("automated live source cost = %v, want 0", automatedLive[0].EstimatedMonthlyCostUSD)
+	}
+}
+
+func TestApplyRDSRegionalCostsSubsetUsesRegionalBillableGiB(t *testing.T) {
+	// Listed snapshots are a subset of regional billable backup; cost share uses all billable GiB.
+	records := []Record{
+		{Kind: KindRDSSnapshot, SizeGiB: 100, SnapshotType: "manual"},
+	}
+	ApplyRDSRegionalCosts(records, RDSRegionContext{
+		FreePoolGiB:       0,
+		TotalBackupGiB:    500,
+		BillableBackupGiB: 500,
+	})
+	want := RDSMonthlyBackupRunRateUSD(500) * (100.0 / 500.0)
+	if records[0].EstimatedMonthlyCostUSD != want {
+		t.Fatalf("subset snapshot cost = %v, want %v", records[0].EstimatedMonthlyCostUSD, want)
 	}
 }
 
@@ -402,6 +419,9 @@ func TestGetRDSRegionContextWithClient(t *testing.T) {
 	}
 	if ctx.TotalBackupGiB != 110 {
 		t.Fatalf("total backup = %v, want 110", ctx.TotalBackupGiB)
+	}
+	if ctx.BillableBackupGiB != 30 {
+		t.Fatalf("billable backup = %v, want 30", ctx.BillableBackupGiB)
 	}
 	if _, ok := ctx.LiveInstanceIDs["db-1"]; !ok {
 		t.Fatalf("live instances = %#v", ctx.LiveInstanceIDs)
