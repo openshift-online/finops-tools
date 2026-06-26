@@ -6,9 +6,6 @@ const (
 	ebsStandardUSDPerGiBMonth = 0.05
 	ebsArchiveUSDPerGiBMonth  = 0.0125
 	rdsSnapshotUSDPerGiBMonth = 0.095
-	// RDSMonthlyBackupDays matches how AWS Cost Explorer accrues RDS:ChargedBackupUsage:
-	// daily excess backup GiB is metered across the month (sum of daily readings × rate).
-	rdsMonthlyBackupDays = 30
 )
 
 // EstimateMonthlyCost returns an approximate monthly storage cost in USD.
@@ -39,13 +36,13 @@ type RDSRegionContext struct {
 }
 
 // RDSMonthlyBackupRunRateUSD estimates gross monthly RDS backup storage spend for
-// constant regional excess backup footprint. AWS bills daily excess GiB across
-// the month; compare net spend to Cost Explorer usage type RDS:ChargedBackupUsage.
+// constant regional excess backup footprint (GiB-months × rate). Compare net
+// spend to Cost Explorer usage type RDS:ChargedBackupUsage.
 func RDSMonthlyBackupRunRateUSD(excessGiB float64) float64 {
 	if excessGiB <= 0 {
 		return 0
 	}
-	return excessGiB * rdsMonthlyBackupDays * rdsSnapshotUSDPerGiBMonth
+	return excessGiB * rdsSnapshotUSDPerGiBMonth
 }
 
 // ApplyRDSRegionalCosts updates RDS snapshot records using the regional free

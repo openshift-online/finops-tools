@@ -47,6 +47,37 @@ func TestComputeEBSSnapshotChargesIncrementalChain(t *testing.T) {
 	}
 }
 
+func TestComputeEBSSnapshotChargesArchivedSnapshotBilledAtFullSize(t *testing.T) {
+	full100 := int64(100 * 1024 * 1024 * 1024)
+	full150 := int64(150 * 1024 * 1024 * 1024)
+	snapshots := []ectypes.Snapshot{
+		{
+			SnapshotId:              aws.String("snap-1"),
+			VolumeId:                aws.String("vol-1"),
+			StartTime:               aws.Time(mustTime("2025-01-01")),
+			VolumeSize:              aws.Int32(200),
+			FullSnapshotSizeInBytes: &full100,
+			StorageTier:             ectypes.StorageTierStandard,
+		},
+		{
+			SnapshotId:              aws.String("snap-2"),
+			VolumeId:                aws.String("vol-1"),
+			StartTime:               aws.Time(mustTime("2025-02-01")),
+			VolumeSize:              aws.Int32(200),
+			FullSnapshotSizeInBytes: &full150,
+			StorageTier:             ectypes.StorageTierArchive,
+		},
+	}
+	charges := computeEBSSnapshotCharges(snapshots)
+	if charges["snap-2"].IncrementalGiB != 150 {
+		t.Fatalf("snap-2 incremental = %v, want 150 (full size for archive tier)", charges["snap-2"].IncrementalGiB)
+	}
+	wantMonthly := 150 * ebsArchiveUSDPerGiBMonth
+	if charges["snap-2"].MonthlyUSD != wantMonthly {
+		t.Fatalf("snap-2 monthly = %v, want %v", charges["snap-2"].MonthlyUSD, wantMonthly)
+	}
+}
+
 func TestComputeEBSSnapshotChargesRedundantSnapshotIsZeroCost(t *testing.T) {
 	full100 := int64(100 * 1024 * 1024 * 1024)
 	snapshots := []ectypes.Snapshot{

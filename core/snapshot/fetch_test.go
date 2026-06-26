@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -75,6 +76,68 @@ func (f fakeRDSLister) GetRDSRegionContext(
 		FreePoolGiB:      f.FreePoolGiB,
 		TotalBackupGiB: f.TotalBackupGiB,
 	}, nil
+}
+
+func TestFetchSkipsRDSRegionContextWhenFilteredRecordsEmpty(t *testing.T) {
+	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	clusterOnly := Record{
+		AccountID:  "111111111111",
+		Region:     "us-east-1",
+		Kind:       KindRDSClusterSnapshot,
+		ResourceID: "cluster-old",
+		SizeGiB:    200,
+	}
+
+	result, err := Fetch(context.Background(), Query{
+		Targets:   []AccountTarget{{AccountID: "111111111111"}},
+		OlderThan: 180 * 24 * time.Hour,
+		Types:     []Kind{KindRDSSnapshot},
+		Now:       now,
+		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
+		rdsLister: fakeRDSLister{
+			records:        []Record{clusterOnly},
+			FreePoolGiB:    0,
+			TotalBackupGiB: 1000,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) != 0 {
+		t.Fatalf("records = %d, want 0 after kind filter", len(result.Records))
+	}
+	if result.Summary.RDSBackupRegionalExcessGiB != 0 {
+		t.Fatalf("regional excess GiB = %v, want 0 for empty filtered region", result.Summary.RDSBackupRegionalExcessGiB)
+	}
+	if result.Summary.RDSBackupEstimatedMonthlyRunRateUSD != 0 {
+		t.Fatalf("regional run rate = %v, want 0 for empty filtered region", result.Summary.RDSBackupEstimatedMonthlyRunRateUSD)
+	}
+}
+
+func TestFetchPropagatesRDSRegionContextCancellation(t *testing.T) {
+	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	rds := Record{
+		AccountID:  "111111111111",
+		Region:     "us-east-1",
+		Kind:       KindRDSSnapshot,
+		ResourceID: "rds-old",
+		SizeGiB:    200,
+	}
+
+	_, err := Fetch(context.Background(), Query{
+		Targets:   []AccountTarget{{AccountID: "111111111111"}},
+		OlderThan: 180 * 24 * time.Hour,
+		Types:     []Kind{KindRDSSnapshot},
+		Now:       now,
+		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
+		rdsLister: fakeRDSLister{
+			records:    []Record{rds},
+			contextErr: context.Canceled,
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Fetch() error = %v, want context.Canceled", err)
+	}
 }
 
 func TestFetchAggregatesRecordsAndSummary(t *testing.T) {
@@ -311,7 +374,7 @@ func (f *fakeRDS) DescribeDBSnapshots(
 
 func TestRDSMonthlyBackupRunRateUSD(t *testing.T) {
 	got := RDSMonthlyBackupRunRateUSD(1425)
-	want := 1425 * 30 * 0.095
+	want := 1425 * 0.095
 	if got != want {
 		t.Fatalf("run rate = %v, want %v", got, want)
 	}
@@ -327,11 +390,11 @@ func TestApplyRDSRegionalCosts(t *testing.T) {
 		{Kind: KindEBSSnapshot, SizeGiB: 50, EstimatedMonthlyCostUSD: 2.5},
 	}
 	ApplyRDSRegionalCosts(records, RDSRegionContext{FreePoolGiB: 150, TotalBackupGiB: 300, BillableBackupGiB: 200})
-	if records[0].EstimatedMonthlyCostUSD != 213.75 {
-		t.Fatalf("snapshot 0 cost = %v, want 213.75", records[0].EstimatedMonthlyCostUSD)
+	if records[0].EstimatedMonthlyCostUSD != 7.125 {
+		t.Fatalf("snapshot 0 cost = %v, want 7.125", records[0].EstimatedMonthlyCostUSD)
 	}
-	if records[1].EstimatedMonthlyCostUSD != 213.75 {
-		t.Fatalf("snapshot 1 cost = %v, want 213.75", records[1].EstimatedMonthlyCostUSD)
+	if records[1].EstimatedMonthlyCostUSD != 7.125 {
+		t.Fatalf("snapshot 1 cost = %v, want 7.125", records[1].EstimatedMonthlyCostUSD)
 	}
 	if records[0].CostBasis != CostBasisRDSRegionalExcess {
 		t.Fatalf("cost basis = %q", records[0].CostBasis)

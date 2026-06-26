@@ -62,6 +62,91 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenPartial(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotSummaryLinesShowsNeutralLabelWhenMixed(t *testing.T) {
+	summary := snapshot.Summary{
+		EstimatedMonthlyCostUSD:             700,
+		EBSEstimatedMonthlyRunRateUSD:       500,
+		RDSBackupEstimatedMonthlyRunRateUSD: 200,
+		OlderThanDays:                       365,
+		TotalCount:                          10,
+		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{
+				Period:         snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+				EBSSnapshotUSD: 5000,
+				RDSBackupUSD:   0,
+			},
+		},
+		ByKind: []snapshot.KindSummary{
+			{Kind: snapshot.KindEBSSnapshot, Count: 5, EstimatedMonthlyCostUSD: 500},
+			{Kind: snapshot.KindRDSSnapshot, Count: 5, EstimatedMonthlyCostUSD: 200},
+		},
+	}
+	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	if lines[1].label != "Cost (listed snapshots, May 2026)" {
+		t.Fatalf("label = %q", lines[1].label)
+	}
+	if lines[1].value != "USD 5,200.00" {
+		t.Fatalf("value = %q", lines[1].value)
+	}
+}
+
+func TestSnapshotKindCostSuffixReflectsScale(t *testing.T) {
+	ctx := newSnapshotCostContext(snapshot.Summary{
+		EBSEstimatedMonthlyRunRateUSD: 100,
+		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{EBSSnapshotUSD: 50},
+		},
+	})
+	if got := snapshotKindCostSuffix(snapshot.KindEBSSnapshot, ctx); got != "attributed" {
+		t.Fatalf("EBS suffix = %q", got)
+	}
+	if got := snapshotKindCostSuffix(snapshot.KindRDSSnapshot, ctx); got != "estimated" {
+		t.Fatalf("RDS suffix = %q", got)
+	}
+}
+
+func TestSnapshotMonthlyCostColumnHeaderMixed(t *testing.T) {
+	ctx := newSnapshotCostContext(snapshot.Summary{
+		EBSEstimatedMonthlyRunRateUSD: 100,
+		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{EBSSnapshotUSD: 50},
+		},
+	})
+	records := []snapshot.Record{
+		{Kind: snapshot.KindEBSSnapshot, EstimatedMonthlyCostUSD: 10},
+		{Kind: snapshot.KindRDSSnapshot, EstimatedMonthlyCostUSD: 20},
+	}
+	if got := snapshotMonthlyCostColumnHeader(records, ctx); got != "COST/MO" {
+		t.Fatalf("header = %q, want COST/MO", got)
+	}
+}
+
+func TestWriteSnapshotByTypeUsesEstimatedSuffixWithoutCE(t *testing.T) {
+	var buf bytes.Buffer
+	r := snapshot.Result{
+		Summary: snapshot.Summary{
+			OlderThanDays: 365,
+			TotalCount:    1,
+			ByKind: []snapshot.KindSummary{
+				{Kind: snapshot.KindEBSSnapshot, Count: 1, EstimatedMonthlyCostUSD: 5},
+			},
+		},
+	}
+	if err := WriteSnapshotListResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	if !strings.Contains(out, "USD 5.00 estimated") {
+		t.Fatalf("output missing estimated by-type suffix:\n%s", out)
+	}
+	if strings.Contains(out, "attributed") {
+		t.Fatalf("output should not claim attribution without CE data:\n%s", out)
+	}
+}
+
 func TestSnapshotRecordMonthlyCostUsesDashForZeroIncremental(t *testing.T) {
 	ctx := newSnapshotCostContext(snapshot.Summary{
 		EBSEstimatedMonthlyRunRateUSD: 100,

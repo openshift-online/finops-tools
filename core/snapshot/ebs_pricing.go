@@ -40,9 +40,14 @@ func computeEBSSnapshotCharges(snapshots []ectypes.Snapshot) map[string]ebsSnaps
 				continue
 			}
 			fullGiB := ebsFullSnapshotSizeGiB(snap)
-			incrementalGiB := fullGiB - prevFullGiB
-			if incrementalGiB < 0 {
-				incrementalGiB = 0
+			var incrementalGiB float64
+			if ebsSnapshotIsArchive(snap) {
+				incrementalGiB = fullGiB
+			} else {
+				incrementalGiB = fullGiB - prevFullGiB
+				if incrementalGiB < 0 {
+					incrementalGiB = 0
+				}
 			}
 			if fullGiB > prevFullGiB {
 				prevFullGiB = fullGiB
@@ -65,6 +70,10 @@ func computeEBSSnapshotCharges(snapshots []ectypes.Snapshot) map[string]ebsSnaps
 		}
 	}
 	return charges
+}
+
+func ebsSnapshotIsArchive(snap ectypes.Snapshot) bool {
+	return strings.EqualFold(strings.TrimSpace(string(snap.StorageTier)), "archive")
 }
 
 func ebsFullSnapshotSizeGiB(snap ectypes.Snapshot) float64 {

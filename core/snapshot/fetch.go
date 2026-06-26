@@ -200,12 +200,17 @@ func scanRegion(
 			return nil, nil, 0, err
 		}
 		rdsRecords = filterRDSRecords(rdsRecords, typeSet)
-		ctxData, err := q.rdsLister.GetRDSRegionContext(ctx, target.AWSConfig, region)
-		if err != nil {
-			ApplyRDSLegacyCosts(rdsRecords)
-		} else {
-			regionRDSContext = &ctxData
-			ApplyRDSRegionalCosts(rdsRecords, ctxData)
+		if len(rdsRecords) > 0 {
+			ctxData, err := q.rdsLister.GetRDSRegionContext(ctx, target.AWSConfig, region)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil, nil, 0, err
+				}
+				ApplyRDSLegacyCosts(rdsRecords)
+			} else {
+				regionRDSContext = &ctxData
+				ApplyRDSRegionalCosts(rdsRecords, ctxData)
+			}
 		}
 		records = append(records, rdsRecords...)
 	}

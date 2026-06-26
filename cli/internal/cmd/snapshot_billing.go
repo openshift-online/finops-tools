@@ -12,7 +12,10 @@ import (
 	"github.com/openshift-online/finops-tools/core/snapshot"
 )
 
-var fetchSnapshotBilledCosts = fetchSnapshotBilledCostsImpl
+var (
+	fetchSnapshotBilledCosts         = fetchSnapshotBilledCostsImpl
+	fetchBilledSnapshotCostsForGroup = snapshot.FetchBilledSnapshotCosts
+)
 
 func fetchSnapshotBilledCostsImpl(
 	ctx context.Context,
@@ -23,6 +26,7 @@ func fetchSnapshotBilledCostsImpl(
 ) ([]snapshot.AccountBilledSnapshotCosts, error) {
 	type group struct {
 		accountIDs []string
+		seen       map[string]struct{}
 	}
 	groups := make(map[string]*group)
 	groupOrder := make([]string, 0)
@@ -36,10 +40,14 @@ func fetchSnapshotBilledCostsImpl(
 		}
 		credID := target.CredentialsAccountID()
 		if _, ok := groups[credID]; !ok {
-			groups[credID] = &group{}
+			groups[credID] = &group{seen: make(map[string]struct{})}
 			groupOrder = append(groupOrder, credID)
 		}
-		groups[credID].accountIDs = append(groups[credID].accountIDs, accountID)
+		g := groups[credID]
+		if _, ok := g.seen[accountID]; !ok {
+			g.seen[accountID] = struct{}{}
+			g.accountIDs = append(g.accountIDs, accountID)
+		}
 		if _, ok := seenAccount[accountID]; !ok {
 			seenAccount[accountID] = struct{}{}
 			accountOrder = append(accountOrder, accountID)
@@ -53,7 +61,7 @@ func fetchSnapshotBilledCostsImpl(
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", credID, err)
 		}
-		billed, err := snapshot.FetchBilledSnapshotCosts(
+		billed, err := fetchBilledSnapshotCostsForGroup(
 			ctx,
 			snapshot.NewCostExplorerClient(awsCfg),
 			g.accountIDs,
