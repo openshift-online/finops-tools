@@ -54,6 +54,51 @@ func TestMonthDisplayLabel_invalidDates(t *testing.T) {
 	}
 }
 
+func TestPopulateDashboard_missingMetricsShowEmptyDashboardFields(t *testing.T) {
+	view := NewSavingsPlansReportView(coresp.Report{
+		StartDate: "2026-01-01",
+		EndDate:   "2026-03-31",
+		Accounts: []coresp.AccountReport{
+			{
+				AccountName: "No metrics",
+			},
+			{
+				AccountName:        "Partial metrics",
+				UtilizationAverage: coresp.PeriodAverage{Percentage: 88.0, OK: true},
+			},
+		},
+	})
+	if len(view.AccountRows) != 2 {
+		t.Fatalf("AccountRows len = %d, want 2", len(view.AccountRows))
+	}
+
+	noMetrics := view.AccountRows[0]
+	if noMetrics.CoverageFormatted != "" || noMetrics.CoverageStatus != "" || noMetrics.CoverageStatusClass != "" {
+		t.Errorf("missing coverage should be empty, got formatted=%q status=%q class=%q",
+			noMetrics.CoverageFormatted, noMetrics.CoverageStatus, noMetrics.CoverageStatusClass)
+	}
+	if noMetrics.UtilizationFormatted != "" || noMetrics.UtilizationStatus != "" {
+		t.Errorf("missing utilization should be empty, got formatted=%q status=%q",
+			noMetrics.UtilizationFormatted, noMetrics.UtilizationStatus)
+	}
+	if noMetrics.SavingsFormatted != "" || noMetrics.SavingsPctFormatted != "" {
+		t.Errorf("missing savings should be empty, got formatted=%q pct=%q",
+			noMetrics.SavingsFormatted, noMetrics.SavingsPctFormatted)
+	}
+	if noMetrics.CoverageRingSVG != "" || noMetrics.UtilizationRingSVG != "" || noMetrics.SavingsDonutSVG != "" {
+		t.Error("missing metrics should not render chart SVGs")
+	}
+
+	partial := view.AccountRows[1]
+	if partial.CoverageStatus != "" || partial.CoverageFormatted != "" {
+		t.Errorf("missing coverage on partial account should be empty, got formatted=%q status=%q",
+			partial.CoverageFormatted, partial.CoverageStatus)
+	}
+	if partial.UtilizationFormatted != "88.0%" {
+		t.Errorf("UtilizationFormatted = %q, want 88.0%%", partial.UtilizationFormatted)
+	}
+}
+
 func TestPopulateDashboard_savingsBarWidthNonNegative(t *testing.T) {
 	view := NewSavingsPlansReportView(coresp.Report{
 		StartDate: "2026-01-01",

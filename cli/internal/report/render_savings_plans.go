@@ -196,24 +196,29 @@ func populateDashboard(view *SavingsPlansReportView, accounts []coresp.AccountRe
 			}
 		}
 
-		covStatus, covClass := dashboardCoverageStatus(covPct)
-		utilStatus, utilClass := dashboardUtilizationStatus(utilPct)
-
 		row := SavingsPlansDashboardAccountView{
-			AccountName:            acct.AccountName,
-			Color:                  color,
-			CoverageFormatted:      fmt.Sprintf("%.1f%%", covPct),
-			CoverageRingSVG:        template.HTML(spProgressRingSVG(covPct, covClass, 72)),
-			CoverageStatus:         covStatus,
-			CoverageStatusClass:    covClass,
-			UtilizationFormatted:   fmt.Sprintf("%.1f%%", utilPct),
-			UtilizationRingSVG:     template.HTML(spProgressRingSVG(utilPct, utilClass, 72)),
-			UtilizationStatus:      utilStatus,
-			UtilizationStatusClass: utilClass,
-			SavingsFormatted:       format.FormatMoney(savings, savingsPlansCurrency),
-			SavingsCompact:         formatCompactUSD(savings),
-			SavingsPctFormatted:    fmt.Sprintf("%.1f%%", savingsPct),
-			SavingsDonutSVG:        template.HTML(spSavingsDonutSVG(savingsPct, color, 36)),
+			AccountName: acct.AccountName,
+			Color:       color,
+		}
+		if acct.CoverageAverage.OK {
+			covStatus, covClass := dashboardCoverageStatus(covPct)
+			row.CoverageFormatted = fmt.Sprintf("%.1f%%", covPct)
+			row.CoverageRingSVG = template.HTML(spProgressRingSVG(covPct, covClass, 72))
+			row.CoverageStatus = covStatus
+			row.CoverageStatusClass = covClass
+		}
+		if acct.UtilizationAverage.OK {
+			utilStatus, utilClass := dashboardUtilizationStatus(utilPct)
+			row.UtilizationFormatted = fmt.Sprintf("%.1f%%", utilPct)
+			row.UtilizationRingSVG = template.HTML(spProgressRingSVG(utilPct, utilClass, 72))
+			row.UtilizationStatus = utilStatus
+			row.UtilizationStatusClass = utilClass
+		}
+		if acct.SavingsTotal.OK {
+			row.SavingsFormatted = format.FormatMoney(savings, savingsPlansCurrency)
+			row.SavingsCompact = formatCompactUSD(savings)
+			row.SavingsPctFormatted = fmt.Sprintf("%.1f%%", savingsPct)
+			row.SavingsDonutSVG = template.HTML(spSavingsDonutSVG(savingsPct, color, 36))
 		}
 		dashboardRows = append(dashboardRows, row)
 
