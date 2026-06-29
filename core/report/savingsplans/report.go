@@ -218,14 +218,22 @@ func buildAccountWith(
 		if periodUtilResp == nil {
 			return accountMetrics{}, fmt.Errorf("nil response from GetSavingsPlansUtilization")
 		}
-		periodUtil = parsePeriodUtilization(periodUtilResp)
+		periodUtil, err = parsePeriodUtilization(periodUtilResp)
+		if err != nil {
+			return accountMetrics{}, err
+		}
 		periodSavings = parsePeriodSavings(periodUtilResp)
+	}
+
+	utilization, err := parseUtilizationMetrics(utils)
+	if err != nil {
+		return accountMetrics{}, err
 	}
 
 	return accountMetrics{
 		Coverage:           parseCoverageMetrics(coverages),
 		CoverageAverage:    parsePeriodCoverage(periodCoverages),
-		Utilization:        parseUtilizationMetrics(utils),
+		Utilization:        utilization,
 		UtilizationAverage: periodUtil,
 		Savings:            parseSavingsMetrics(utils),
 		SavingsTotal:       periodSavings,
@@ -343,14 +351,18 @@ func parsePeriodCoverage(coverages []types.SavingsPlansCoverage) PeriodAverage {
 	}
 }
 
-func parsePeriodUtilization(resp *costexplorer.GetSavingsPlansUtilizationOutput) PeriodAverage {
+func parsePeriodUtilization(resp *costexplorer.GetSavingsPlansUtilizationOutput) (PeriodAverage, error) {
 	if resp == nil || resp.Total == nil || resp.Total.Utilization == nil {
-		return PeriodAverage{}
+		return PeriodAverage{}, nil
+	}
+	pct := parseFloatPtr(resp.Total.Utilization.UtilizationPercentage)
+	if err := validateUtilizationPercentage(pct, "period average"); err != nil {
+		return PeriodAverage{}, err
 	}
 	return PeriodAverage{
-		Percentage: parseFloatPtr(resp.Total.Utilization.UtilizationPercentage),
+		Percentage: pct,
 		OK:         true,
-	}
+	}, nil
 }
 
 func parsePeriodSavings(resp *costexplorer.GetSavingsPlansUtilizationOutput) PeriodSavings {
@@ -403,20 +415,24 @@ func sortSavings(m []MonthlySavings) {
 }
 
 // parseUtilizationMetrics converts AWS SavingsPlansUtilizationsByTime to sorted MonthlyMetric slice.
-func parseUtilizationMetrics(utils []types.SavingsPlansUtilizationByTime) []MonthlyMetric {
+func parseUtilizationMetrics(utils []types.SavingsPlansUtilizationByTime) ([]MonthlyMetric, error) {
 	metrics := make([]MonthlyMetric, 0, len(utils))
 	for _, u := range utils {
 		if u.TimePeriod == nil || u.Utilization == nil {
 			continue
 		}
+		month := monthLabel(aws.ToString(u.TimePeriod.Start))
 		pct := parseFloatPtr(u.Utilization.UtilizationPercentage)
+		if err := validateUtilizationPercentage(pct, month); err != nil {
+			return nil, err
+		}
 		metrics = append(metrics, MonthlyMetric{
-			Month:      monthLabel(aws.ToString(u.TimePeriod.Start)),
+			Month:      month,
 			Percentage: pct,
 		})
 	}
 	sortMetrics(metrics)
-	return metrics
+	return metrics, nil
 }
 
 func sortMetrics(m []MonthlyMetric) {
@@ -431,6 +447,17 @@ func monthLabel(dateStr string) string {
 	return dateStr
 }
 
+
+// validateUtilizationPercentage rejects utilization outside [0, 100].
+func validateUtilizationPercentage(pct float64, scope string) error {
+	if pct < 0 {
+		return fmt.Errorf("utilization percentage %.1f%% for %s is negative", pct, scope)
+	}
+	if pct > 100 {
+		return fmt.Errorf("utilization percentage %.1f%% for %s exceeds 100%%", pct, scope)
+	}
+	return nil
+}
 
 // parseFloatPtr parses a *string to float64, returning 0 on nil or error.
 func parseFloatPtr(s *string) float64 {

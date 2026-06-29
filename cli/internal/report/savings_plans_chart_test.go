@@ -52,10 +52,6 @@ func TestDashboardUtilizationStatus(t *testing.T) {
 	if label != "Poor" || class != "status-poor" {
 		t.Errorf("got %q %q", label, class)
 	}
-	label, class = dashboardUtilizationStatus(101.0)
-	if label != "Watch" || class != "status-watch" {
-		t.Errorf("over 100%%: got %q %q, want Watch status-watch", label, class)
-	}
 }
 
 func TestAccountDetailStatusMatchesDashboard(t *testing.T) {

@@ -3,6 +3,7 @@ package savingsplans
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,7 +167,10 @@ func TestParseUtilizationMetrics(t *testing.T) {
 		},
 	}
 
-	metrics := parseUtilizationMetrics(input)
+	metrics, err := parseUtilizationMetrics(input)
+	if err != nil {
+		t.Fatalf("parseUtilizationMetrics: %v", err)
+	}
 
 	if len(metrics) != 2 {
 		t.Fatalf("expected 2 metrics, got %d", len(metrics))
@@ -176,6 +180,19 @@ func TestParseUtilizationMetrics(t *testing.T) {
 	}
 	if metrics[1].Percentage != 91.0 {
 		t.Errorf("metrics[1].Percentage = %f, want 91.0", metrics[1].Percentage)
+	}
+}
+
+func TestParseUtilizationMetrics_rejectsOver100(t *testing.T) {
+	_, err := parseUtilizationMetrics([]types.SavingsPlansUtilizationByTime{{
+		TimePeriod:  &types.DateInterval{Start: aws.String("2026-01-01"), End: aws.String("2026-02-01")},
+		Utilization: &types.SavingsPlansUtilization{UtilizationPercentage: aws.String("101.3")},
+	}})
+	if err == nil {
+		t.Fatal("expected error for utilization over 100%")
+	}
+	if !strings.Contains(err.Error(), "101.3%") || !strings.Contains(err.Error(), "2026-01") {
+		t.Errorf("error = %q, want month and percentage in message", err)
 	}
 }
 
@@ -192,7 +209,10 @@ func TestParseUtilizationMetrics_SortedByMonth(t *testing.T) {
 		},
 	}
 
-	metrics := parseUtilizationMetrics(input)
+	metrics, err := parseUtilizationMetrics(input)
+	if err != nil {
+		t.Fatalf("parseUtilizationMetrics: %v", err)
+	}
 
 	if metrics[0].Month != "2026-01" {
 		t.Errorf("expected sorted: metrics[0].Month = %q, want 2026-01", metrics[0].Month)
@@ -394,12 +414,23 @@ func TestParsePeriodCoverage(t *testing.T) {
 }
 
 func TestParsePeriodUtilization(t *testing.T) {
-	avg := parsePeriodUtilization(periodUtilizationResp("93.4", nil))
+	avg, err := parsePeriodUtilization(periodUtilizationResp("93.4", nil))
+	if err != nil {
+		t.Fatalf("parsePeriodUtilization: %v", err)
+	}
 	if !avg.OK || avg.Percentage != 93.4 {
 		t.Errorf("parsePeriodUtilization = %+v, want 93.4", avg)
 	}
-	if parsePeriodUtilization(nil).OK {
+	empty, err := parsePeriodUtilization(nil)
+	if err != nil {
+		t.Fatalf("parsePeriodUtilization(nil): %v", err)
+	}
+	if empty.OK {
 		t.Error("expected empty utilization period average")
+	}
+	_, err = parsePeriodUtilization(periodUtilizationResp("101.0", nil))
+	if err == nil {
+		t.Fatal("expected error for period utilization over 100%")
 	}
 }
 
