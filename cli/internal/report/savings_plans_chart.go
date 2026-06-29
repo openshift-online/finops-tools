@@ -97,7 +97,7 @@ func spBubbleChartSVG(points []spBubblePoint) string {
 	}
 	bubbleR := func(savings float64) float64 {
 		minR, maxR := 18.0, 52.0
-		if maxSavings <= 0 {
+		if maxSavings <= 0 || savings <= 0 {
 			return minR
 		}
 		frac := math.Sqrt(savings / maxSavings)

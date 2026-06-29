@@ -52,3 +52,18 @@ func TestDailyChartSVGEmpty(t *testing.T) {
 		t.Fatalf("got %q", svg)
 	}
 }
+
+func TestHtmlEscape(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"plain", "plain"},
+		{"O'Brien", "O&#39;Brien"},
+		{`a&b<c>d"e'f`, "a&amp;b&lt;c&gt;d&quot;e&#39;f"},
+	}
+	for _, tt := range tests {
+		if got := htmlEscape(tt.in); got != tt.want {
+			t.Errorf("htmlEscape(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

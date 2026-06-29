@@ -127,6 +127,20 @@ func TestSpBubbleChartSVG_threeAccounts(t *testing.T) {
 	}
 }
 
+func TestSpBubbleChartSVG_negativeSavings(t *testing.T) {
+	svg := spBubbleChartSVG([]spBubblePoint{
+		{Label: "Positive savings", Coverage: 95.0, Utilization: 95.0, Savings: 1_000, SavingsCompact: "$1.00K", Color: "#1a73e8"},
+		{Label: "Negative savings", Coverage: 90.0, Utilization: 90.0, Savings: -500, SavingsCompact: "-$500", Color: "#ed6c02"},
+	})
+	if strings.Contains(svg, "NaN") {
+		t.Errorf("bubble chart must not contain NaN radii: %s", svg)
+	}
+	// Negative savings uses minimum bubble radius (18.0).
+	if !strings.Contains(svg, `r="18.0"`) {
+		t.Errorf("expected minimum bubble radius for negative savings, got: %s", svg)
+	}
+}
+
 func TestSpBubbleChartSVG_empty(t *testing.T) {
 	svg := spBubbleChartSVG(nil)
 	if !strings.Contains(svg, "No account data") {
