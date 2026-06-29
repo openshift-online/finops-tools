@@ -288,7 +288,7 @@ func dashboardCoverageStatus(pct float64) (label, class string) {
 
 func dashboardUtilizationStatus(pct float64) (label, class string) {
 	switch {
-	case pct >= 95 && pct <= 100:
+	case pct >= 95:
 		return "Good", "status-good"
 	case pct >= 70:
 		return "Watch", "status-watch"
@@ -415,25 +415,11 @@ func monthDisplayLabel(month, rangeStart, rangeEnd string) string {
 }
 
 func coverageStatusHTML(pct float64) template.HTML {
-	switch {
-	case pct >= 80:
-		return `<span style="color:#22c55e">&#x2713; Good</span>`
-	case pct >= 60:
-		return `<span style="color:#f59e0b">&#x26A0; Low</span>`
-	default:
-		return `<span style="color:#ef4444">&#x2717; Critical</span>`
-	}
+	return dashboardStatusHTML(pct, true)
 }
 
 func utilizationStatusHTML(pct float64) template.HTML {
-	switch {
-	case pct >= 90:
-		return `<span style="color:#22c55e">&#x2713; Good</span>`
-	case pct >= 70:
-		return `<span style="color:#f59e0b">&#x26A0; Low</span>`
-	default:
-		return `<span style="color:#ef4444">&#x2717; Critical</span>`
-	}
+	return dashboardStatusHTML(pct, false)
 }
 
 // RenderSavingsPlansHTML renders the savings plans report as HTML to w.

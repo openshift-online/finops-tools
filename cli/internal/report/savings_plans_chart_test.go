@@ -52,6 +52,33 @@ func TestDashboardUtilizationStatus(t *testing.T) {
 	if label != "Poor" || class != "status-poor" {
 		t.Errorf("got %q %q", label, class)
 	}
+	label, class = dashboardUtilizationStatus(101.0)
+	if label != "Watch" || class != "status-watch" {
+		t.Errorf("over 100%%: got %q %q, want Watch status-watch", label, class)
+	}
+}
+
+func TestAccountDetailStatusMatchesDashboard(t *testing.T) {
+	for _, tc := range []struct {
+		pct      float64
+		coverage bool
+		want     string
+	}{
+		{95.8, true, "Good"},
+		{94.4, true, "Watch"},
+		{75.9, true, "Poor"},
+		{99.9, false, "Good"},
+		{92.9, false, "Watch"},
+		{69.9, false, "Poor"},
+	} {
+		got := coverageStatusHTML(tc.pct)
+		if !tc.coverage {
+			got = utilizationStatusHTML(tc.pct)
+		}
+		if !strings.Contains(string(got), tc.want) {
+			t.Errorf("pct=%.1f coverage=%v: got %q, want label %q", tc.pct, tc.coverage, got, tc.want)
+		}
+	}
 }
 
 func TestSpBubbleChartSVG(t *testing.T) {
