@@ -240,6 +240,35 @@ func TestRenderSavingsPlansHTML_linkedOmitsStatusColumn(t *testing.T) {
 	}
 }
 
+func TestRenderSavingsPlansHTML_savingsTotalWithoutMonthlyRows(t *testing.T) {
+	var buf bytes.Buffer
+	err := RenderSavingsPlansHTML(&buf, coresp.Report{
+		GeneratedAt: time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC),
+		StartDate:   "2026-01-01",
+		EndDate:     "2026-03-31",
+		Accounts: []coresp.AccountReport{{
+			AccountName:  "Period Only",
+			SavingsTotal: coresp.PeriodSavings{NetSavings: 5000, OnDemandCostEquivalent: 25000, OK: true},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	section := accountSectionHTML(out, "Period Only")
+	if section == "" {
+		t.Fatal("output missing Period Only account detail section")
+	}
+	for _, want := range []string{"Period total", "USD 5,000.00", "20.0%"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("savings section missing %q; got:\n%s", want, section)
+		}
+	}
+	if strings.Contains(section, "No savings data available for this period.") {
+		t.Errorf("period total should render without monthly rows; got:\n%s", section)
+	}
+}
+
 func TestMetricsToView_statusThresholds(t *testing.T) {
 	coverage := metricsToView([]coresp.MonthlyMetric{
 		{Month: "2026-01", Percentage: 85.0},

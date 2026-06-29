@@ -317,7 +317,7 @@
   <section>
     <h3>Savings</h3>
     <p class="meta">Net savings from Savings Plans compared to on-demand pricing for covered usage</p>
-    {{ if .Savings }}
+    {{ if or .Savings .SavingsTotal.NetSavingsFormatted }}
     <table>
       <thead>
         <tr>
