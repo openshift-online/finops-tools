@@ -74,7 +74,7 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 				},
 				CoverageAverage: coresp.PeriodAverage{Percentage: 76.2, OK: true},
 				Utilization: []coresp.MonthlyMetric{
-					{Month: "2026-01", Percentage: 92.0},
+					{Month: "2026-01", Percentage: 96.0},
 					{Month: "2026-02", Percentage: 55.0},
 					{Month: "2026-06", Percentage: 81.0},
 				},
@@ -130,7 +130,7 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 		"2026-06 (through 8)",
 		"85.0%",
 		"65.0%",
-		"92.0%",
+		"96.0%",
 		"55.0%",
 		"72.0%",
 		"88.0%",
@@ -149,7 +149,7 @@ func TestRenderSavingsPlansHTML(t *testing.T) {
 	if !strings.Contains(out, "2026-01-15 — 2026-06-08") {
 		t.Errorf("period line should use full dates from Build(); got excerpt around Period:\n%s", excerptAround(out, "2026-01-15"))
 	}
-	for _, want := range []string{"Good", "Low", "Critical"} {
+	for _, want := range []string{"Good", "Watch", "Poor"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing detail status %q", want)
 		}
@@ -232,7 +232,7 @@ func TestRenderSavingsPlansHTML_linkedOmitsStatusColumn(t *testing.T) {
 	if linkedSection == "" {
 		t.Fatal("output missing Linked Member account detail section")
 	}
-	if strings.Contains(linkedSection, "Critical") || strings.Contains(linkedSection, "Good") || strings.Contains(linkedSection, "Low") {
+	if strings.Contains(linkedSection, "Good") || strings.Contains(linkedSection, "Watch") || strings.Contains(linkedSection, "Poor") {
 		t.Errorf("linked account detail should not include status labels; got:\n%s", linkedSection)
 	}
 	if strings.Count(linkedSection, "<th>Status</th>") != 0 {
@@ -281,12 +281,12 @@ func TestMetricsToView_statusThresholds(t *testing.T) {
 		{Month: "2026-03", Percentage: 55.0},
 	}, "2026-01-01", "2026-03-31", utilizationStatusHTML, true)
 
-	assertStatusLabel(t, coverage[0].StatusHTML, "Good")
-	assertStatusLabel(t, coverage[1].StatusHTML, "Low")
-	assertStatusLabel(t, coverage[2].StatusHTML, "Critical")
-	assertStatusLabel(t, utilization[0].StatusHTML, "Good")
-	assertStatusLabel(t, utilization[1].StatusHTML, "Low")
-	assertStatusLabel(t, utilization[2].StatusHTML, "Critical")
+	assertStatusLabel(t, coverage[0].StatusHTML, "Watch")
+	assertStatusLabel(t, coverage[1].StatusHTML, "Poor")
+	assertStatusLabel(t, coverage[2].StatusHTML, "Poor")
+	assertStatusLabel(t, utilization[0].StatusHTML, "Watch")
+	assertStatusLabel(t, utilization[1].StatusHTML, "Watch")
+	assertStatusLabel(t, utilization[2].StatusHTML, "Poor")
 }
 
 func TestPeriodAverageToView(t *testing.T) {
@@ -298,8 +298,8 @@ func TestPeriodAverageToView(t *testing.T) {
 	if util.PercentageFormatted != "82.0%" {
 		t.Errorf("utilization average = %q, want 82.0%%", util.PercentageFormatted)
 	}
-	assertStatusLabel(t, cov.StatusHTML, "Low")
-	assertStatusLabel(t, util.StatusHTML, "Low")
+	assertStatusLabel(t, cov.StatusHTML, "Poor")
+	assertStatusLabel(t, util.StatusHTML, "Watch")
 }
 
 func TestSavingsToView(t *testing.T) {
