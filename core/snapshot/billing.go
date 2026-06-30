@@ -64,12 +64,10 @@ func FetchBilledSnapshotCosts(
 		EndDate:   formatBillingDate(end.AddDate(0, 0, -1)),
 	}
 
+	accountIDs = uniqueTrimmedAccountIDs(accountIDs)
+
 	byAccount := make(map[string]*AccountBilledSnapshotCosts, len(accountIDs))
 	for _, accountID := range accountIDs {
-		accountID = strings.TrimSpace(accountID)
-		if accountID == "" {
-			continue
-		}
 		costs, err := fetchAccountBilledSnapshotCosts(ctx, ce, accountID, start, end)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", accountID, err)
@@ -78,14 +76,28 @@ func FetchBilledSnapshotCosts(
 		byAccount[accountID] = &costs
 	}
 
-	out := make([]AccountBilledSnapshotCosts, 0, len(byAccount))
+	out := make([]AccountBilledSnapshotCosts, 0, len(accountIDs))
 	for _, accountID := range accountIDs {
-		accountID = strings.TrimSpace(accountID)
-		if costs, ok := byAccount[accountID]; ok {
-			out = append(out, *costs)
-		}
+		out = append(out, *byAccount[accountID])
 	}
 	return out, nil
+}
+
+func uniqueTrimmedAccountIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func fetchAccountBilledSnapshotCosts(
