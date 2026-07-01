@@ -326,8 +326,8 @@ func TestNewSavingsPlansReportView_savingsEmpty(t *testing.T) {
 			AccountName: "test",
 		}},
 	})
-	if view.TotalSavingsFormatted != "" {
-		t.Errorf("empty savings total = %q, want empty", view.TotalSavingsFormatted)
+	if view.TotalSavingsCompact != "" {
+		t.Errorf("empty savings total = %q, want empty", view.TotalSavingsCompact)
 	}
 }
 

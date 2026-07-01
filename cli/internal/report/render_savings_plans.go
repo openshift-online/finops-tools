@@ -98,14 +98,12 @@ type SavingsPlansReportView struct {
 	EndDate        string
 	AccountCount   int
 
-	TotalSavingsFormatted    string
 	TotalSavingsCompact      string
 	TotalSavingsPctFormatted string
 	AvgCoverageFormatted     string
 	AvgCoverageStatusHTML    template.HTML
 	AvgUtilizationFormatted  string
 	AvgUtilizationStatusHTML template.HTML
-	TotalOnDemandFormatted   string
 	TotalOnDemandCompact     string
 
 	BubbleChartSVG template.HTML
@@ -252,9 +250,7 @@ func populateDashboard(view *SavingsPlansReportView, accounts []coresp.AccountRe
 	view.BubbleChartSVG = template.HTML(spBubbleChartSVG(bubbles))
 
 	if totalSavings > 0 || totalOnDemand > 0 {
-		view.TotalSavingsFormatted = format.FormatMoney(totalSavings, savingsPlansCurrency)
 		view.TotalSavingsCompact = formatCompactUSD(totalSavings)
-		view.TotalOnDemandFormatted = format.FormatMoney(totalOnDemand, savingsPlansCurrency)
 		view.TotalOnDemandCompact = formatCompactUSD(totalOnDemand)
 		if totalOnDemand > 0 {
 			view.TotalSavingsPctFormatted = fmt.Sprintf("%.1f%%", totalSavings/totalOnDemand*100)
