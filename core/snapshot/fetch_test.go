@@ -427,6 +427,22 @@ func TestApplyRDSRegionalCosts(t *testing.T) {
 	if automatedLive[0].EstimatedMonthlyCostUSD != 0 {
 		t.Fatalf("automated live source cost = %v, want 0", automatedLive[0].EstimatedMonthlyCostUSD)
 	}
+
+	// Automated live backups can inflate regional excess; only billable GiB is removable.
+	majorityAutomatedLive := []Record{{
+		Kind:         KindRDSSnapshot,
+		SizeGiB:      50,
+		SnapshotType: "manual",
+	}}
+	ApplyRDSRegionalCosts(majorityAutomatedLive, RDSRegionContext{
+		FreePoolGiB:       100,
+		TotalBackupGiB:    250,
+		BillableBackupGiB: 50,
+	})
+	wantMajority := RDSMonthlyBackupRunRateUSD(50)
+	if majorityAutomatedLive[0].EstimatedMonthlyCostUSD != wantMajority {
+		t.Fatalf("manual snapshot cost = %v, want %v (billable excess cap)", majorityAutomatedLive[0].EstimatedMonthlyCostUSD, wantMajority)
+	}
 }
 
 func TestApplyRDSRegionalCostsSubsetUsesRegionalBillableGiB(t *testing.T) {

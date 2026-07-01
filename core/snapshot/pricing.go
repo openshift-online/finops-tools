@@ -46,8 +46,12 @@ func RDSMonthlyBackupRunRateUSD(excessGiB float64) float64 {
 }
 
 // ApplyRDSRegionalCosts updates RDS snapshot records using the regional free
-// storage allowance (100% of provisioned DB storage). Excess backup storage is
-// allocated across billable snapshots proportionally by allocated size.
+// storage allowance (100% of provisioned DB storage). Billable excess (manual
+// snapshots and automated snapshots from deleted instances) is allocated across
+// billable snapshots proportionally by allocated size. When automated backups
+// from live instances dominate regional excess, only billable GiB can be removed
+// by deleting listed snapshots, so allocatable excess is capped at billable
+// backup size (regional run-rate summaries still use full excess).
 func ApplyRDSRegionalCosts(records []Record, ctx RDSRegionContext) {
 	excessGiB := ctx.TotalBackupGiB - ctx.FreePoolGiB
 	if excessGiB <= 0 || ctx.TotalBackupGiB <= 0 {
@@ -61,7 +65,6 @@ func ApplyRDSRegionalCosts(records []Record, ctx RDSRegionContext) {
 		return
 	}
 
-	excessCost := RDSMonthlyBackupRunRateUSD(excessGiB)
 	billableGiB := ctx.BillableBackupGiB
 	if billableGiB <= 0 {
 		for i := range records {
@@ -74,6 +77,12 @@ func ApplyRDSRegionalCosts(records []Record, ctx RDSRegionContext) {
 		return
 	}
 
+	billableExcessGiB := excessGiB
+	if billableGiB < excessGiB {
+		billableExcessGiB = billableGiB
+	}
+	billableExcessCost := RDSMonthlyBackupRunRateUSD(billableExcessGiB)
+
 	for i := range records {
 		if !isRDSKind(records[i].Kind) {
 			continue
@@ -84,7 +93,7 @@ func ApplyRDSRegionalCosts(records []Record, ctx RDSRegionContext) {
 			continue
 		}
 		share := records[i].SizeGiB / billableGiB
-		records[i].EstimatedMonthlyCostUSD = excessCost * share
+		records[i].EstimatedMonthlyCostUSD = billableExcessCost * share
 		records[i].CostBasis = CostBasisRDSRegionalExcess
 	}
 }
