@@ -18,13 +18,7 @@ type accountListJSONRow struct {
 func writeAccountListJSON(w io.Writer, provider string, entries []AccountListRow) error {
 	rows := make([]accountListJSONRow, len(entries))
 	for i, e := range entries {
-		rows[i] = accountListJSONRow{
-			Alias:      e.Alias,
-			AccountID:  e.AccountID,
-			Kind:       e.Kind,
-			PayerAlias: e.PayerAlias,
-			Role:       e.Role,
-		}
+		rows[i] = accountListJSONRow(e)
 	}
 	payload := struct {
 		Provider string               `json:"provider"`
