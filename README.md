@@ -17,12 +17,12 @@ The HTTP API is a separate module that imports **`core` only** — it must never
 
 | Package | Role |
 |---------|------|
-| `cmd/` | Cobra wiring only: `<noun>.go` + `<noun>_<verb>.go` (e.g. `report_generate.go`) |
+| `cmd/` | Cobra wiring only: `<noun>.go` + `<noun>_<verb>.go` (e.g. `report_create.go`) |
 | `output/` | Human-readable tables and `--format` handlers |
 | `format/` | Currency formatting for CLI output |
 | `configstore/` | FinOps YAML config read/write |
 | `snowflakeoauth/`, `snowflakecred/` | Red Hat SSO OAuth login and token storage |
-| `account/` | Account login flows (`account add` business logic; not the `cmd` noun files) |
+| `account/` | Account login flows (`config account add` business logic; not the `cmd` noun files) |
 | `aws/`, `awsauth/`, `awslogin/`, `awsrole/` | Credentials, auth orchestration, SAML, role ARNs |
 | `report/` | HTML templates and charts (distinct from `core/report` data assembly) |
 | `progress/` | Progress lines on stderr |
@@ -31,7 +31,7 @@ The HTTP API is a separate module that imports **`core` only** — it must never
 
 ## CLI commands
 
-Every command uses **`finops <noun> <verb>`** (e.g. `finops account add`, `finops demo hello`). See `.cursor/rules/cli-commands.mdc` for conventions when adding commands.
+Every command uses **singular root nouns** with **`finops <noun> <verb>`** for core ops, or **`finops config <sub-resource> <verb>`** for setup (e.g. `finops config account add`, `finops account get-cost`). See `.cursor/rules/cli-commands.mdc` for conventions when adding commands.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ go work sync
 make test
 make build
 make build-backend
-./bin/finops demo hello   # prints: hello
+./bin/finops --help
 ./bin/finops-backend      # starts HTTP server on :8080 (see HTTP API below)
 ```
 
@@ -54,7 +54,7 @@ Or without Make:
 
 ```bash
 go test ./core/... ./cli/... ./backend/...
-go run ./cli/cmd/finops demo hello
+go run ./cli/cmd/finops --help
 go build -o bin/finops ./cli/cmd/finops
 go run ./backend/cmd/finops-backend
 go build -o bin/finops-backend ./backend/cmd/finops-backend
@@ -329,7 +329,7 @@ FinOps stores local settings in a YAML config file:
 | Linux / macOS | `$XDG_CONFIG_HOME/finops/config.yaml` or `~/.config/finops/config.yaml` |
 | Windows | `%AppData%/finops/config.yaml` |
 
-The file is created automatically on first `finops account add`. Example:
+The file is created automatically on first `finops config account add`. Example:
 
 ```yaml
 defaults:
@@ -357,7 +357,7 @@ snowflake:
 
 OAuth client ID and secret are **not** stored in `config.yaml`. Use a separate secrets file (default `~/.config/finops/snowflake-oauth.yaml`, mode `0600`) or environment variables.
 
-Set defaults using fully qualified names (used when `--auth-method` is omitted on `account add`):
+Set defaults using fully qualified names (used when `--auth-method` is omitted on `config account add`):
 
 ```bash
 finops config default set --name aws.auth-method --value profile
@@ -366,21 +366,21 @@ finops config default set --name aws.linked_role --value OrganizationAccountAcce
 finops config default set --name cost.exclude_recent_days --value 2
 ```
 
-Cost query period defaults (`cost.days`, `cost.months`, `cost.from`, `cost.to`, `cost.exclude_recent_days`) apply to `finops cost get` and `finops report generate` when the matching CLI flag is omitted. Set only one of `cost.days`, `cost.months`, or `cost.from` (optional `cost.to` with `cost.from`).
+Cost query period defaults (`cost.days`, `cost.months`, `cost.from`, `cost.to`, `cost.exclude_recent_days`) apply to `finops account get-cost` and `finops report create` when the matching CLI flag is omitted. Set only one of `cost.days`, `cost.months`, or `cost.from` (optional `cost.to` with `cost.from`).
 
 Register a **payer** account by **12-digit account ID** (login + save in config):
 
 ```bash
-finops account add aws 123456789012 --alias rh-control       # auth-method: flag, or config default, else saml
-finops account add aws 123456789012 --auth-method profile  # overrides config default
-finops account add aws 123456789012 --force
+finops config account add aws 123456789012 --alias rh-control       # auth-method: flag, or config default, else saml
+finops config account add aws 123456789012 --auth-method profile  # overrides config default
+finops config account add aws 123456789012 --force
 ```
 
 Register a **linked** account (authenticate to the payer first, then assume a role in the member account):
 
 ```bash
-finops account add aws 111111111111 --alias osd-tenant-1 --payer rh-control
-finops account add aws 111111111111 --payer rh-control --role CustomRole
+finops config account add aws 111111111111 --alias osd-tenant-1 --payer rh-control
+finops config account add aws 111111111111 --payer rh-control --role CustomRole
 ```
 
 The IAM role name defaults to `OrganizationAccountAccessRole`, or `defaults.aws.linked_role` in the finops config. The CLI builds `arn:aws:iam::<account-id>:role/<role-name>` automatically.
@@ -390,21 +390,21 @@ Without `--alias`, the account ID is used as the config key. Aliases are CLI-onl
 List registered accounts (payer vs linked):
 
 ```bash
-finops account list
-finops account list aws
-finops account list snowflake
+finops config account list
+finops config account list aws
+finops config account list snowflake
 ```
 
 ### Snowflake (Red Hat SSO OAuth)
 
 Query Snowflake using OAuth tokens from [Red Hat SSO](https://dataverse.pages.redhat.com/platform/snowflake/red-hat-sso-access/). The access token must include audience `dataverse-snowflake` and scope `session:role-any` (usually via IAM default client scopes / mappers, not by requesting scopes in the authorize URL). The CLI OAuth redirect URI is fixed at `http://127.0.0.1:8765/oauth/callback` (must be registered on the SSO client).
 
-Session settings (account, role, warehouse, database, schema) are stored only in the finops config file (`~/.config/finops/config.yaml`). The CLI does **not** read `~/.snowflake/connections.toml` or Snowflake CLI connection profiles. Configure each alias with `finops account add snowflake` flags and/or `snowflake.*` defaults below.
+Session settings (account, role, warehouse, database, schema) are stored only in the finops config file (`~/.config/finops/config.yaml`). The CLI does **not** read `~/.snowflake/connections.toml` or Snowflake CLI connection profiles. Configure each alias with `finops config account add snowflake` flags and/or `snowflake.*` defaults below.
 
 Store OAuth client credentials (never commit these):
 
 ```bash
-finops config snowflake oauth set --client-id finops-tools-dataverse --client-secret "$SECRET"
+finops config oauth-client set --client-id finops-tools-dataverse --client-secret "$SECRET"
 # or: export FINOPS_SNOWFLAKE_OAUTH_CLIENT_ID=... FINOPS_SNOWFLAKE_OAUTH_CLIENT_SECRET=...
 ```
 
@@ -423,11 +423,11 @@ finops config default set --name snowflake.oauth_audience --value dataverse-snow
 Register a Snowflake account (opens browser for Red Hat SSO, stores refresh token in `~/.config/finops/snowflake-tokens.yaml`). A warehouse is required (per alias or via `snowflake.warehouse` default):
 
 ```bash
-finops account add snowflake myorg-sandbox --alias sandbox \
+finops config account add snowflake myorg-sandbox --alias sandbox \
   --snowflake-role MY_ROLE \
   --warehouse MY_WH \
   --database MY_DB --schema MY_SCHEMA
-finops account add snowflake myorg-prod --alias prod --force   # re-login
+finops config account add snowflake myorg-prod --alias prod --force   # re-login
 ```
 
 Run SQL:
@@ -441,23 +441,23 @@ finops snowflake query --sql "SELECT 1" --format json
 Manage AWS Organizations tags on an account (registered alias or 12-digit account ID):
 
 ```bash
-finops account list-tags --account-alias rh-control
-finops account list-tags --account-id 111111111111 --payer rh-control
-finops account add-tag --account-alias rh-control --tag-key owner --tag-value team-a
-finops account add-tag --account-id 111111111111 --tag-key owner --tag-value team-b --force --payer rh-control
-finops account update-tag --account-alias rh-control --tag-key owner --tag-value team-c
-finops account update-tag --account-id 111111111111 --tag-key env --tag-value prod --force --payer rh-control
+finops tag list --account-alias rh-control
+finops tag list --account-id 111111111111 --payer rh-control
+finops tag add --account-alias rh-control --tag-key owner --tag-value team-a
+finops tag add --account-id 111111111111 --tag-key owner --tag-value team-b --force --payer rh-control
+finops tag update --account-alias rh-control --tag-key owner --tag-value team-c
+finops tag update --account-id 111111111111 --tag-key env --tag-value prod --force --payer rh-control
 ```
 
 List AWS Organizational Units (for discovering OU IDs to use with `--ou` on cost/report commands):
 
 ```bash
-finops account list-ous --payer rh-control
-finops account list-ous --payer rh-control --parent ou-abcd-1234
-finops account list-ous --payer rh-control --format json
+finops aws list-ous --payer rh-control
+finops aws list-ous --payer rh-control --parent ou-abcd-1234
+finops aws list-ous --payer rh-control --format json
 ```
 
-**Cost Explorer (`finops cost get`) requires payer accounts only.** Linked-account credentials are for member-account APIs, not payer-level billing queries.
+**Cost Explorer (`finops account get-cost`) requires payer accounts only.** Linked-account credentials are for member-account APIs, not payer-level billing queries.
 
 Static secrets (API keys, etc.) for other tools live in `~/.config/finops/.env`; AWS sessions use `~/.aws/credentials` profiles.
 
@@ -466,7 +466,7 @@ Static secrets (API keys, etc.) for other tools live in `~/.config/finops/.env`;
 Store and verify temporary AWS credentials for a payer account (same profile layout as finops-mcp-aws):
 
 ```bash
-finops account add aws 123456789012
+finops config account add aws 123456789012
 ```
 
 **Behavior:**
@@ -474,7 +474,7 @@ finops account add aws 123456789012
 1. Looks up a profile derived from the account ID in `~/.aws/credentials`, then in `~/.aws/config` (shared config / SSO).
 2. If the profile exists and STS validation succeeds, reports success without logging in again.
 3. With `--auth-method saml` (default), if credentials are missing or invalid, runs a native Red Hat Kerberos + SAML login flow and merges temporary credentials into `~/.aws/credentials` (other profiles are preserved).
-4. With `--auth-method profile`, SAML login is skipped. `finops account add` uses an existing profile when valid (including a `~/.aws` profile named like `--alias`, e.g. `rh-control`); in an interactive terminal it prompts for access keys only when no matching profile exists. You can also configure the profile yourself (`aws configure`, `aws sso login`, etc.) and run `account add` again to confirm it works.
+4. With `--auth-method profile`, SAML login is skipped. `finops config account add` uses an existing profile when valid (including a `~/.aws` profile named like `--alias`, e.g. `rh-control`); in an interactive terminal it prompts for access keys only when no matching profile exists. You can also configure the profile yourself (`aws configure`, `aws sso login`, etc.) and run `config account add` again to confirm it works.
 
 **SAML prerequisites** (default login, and `--force`):
 
@@ -484,7 +484,7 @@ finops account add aws 123456789012
 
 SAML account matching accepts:
 
-- 12-digit AWS account ID (recommended for `finops account add aws <id>`)
+- 12-digit AWS account ID (recommended for `finops config account add aws <id>`)
 - SAML account display name (for example `rh-control`)
 - `account/role` when a specific role name is required
 
@@ -502,7 +502,7 @@ source_profile = rh-control
 ```
 
 ```bash
-finops account add aws 111111111111 --alias osd-tenant-1 --auth-method profile
+finops config account add aws 111111111111 --alias osd-tenant-1 --auth-method profile
 ```
 
 STS validation must report the **linked** account ID. This registers credentials only; for finops metadata (`payer_alias`, `role`) use `--payer` (and optional `--role`) as shown above.
@@ -512,26 +512,26 @@ STS validation must report the **linked** account ID. This registers credentials
 Fetch **Net Amortized Cost** from AWS Cost Explorer for a configurable date range (default: last 30 calendar days, or `defaults.cost.*` in config). Payer and linked account aliases are supported; linked accounts query Cost Explorer through the registered payer.
 
 ```bash
-finops account add aws 123456789012 --alias rh-control
-finops cost get --account-alias rh-control
-finops cost get --account-alias rh-control --days 7
-finops cost get --account-alias rh-control --months 3
-finops cost get --account-alias rh-control --from 2026-01-01 --to 2026-03-31
-finops cost get --account-alias rh-control --exclude-recent-days 2   # omit last 2 days (AWS CE lag)
-finops cost get --account-alias quay              # linked account (uses payer credentials)
-finops cost get --account 123456789012
-finops cost get --account-alias rh-control,osd-staging-1
-finops cost get --account 123456789012 --format json
-finops cost get --account 123456789012 --format csv
-finops cost get --account 123456789012 --split-by service
-finops cost get --account 123456789012 --split-by account
-finops cost get --account 333333333333 --payer rhc   # member account, payer registered; member need not be in config
-finops account list-ous --payer rh-control           # discover OU IDs
-finops cost get --ou ou-abcd-1234 --payer rh-control
-finops cost get --ou ou-abcd-1234 --payer rh-control --ou-direct --days 7
-finops cost get --payer rh-control --tag-key organization
-finops cost get --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
-finops report generate costs --payer rh-control --tag-key env --tag-value prod -o prod.html
+finops config account add aws 123456789012 --alias rh-control
+finops account get-cost --account-alias rh-control
+finops account get-cost --account-alias rh-control --days 7
+finops account get-cost --account-alias rh-control --months 3
+finops account get-cost --account-alias rh-control --from 2026-01-01 --to 2026-03-31
+finops account get-cost --account-alias rh-control --exclude-recent-days 2   # omit last 2 days (AWS CE lag)
+finops account get-cost --account-alias quay              # linked account (uses payer credentials)
+finops account get-cost --account 123456789012
+finops account get-cost --account-alias rh-control,osd-staging-1
+finops account get-cost --account 123456789012 --format json
+finops account get-cost --account 123456789012 --format csv
+finops account get-cost --account 123456789012 --split-by service
+finops account get-cost --account 123456789012 --split-by account
+finops account get-cost --account 333333333333 --payer rhc   # member account, payer registered; member need not be in config
+finops aws list-ous --payer rh-control           # discover OU IDs
+finops account get-cost --ou ou-abcd-1234 --payer rh-control
+finops account get-cost --ou ou-abcd-1234 --payer rh-control --ou-direct --days 7
+finops account get-cost --payer rh-control --tag-key organization
+finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
+finops report create costs --payer rh-control --tag-key env --tag-value prod -o prod.html
 ```
 
 | Flag | Description |
@@ -561,7 +561,7 @@ finops report generate costs --payer rh-control --tag-key env --tag-value prod -
 
 ### Snapshot (AWS)
 
-Find **EBS and RDS snapshots** older than a cutoff and estimate monthly storage cost. Account selection matches `finops cost get` (`--account`, `--account-alias`, `--ou`, `--tag-key` with `--payer`). Linked member accounts are scanned via role assumption from the payer.
+Find **EBS and RDS snapshots** older than a cutoff and estimate monthly storage cost. Account selection matches `finops account get-cost` (`--account`, `--account-alias`, `--ou`, `--tag-key` with `--payer`). Linked member accounts are scanned via role assumption from the payer.
 
 ```bash
 finops snapshot list --account-alias rh-control
@@ -577,7 +577,7 @@ finops snapshot list --account 333333333333 --payer rhc --older-than-days 90 --f
 | `--types` | Snapshot types to scan: `ebs`, `rds`, or comma-separated (default: `ebs,rds`) |
 | `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
 | `--min-size-gib` | Skip snapshots smaller than this size in GiB (default: `0`) |
-| `--account` / `--account-alias` / `--ou` / `--tag-key` / `--payer` | Same account selection as `finops cost get` |
+| `--account` / `--account-alias` / `--ou` / `--tag-key` / `--payer` | Same account selection as `finops account get-cost` |
 | `--role` | Linked-account IAM role name (default: `defaults.aws.linked_role` in config) |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr |
@@ -590,15 +590,15 @@ Generate HTML reports from configured accounts. Templates use Go's **`html/templ
 
 ```bash
 finops report list
-finops report generate costs --account-alias rh-control
-finops report generate costs --account-alias rh-control -o costs.html
-finops report generate costs --account 333333333333 --payer rhc -o member.html
-finops report generate costs --ou ou-abcd-1234 --payer rh-control -o ou-costs.html
+finops report create costs --account-alias rh-control
+finops report create costs --account-alias rh-control -o costs.html
+finops report create costs --account 333333333333 --payer rhc -o member.html
+finops report create costs --ou ou-abcd-1234 --payer rh-control -o ou-costs.html
 ```
 
 The **costs** template includes:
 
-- Total net amortized cost for the selected period (same flags and config defaults as `cost get`)
+- Total net amortized cost for the selected period (same flags and config defaults as `account get-cost`)
 - Breakdown by linked AWS account
 - Breakdown by AWS service
 - Daily cost trend chart (embedded SVG; works when opening the HTML file locally)
@@ -621,9 +621,9 @@ The **costs** template includes:
 | `--credentials-file` | Path to AWS credentials file |
 | `--output` / `-o` | Write HTML to a file instead of stdout |
 | `--quiet` | Suppress progress messages on stderr (HTML still goes to stdout or `--output`) |
-| `--days`, `--months`, `--from`, `--to`, `--exclude-recent-days` | Same period options as `finops cost get` |
+| `--days`, `--months`, `--from`, `--to`, `--exclude-recent-days` | Same period options as `finops account get-cost` |
 
-Progress lines (tag resolution, credential checks, Cost Explorer queries) are printed to **stderr** so you can redirect output safely, e.g. `finops cost get ... --format json > costs.json`.
+Progress lines (tag resolution, credential checks, Cost Explorer queries) are printed to **stderr** so you can redirect output safely, e.g. `finops account get-cost ... --format json > costs.json`.
 
 Use `--quiet` to suppress progress messages.
 
@@ -650,7 +650,7 @@ Releases are built with [GoReleaser](https://goreleaser.com/) on tag push (`v*`)
 Download a release asset, extract it, and run:
 
 ```bash
-finops demo hello
+finops --help
 ```
 
 ## CI

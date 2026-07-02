@@ -1,4 +1,4 @@
-// report_snowflake.go provides the Snowflake connection used by report generate
+// report_snowflake.go provides the Snowflake connection used by report create
 // commands that query Snowflake (currently: hcp-hierarchy).
 package cmd
 

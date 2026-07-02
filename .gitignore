@@ -3,6 +3,6 @@
 /cache/
 *.exe
 
-# Local Snowflake OAuth credentials and tokens (use finops config snowflake oauth set)
+# Local Snowflake OAuth credentials and tokens (use finops config oauth-client set)
 **/snowflake-oauth.yaml
 **/snowflake-tokens.yaml

@@ -8,6 +8,7 @@ import (
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
 	"github.com/openshift-online/finops-tools/cli/internal/progress"
+	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/spf13/cobra"
 )
@@ -16,6 +17,7 @@ var (
 	snapshotListAccount        string
 	snapshotListAccountAliases string
 	snapshotListFormat         string
+	snapshotListOutput         string
 	snapshotListMinSizeGiB     float64
 	snapshotListOlderThanDays  int
 	snapshotListOU             string
@@ -29,6 +31,7 @@ var (
 	snapshotListTagKey         string
 	snapshotListTagValue       string
 	snapshotListTypes          string
+	snapshotListProvider       string
 	snapshotListFetch          = snapshot.Fetch
 )
 
@@ -37,7 +40,7 @@ var snapshotListCmd = &cobra.Command{
 	Short: "List EBS and RDS snapshots with estimated storage costs",
 	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
-Account selection matches finops cost get: --account, --account-alias, --ou, or --tag-key with --payer.
+Account selection matches finops account get-cost: --account, --account-alias, --ou, or --tag-key with --payer.
 Linked member accounts are scanned using role assumption from the payer.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
@@ -73,6 +76,9 @@ Examples:
 		if _, err := output.ParseFormat(snapshotListFormat); err != nil {
 			return err
 		}
+		if _, err := cost.ParseProvider(snapshotListProvider); err != nil {
+			return err
+		}
 		if snapshotListOlderThanDays <= 0 {
 			return fmt.Errorf("--older-than-days must be positive")
 		}
@@ -92,29 +98,41 @@ Examples:
 
 func init() {
 	snapshotCmd.AddCommand(snapshotListCmd)
-	snapshotListCmd.Flags().StringVar(&snapshotListAccount, "account", "", "AWS account ID(s), comma-separated 12-digit IDs")
-	snapshotListCmd.Flags().StringVar(&snapshotListAccountAliases, "account-alias", "", "Configured account alias(es), comma-separated")
-	snapshotListCmd.Flags().StringVar(&snapshotListOU, "ou", "", "AWS OU ID(s), comma-separated (requires --payer)")
-	snapshotListCmd.Flags().BoolVar(&snapshotListOUDirect, "ou-direct", false, "Include only accounts directly in --ou, not descendant OUs")
-	snapshotListCmd.Flags().StringVar(&snapshotListPayer, "payer", "", "Registered payer alias for member IDs, --ou, or --tag-key")
-	snapshotListCmd.Flags().StringVar(&snapshotListTagKey, "tag-key", "", "Select accounts by AWS Organizations tag key")
-	snapshotListCmd.Flags().StringVar(&snapshotListTagValue, "tag-value", "", "Optional tag value for --tag-key")
+	bindAWSTargetFlags(snapshotListCmd, awsTargetFlagRefs{
+		Account:         &snapshotListAccount,
+		AccountAliases:  &snapshotListAccountAliases,
+		OU:              &snapshotListOU,
+		OUDirect:        &snapshotListOUDirect,
+		Payer:           &snapshotListPayer,
+		TagKey:          &snapshotListTagKey,
+		TagValue:        &snapshotListTagValue,
+		SkipOrgCache:    &snapshotListSkipOrgCache,
+		RefreshOrgCache: &snapshotListRefreshOrgCache,
+	})
 	snapshotListCmd.Flags().IntVar(&snapshotListOlderThanDays, "older-than-days", snapshot.DefaultOlderThanDays, "List snapshots older than this many days")
 	snapshotListCmd.Flags().StringVar(&snapshotListTypes, "types", "ebs,rds", "Snapshot types to scan: ebs, rds (comma-separated)")
 	snapshotListCmd.Flags().StringVar(&snapshotListRegions, "regions", "", "Limit scan to comma-separated AWS regions (default: all enabled regions)")
 	snapshotListCmd.Flags().Float64Var(&snapshotListMinSizeGiB, "min-size-gib", 0, "Skip snapshots smaller than this size in GiB")
 	snapshotListCmd.Flags().StringVar(&snapshotListFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
+	addOutputFlag(snapshotListCmd, &snapshotListOutput)
+	snapshotListCmd.Flags().StringVar(&snapshotListProvider, "provider", string(cost.ProviderAWS),
+		"Cloud provider: aws or gcp")
 	snapshotListCmd.Flags().StringVar(&snapshotListRole, "role", "", "Linked-account IAM role name (default: config defaults.aws.linked_role)")
 	snapshotListCmd.Flags().BoolVar(&snapshotListQuiet, "quiet", false, "Suppress progress messages on stderr")
-	snapshotListCmd.Flags().BoolVar(&snapshotListSkipOrgCache, "skip-org-cache", false, "Bypass cached organization account/tag data")
-	snapshotListCmd.Flags().BoolVar(&snapshotListRefreshOrgCache, "refresh-org-cache", false, "Refresh organization cache from AWS")
 }
 
 func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	format, err := output.ParseFormat(snapshotListFormat)
 	if err != nil {
 		return err
+	}
+	provider, err := cost.ParseProvider(snapshotListProvider)
+	if err != nil {
+		return err
+	}
+	if provider != cost.ProviderAWS {
+		return fmt.Errorf("only AWS is supported for snapshot list today")
 	}
 	types, err := snapshot.ParseTypes(snapshotListTypes)
 	if err != nil {
@@ -153,8 +171,17 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	out, closeOut, err := resolveCommandOutput(cmd, snapshotListOutput)
+	if err != nil {
+		return err
+	}
+	if closeOut != nil {
+		defer closeOut()
+	}
+
 	if len(targets) == 0 {
-		return output.WriteSnapshotListResult(cmd.OutOrStdout(), format, snapshot.Result{
+		return output.WriteSnapshotListResult(out, format, snapshot.Result{
 			Summary: snapshot.Summary{
 				OlderThanDays:  snapshotListOlderThanDays,
 				CostDisclaimer: "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
@@ -202,5 +229,5 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		result.Summary.BilledCosts = billed
 	}
 
-	return output.WriteSnapshotListResult(cmd.OutOrStdout(), format, result)
+	return output.WriteSnapshotListResult(out, format, result)
 }

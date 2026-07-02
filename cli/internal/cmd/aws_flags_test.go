@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-func TestReportGenerateHelpSeparatesAWSFlags(t *testing.T) {
+func TestReportCreateHelpSeparatesAWSFlags(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"report", "generate", "--help"})
+	rootCmd.SetArgs([]string{"report", "create", "--help"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute --help: %v", err)

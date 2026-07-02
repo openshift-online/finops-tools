@@ -1,4 +1,4 @@
-// account_update_tag.go implements "finops account update-tag" for AWS Organizations account tags.
+// tag_update.go implements "finops tag update" for AWS Organizations account tags.
 package cmd
 
 import (
@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var accountUpdateTagCmd = &cobra.Command{
-	Use:   "update-tag",
+var tagUpdateCmd = &cobra.Command{
+	Use:   "update",
 	Short: "Update an AWS Organizations tag on an account",
 	Long: `Update one AWS Organizations tag on an account.
 
@@ -23,11 +23,11 @@ By default, the command fails when the tag key does not exist.
 Use --force to create the tag when it is missing.
 
 Examples:
-  finops account update-tag --account-alias rh-control --tag-key owner --tag-value team-b
-  finops account update-tag --account-alias osd-tenant-1 --tag-key env --tag-value stage --force
-  finops account update-tag --account-id 111111111111 --tag-key organization --tag-value "Hybrid Platform" --payer rh-control`,
+  finops tag update --account-alias rh-control --tag-key owner --tag-value team-b
+  finops tag update --account-alias osd-tenant-1 --tag-key env --tag-value stage --force
+  finops tag update --account-id 111111111111 --tag-key organization --tag-value "Hybrid Platform" --payer rh-control`,
 	Args: cobra.NoArgs,
-	RunE: runAccountUpdateTag,
+	RunE: runTagUpdate,
 }
 
 var (
@@ -45,16 +45,18 @@ var (
 )
 
 func init() {
-	accountCmd.AddCommand(accountUpdateTagCmd)
-	accountUpdateTagCmd.Flags().StringVar(&accountUpdateTagKey, "tag-key", "", "Tag key")
-	accountUpdateTagCmd.Flags().StringVar(&accountUpdateTagValue, "tag-value", "", "Tag value")
-	accountUpdateTagCmd.Flags().BoolVar(&accountUpdateTagForce, "force", false, "Create the tag when the key does not already exist")
-	accountUpdateTagCmd.Flags().StringVar(&accountUpdateTagPayer, "payer", "", "Registered payer alias to use for credentials when mutating account tags")
-	accountUpdateTagCmd.Flags().StringVar(&accountUpdateTagAlias, "account-alias", "", "Registered account alias")
-	accountUpdateTagCmd.Flags().StringVar(&accountUpdateTagAccountID, "account-id", "", "12-digit AWS account ID")
+	tagCmd.AddCommand(tagUpdateCmd)
+	tagUpdateCmd.Flags().StringVar(&accountUpdateTagKey, "tag-key", "", "Tag key")
+	tagUpdateCmd.Flags().StringVar(&accountUpdateTagValue, "tag-value", "", "Tag value")
+	tagUpdateCmd.Flags().BoolVar(&accountUpdateTagForce, "force", false, "Create the tag when the key does not already exist")
+	bindAWSAccountSelectorFlags(tagUpdateCmd, awsAccountSelectorFlagRefs{
+		Payer:     &accountUpdateTagPayer,
+		Alias:     &accountUpdateTagAlias,
+		AccountID: &accountUpdateTagAccountID,
+	}, "Registered payer alias to use for credentials when mutating account tags")
 }
 
-func runAccountUpdateTag(cmd *cobra.Command, args []string) error {
+func runTagUpdate(cmd *cobra.Command, args []string) error {
 	tagKey := strings.TrimSpace(accountUpdateTagKey)
 	if tagKey == "" {
 		return fmt.Errorf("tag key is required (--tag-key)")

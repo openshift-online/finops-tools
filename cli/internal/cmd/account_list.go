@@ -1,14 +1,20 @@
-// account_list.go implements "finops account list" to show registered account aliases.
+// config_account_list.go implements "finops config account list" to show registered account aliases.
 package cmd
 
 import (
 	"fmt"
+	"io"
 	"slices"
 
 	"github.com/openshift-online/finops-tools/cli/internal/account"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
 	"github.com/spf13/cobra"
+)
+
+var (
+	accountListFormat string
+	accountListOutput string
 )
 
 var accountListCmd = &cobra.Command{
@@ -20,19 +26,30 @@ AWS entries show whether each alias is a payer account (org billing / Cost Explo
 or a linked member account (role assumption from a registered payer).
 
 Examples:
-  finops account list
-  finops account list aws
-  finops account list gcp
-  finops account list snowflake`,
+  finops config account list
+  finops config account list aws
+  finops config account list gcp
+  finops config account list snowflake`,
 	Args: cobra.MaximumNArgs(1),
+	PreRunE: func(_ *cobra.Command, _ []string) error {
+		_, err := output.ParseFormat(accountListFormat)
+		return err
+	},
 	RunE: runAccountList,
 }
 
 func init() {
-	accountCmd.AddCommand(accountListCmd)
+	configAccountCmd.AddCommand(accountListCmd)
+	accountListCmd.Flags().StringVar(&accountListFormat, "format", string(output.FormatPrettyPrint),
+		"Output format: pretty-print, json, csv")
+	addOutputFlag(accountListCmd, &accountListOutput)
 }
 
 func runAccountList(cmd *cobra.Command, args []string) error {
+	format, err := output.ParseFormat(accountListFormat)
+	if err != nil {
+		return err
+	}
 	provider := account.ProviderAWS
 	if len(args) == 1 {
 		p, err := account.ParseProvider(args[0])
@@ -51,24 +68,32 @@ func runAccountList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	out, closeOut, err := resolveCommandOutput(cmd, accountListOutput)
+	if err != nil {
+		return err
+	}
+	if closeOut != nil {
+		defer closeOut()
+	}
+
 	switch provider {
 	case account.ProviderAWS:
-		return printAWSAccountList(cmd, cfg)
+		return printAWSAccountList(out, format, cfg)
 	case account.ProviderGCP:
-		return printGCPAccountList(cmd, cfg)
+		return printGCPAccountList(out, format, cfg)
 	case account.ProviderSnowflake:
-		return printSnowflakeAccountList(cmd, cfg)
+		return printSnowflakeAccountList(out, format, cfg)
 	default:
 		return fmt.Errorf("unsupported provider %q", provider)
 	}
 }
 
-func printAWSAccountList(cmd *cobra.Command, cfg configstore.File) error {
+func printAWSAccountList(w io.Writer, format output.Format, cfg configstore.File) error {
 	rows := awsAccountListRows(cfg.ListAWSAccounts())
-	return output.WriteAWSAccountList(cmd.OutOrStdout(), rows)
+	return output.WriteAccountListResult(w, format, "aws", rows)
 }
 
-func printGCPAccountList(cmd *cobra.Command, cfg configstore.File) error {
+func printGCPAccountList(w io.Writer, format output.Format, cfg configstore.File) error {
 	aliases := make([]string, 0, len(cfg.GCP.AccountAliases))
 	for alias := range cfg.GCP.AccountAliases {
 		aliases = append(aliases, alias)
@@ -82,10 +107,10 @@ func printGCPAccountList(cmd *cobra.Command, cfg configstore.File) error {
 			AccountID: cfg.GCP.AccountAliases[alias],
 		})
 	}
-	return output.WriteGCPAccountList(cmd.OutOrStdout(), rows)
+	return output.WriteAccountListResult(w, format, "gcp", rows)
 }
 
-func printSnowflakeAccountList(cmd *cobra.Command, cfg configstore.File) error {
+func printSnowflakeAccountList(w io.Writer, format output.Format, cfg configstore.File) error {
 	entries := cfg.ListSnowflakeAccounts()
 	rows := make([]output.AccountListRow, len(entries))
 	for i, e := range entries {
@@ -96,7 +121,7 @@ func printSnowflakeAccountList(cmd *cobra.Command, cfg configstore.File) error {
 			Role:      e.Role,
 		}
 	}
-	return output.WriteSnowflakeAccountList(cmd.OutOrStdout(), rows)
+	return output.WriteAccountListResult(w, format, "snowflake", rows)
 }
 
 func awsAccountListRows(entries []configstore.AWSAccountListEntry) []output.AccountListRow {

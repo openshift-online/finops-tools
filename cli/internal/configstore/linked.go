@@ -54,7 +54,7 @@ func (f File) SetLinkedAccount(alias string, linked LinkedAccount) (File, error)
 	}
 	payerID, ok := f.AWSAccountIDForAlias(linked.PayerAlias)
 	if !ok {
-		return File{}, fmt.Errorf("unknown payer alias %q (register payer with: finops account add aws <12-digit-id> --alias %s)",
+		return File{}, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)",
 			linked.PayerAlias, linked.PayerAlias)
 	}
 	if !f.isPayerAccountID(payerID) {

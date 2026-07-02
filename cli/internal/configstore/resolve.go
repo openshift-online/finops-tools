@@ -52,7 +52,7 @@ func ResolveCostTargets(cfg File, accountIDs, aliases []string, payerAlias strin
 	if payerAlias != "" {
 		id, ok := cfg.PayerAccountIDForAlias(payerAlias)
 		if !ok {
-			return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
+			return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
 		}
 		payerAccountID = id
 	}
@@ -66,7 +66,7 @@ func ResolveCostTargets(cfg File, accountIDs, aliases []string, payerAlias strin
 			return nil
 		}
 		if requireRegistered && !cfg.HasAWSAccount(accountID) {
-			return fmt.Errorf("account %s is not registered (run: finops account add aws %s, or use --payer <payer-alias>)", accountID, accountID)
+			return fmt.Errorf("account %s is not registered (run: finops config account add aws %s, or use --payer <payer-alias>)", accountID, accountID)
 		}
 		seen[accountID] = struct{}{}
 		out = append(out, target)
@@ -90,7 +90,7 @@ func ResolveCostTargets(cfg File, accountIDs, aliases []string, payerAlias strin
 		}
 		id, ok := cfg.PayerAccountIDForAlias(alias)
 		if !ok {
-			return nil, fmt.Errorf("unknown account alias %q (add with: finops account add aws <12-digit-id> --alias %s)", alias, alias)
+			return nil, fmt.Errorf("unknown account alias %q (add with: finops config account add aws <12-digit-id> --alias %s)", alias, alias)
 		}
 		if err := add(cost.AccountTarget{
 			AccountID:    id,

@@ -19,7 +19,7 @@ const (
 	ProviderGCP Provider = "gcp"
 )
 
-// DefaultDays is the lookback window for cost get.
+// DefaultDays is the lookback window for account get-cost.
 const DefaultDays = 30
 
 // MetricNetAmortized is the AWS Cost Explorer metric name.

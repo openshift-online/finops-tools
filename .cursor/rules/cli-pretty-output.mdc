@@ -60,7 +60,7 @@ Use `cli/internal/format` (`FormatAmount`, `FormatMoney`) for all human-readable
 
 ## Machine-readable formats
 
-When a command needs JSON/CSV, follow `cost.go`: `ParseFormat`, `Write*Result(w, format, data)`, default `pretty-print`. Pretty path always goes through `*_pretty.go`. Do not add thousands separators to JSON/CSV.
+When a command needs JSON/CSV, follow `account_get_cost.go`: `ParseFormat`, `Write*Result(w, format, data)`, default `pretty-print`. Pretty path always goes through `*_pretty.go`. Do not add thousands separators to JSON/CSV.
 
 ## Tests
 

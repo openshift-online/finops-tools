@@ -1,5 +1,5 @@
 // Package cmd wires the finops CLI with Cobra: root command, command groups (core vs setup),
-// and registration of noun commands (cost, account, config, demo).
+// and registration of noun commands.
 package cmd
 
 import (
@@ -23,6 +23,6 @@ func init() {
 	rootCmd.SetErr(os.Stderr)
 	rootCmd.AddGroup(
 		&cobra.Group{ID: "core", Title: "Core Commands:"},
-		&cobra.Group{ID: "setup", Title: "Setup & Extra:"},
+		&cobra.Group{ID: "setup", Title: "Setup:"},
 	)
 }

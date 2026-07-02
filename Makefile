@@ -39,7 +39,7 @@ openshift-restart:
 openshift-refresh: podman-push openshift-apply openshift-restart
 
 run: build
-	./bin/finops demo hello
+	./bin/finops --help
 
 clean:
 	rm -rf bin dist

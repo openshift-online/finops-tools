@@ -1,42 +1,56 @@
 ---
-description: finops CLI command naming — noun then verb
+description: finops CLI command naming — singular nouns, config uses 3 levels
 globs: cli/**/*
 alwaysApply: false
 ---
 
 # finops CLI commands
 
-All user-facing commands follow **`finops <noun> <verb>`** (two words after `finops`).
+Root commands use **singular nouns** (`account`, `snapshot`, `report`, `tag`, `aws`, `snowflake`, `config`).
 
 ## Structure
 
-- **Noun** — resource or domain (`config`, `demo`, `cluster`, …). Implemented as a Cobra parent command attached to `rootCmd`.
-- **Verb** — action on that noun (`login`, `verify`, `hello`, …). Implemented as a child of the noun command.
-- **Args and flags** come after the verb: `finops account add aws 123456789012 --force`.
+| Shape | Where | Example |
+|-------|-------|---------|
+| `config <sub-resource> <verb>` | Setup (3 levels) | `config account add`, `config default get`, `config oauth-client set` |
+| `<noun> <verb>` | Core ops | `tag list`, `snapshot list`, `report create`, `snowflake query` |
+| `<noun> <hyphenated-verb>` | Billing / AWS-specific | `account get-cost`, `aws list-ous` |
+
+- **Args and flags** come after the verb: `finops config account add aws 123456789012 --force`.
+- **`config account`** is registry setup; root **`account get-cost`** is billing.
 
 ## Examples
 
 ```bash
-# ✅ GOOD
-finops account add aws 123456789012
-finops account list
+# ✅ GOOD — setup (3-level config)
+finops config account add aws 123456789012 --alias rh-control
+finops config account list aws
 finops config default set --name aws.auth-method --value profile
-finops demo hello
+finops config oauth-client set --client-id finops-tools-dataverse --client-secret "$SECRET"
+
+# ✅ GOOD — core
+finops account get-cost --account-alias rh-control
+finops tag list --account-alias rh-control
+finops aws list-ous --payer rh-control
+finops report create costs --account-alias rh-control -o costs.html
+finops snowflake query --alias sandbox "SELECT 1"
 
 # ❌ BAD — verb or arg at root
 finops hello
-finops login aws
+finops get-cost
 
-# ❌ BAD — extra nesting (noun verb subcommand)
-finops config aws login rh-control
+# ❌ BAD — old paths (removed)
+finops cost get
+finops account add aws 123456789012
+finops report generate costs
 ```
 
 ## Help groups
 
 Root-level help (`finops --help`) groups noun commands into two sections:
 
-- **Core** (`GroupID = "core"`) — day-to-day operations (`cost`, future domain nouns like `cluster`).
-- **Setup & extra** (`GroupID = "setup"`) — local setup and utilities (`config`, `demo`).
+- **Core** (`GroupID = "core"`) — day-to-day operations (`account`, `snapshot`, `report`, `tag`, `aws`, `snowflake`).
+- **Setup** (`GroupID = "setup"`) — local setup (`config`).
 
 Groups are defined on `rootCmd` in `cli/internal/cmd/root.go` via `AddGroup`. Every new root-level noun must set `GroupID` to a registered group ID.
 
@@ -46,13 +60,14 @@ Groups are defined on `rootCmd` in `cli/internal/cmd/root.go` via `AddGroup`. Ev
 2. Add `cli/internal/cmd/<noun>_<verb>.go` with the verb child (`Use: "<verb> [args]"`).
 3. Put business logic in `core/`; keep Cobra wiring thin. Never use `os/exec` in `core/` — external CLIs belong in `cli/` (see `core-no-shell.mdc`).
 4. Terminal tables and colors go in `cli/internal/output/` (see `cli-pretty-output.mdc`).
-5. Update README; CLI-owned hints belong in `cli/`, not `core/`.
+5. Shared AWS target flags: use `bindAWSTargetFlags` / `bindAWSAccountSelectorFlags` from `aws_targets.go`.
+6. Update README; CLI-owned hints belong in `cli/`, not `core/`.
 
 ## Naming
 
-- Nouns and verbs are lowercase single words (kebab-case only if the domain name requires it).
-- Prefer a dedicated verb command over a mode flag when behavior differs (e.g. `account add` vs a shared `login --check`).
-- Command source files use the noun prefix: `report_generate.go` for `finops report generate`, not `reports_generate.go`.
+- Root nouns are singular (`account`, not `accounts`).
+- Nouns and verbs are lowercase; use kebab-case for multi-word verbs (`get-cost`, `list-ous`).
+- Command source files use the noun prefix: `report_create.go` for `finops report create`, not `reports_create.go`.
 
 ## Scaling `cmd/`
 
@@ -62,4 +77,4 @@ Keep a flat `package cmd` until one of these triggers:
 - Several verb files per noun exceed ~300 lines each, or
 - Import cycles force shared logic out of `cmd`.
 
-Then split into per-noun subpackages (`cli/internal/cmd/account/`, `cost/`, …), each exporting `NewCmd() *cobra.Command`, registered from `root.go`.
+Then split into per-noun subpackages (`cli/internal/cmd/account/`, `report/`, …), each exporting `NewCmd() *cobra.Command`, registered from `root.go`.

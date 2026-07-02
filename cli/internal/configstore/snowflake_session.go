@@ -39,7 +39,7 @@ func ValidateSnowflakeWarehouse(acct SnowflakeAccount, alias string) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"snowflake alias %q has no warehouse configured; set --warehouse on finops account add snowflake, add warehouse under snowflake.account_aliases.%s in the finops config, or set finops config default snowflake.warehouse",
+		"snowflake alias %q has no warehouse configured; set --warehouse on finops config account add snowflake, add warehouse under snowflake.account_aliases.%s in the finops config, or set finops config default snowflake.warehouse",
 		alias, alias,
 	)
 }

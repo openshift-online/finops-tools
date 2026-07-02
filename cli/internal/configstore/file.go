@@ -234,3 +234,28 @@ func (f File) HasAWSAccount(accountID string) bool {
 	}
 	return false
 }
+
+// RemoveAccountByAlias removes alias from AWS, GCP, or Snowflake account maps.
+func (f File) RemoveAccountByAlias(alias string) (File, error) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return File{}, fmt.Errorf("alias is required")
+	}
+	removed := false
+	if _, ok := f.AWS.AccountAliases[alias]; ok {
+		delete(f.AWS.AccountAliases, alias)
+		removed = true
+	}
+	if _, ok := f.GCP.AccountAliases[alias]; ok {
+		delete(f.GCP.AccountAliases, alias)
+		removed = true
+	}
+	if _, ok := f.Snowflake.AccountAliases[alias]; ok {
+		delete(f.Snowflake.AccountAliases, alias)
+		removed = true
+	}
+	if !removed {
+		return File{}, fmt.Errorf("unknown account alias %q", alias)
+	}
+	return f, nil
+}

@@ -22,7 +22,7 @@ var configDefaultSetCmd = &cobra.Command{
 Supported names:
   aws.auth-method — AWS authentication for account add (saml or profile)
   aws.linked_role — IAM role name for linked account add (default: OrganizationAccountAccessRole)
-  cost.days — default lookback in calendar days for cost get / report generate
+  cost.days — default lookback in calendar days for account get-cost / report create
   cost.months — default lookback in calendar months (1st-of-month start)
   cost.from — default start date YYYY-MM-DD (optional cost.to)
   cost.to — default end date YYYY-MM-DD (requires cost.from)

@@ -71,7 +71,7 @@ const (
 	AccountTargetsRequired AccountTargetMode = iota
 	// AccountTargetsOptional allows zero targets (empty costs report).
 	AccountTargetsOptional
-	// AccountTargetsSnowflake uses --account-alias as a Snowflake alias, not AWS targets.
+	// AccountTargetsSnowflake uses --snowflake-alias, not AWS targets.
 	AccountTargetsSnowflake
 )
 

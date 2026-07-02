@@ -76,10 +76,11 @@ func TestValidateCostTargetSelector(t *testing.T) {
 
 func TestValidateReportCostTargetSelector(t *testing.T) {
 	tests := []struct {
-		name     string
-		template string
-		sel      costTargetSelector
-		wantErr  string
+		name           string
+		template       string
+		sel            costTargetSelector
+		snowflakeAlias string
+		wantErr        string
 	}{
 		{
 			name:     "hcp-hierarchy no alias",
@@ -87,9 +88,10 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 			sel:      costTargetSelector{},
 		},
 		{
-			name:     "hcp-hierarchy snowflake alias",
-			template: reportpkg.TemplateHCPHierarchy,
-			sel:      costTargetSelector{Aliases: []string{"rhsandbox"}},
+			name:             "hcp-hierarchy snowflake alias",
+			template:         reportpkg.TemplateHCPHierarchy,
+			sel:              costTargetSelector{},
+			snowflakeAlias:   "rhsandbox",
 		},
 		{
 			name:     "hcp-hierarchy rejects aws alias flags",
@@ -98,10 +100,10 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 			wantErr:  "does not use AWS account targets",
 		},
 		{
-			name:     "hcp-hierarchy rejects multiple aliases",
+			name:     "hcp-hierarchy rejects aws account aliases",
 			template: reportpkg.TemplateHCPHierarchy,
-			sel:      costTargetSelector{Aliases: []string{"rhsandbox", "rhprod"}},
-			wantErr:  "single Snowflake --account-alias",
+			sel:      costTargetSelector{Aliases: []string{"rh-control"}},
+			wantErr:  "does not use AWS account targets",
 		},
 		{
 			name:     "costs optional empty",
@@ -118,7 +120,7 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateReportCostTargetSelector(tc.template, tc.sel)
+			err := validateReportCostTargetSelector(tc.template, tc.sel, tc.snowflakeAlias)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -260,7 +262,7 @@ func TestCostGetPreRunETagMode(t *testing.T) {
 		costGetSplitBy = ""
 	})
 
-	if err := costGetCmd.PreRunE(costGetCmd, nil); err != nil {
+	if err := accountGetCostCmd.PreRunE(accountGetCostCmd, nil); err != nil {
 		t.Fatalf("PreRunE: %v", err)
 	}
 }

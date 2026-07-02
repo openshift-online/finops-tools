@@ -81,9 +81,9 @@ func TestRunAccountTagsLinkedAliasUsesPayerCredentials(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	accountTagsCmd.SetOut(buf)
-	accountTagsCmd.SetErr(buf)
-	if err := runAccountTags(accountTagsCmd, nil); err != nil {
+	tagListCmd.SetOut(buf)
+	tagListCmd.SetErr(buf)
+	if err := runTagList(tagListCmd, nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	out := buf.String()
@@ -143,9 +143,9 @@ func TestRunAccountTagsJSONFormat(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	accountTagsCmd.SetOut(buf)
-	accountTagsCmd.SetErr(buf)
-	if err := runAccountTags(accountTagsCmd, nil); err != nil {
+	tagListCmd.SetOut(buf)
+	tagListCmd.SetErr(buf)
+	if err := runTagList(tagListCmd, nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	out := buf.String()
@@ -167,7 +167,7 @@ func TestRunAccountTagsInvalidFormat(t *testing.T) {
 		accountTagsAlias = ""
 		accountTagsAccountID = ""
 	})
-	err := runAccountTags(accountTagsCmd, nil)
+	err := runTagList(tagListCmd, nil)
 	if err == nil {
 		t.Fatal("expected invalid format error")
 	}
@@ -224,9 +224,9 @@ func TestRunAccountTagsWithPayerOverride(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	accountTagsCmd.SetOut(buf)
-	accountTagsCmd.SetErr(buf)
-	if err := runAccountTags(accountTagsCmd, nil); err != nil {
+	tagListCmd.SetOut(buf)
+	tagListCmd.SetErr(buf)
+	if err := runTagList(tagListCmd, nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !strings.Contains(buf.String(), "111111111111") {

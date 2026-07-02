@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// awsFlags are bound as persistent flags on cost, report, and account commands.
+// awsFlags are bound as persistent flags on account, report, snapshot, tag, aws, and config account commands.
 // Help output lists them under "Global Flags", separate from each subcommand's flags.
 var awsFlags struct {
 	AuthMethod      string

@@ -1,4 +1,4 @@
-// cost_get.go implements "finops cost get": resolves targets, ensures credentials, fetches costs, and prints output.
+// account_get_cost.go implements "finops account get-cost": resolves targets, ensures credentials, fetches costs, and prints output.
 package cmd
 
 import (
@@ -17,6 +17,7 @@ var (
 	costGetAccount         string
 	costGetAccountAliases  string
 	costGetFormat          string
+	costGetOutput          string
 	costGetOU              string
 	costGetOUDirect        bool
 	costGetPayer           string
@@ -29,11 +30,11 @@ var (
 	costGetRefreshOrgCache bool
 )
 
-var costGetCmd = &cobra.Command{
-	Use:   "get",
+var accountGetCostCmd = &cobra.Command{
+	Use:   "get-cost",
 	Short: "Get net amortized cost for a date range",
 	Long: `Fetch the sum of AWS Cost Explorer NetAmortizedCost for one or more payer or linked accounts.
-Provide --account with 12-digit AWS account IDs and/or --account-alias with configured aliases (see finops account add aws).
+Provide --account with 12-digit AWS account IDs and/or --account-alias with configured aliases (see finops config account add aws).
 Alternatively, select accounts by AWS Organizations tag with --payer and --tag-key (optional --tag-value).
 
 Period (default: last 30 calendar days, or defaults.cost.* in config):
@@ -44,16 +45,16 @@ Use --payer with --account to query a member account that is not registered (the
 Use --payer with --tag-key to query all org accounts matching an Organizations account tag.
 
 Examples:
-  finops cost get --account-alias rh-control
-  finops cost get --payer rh-control --tag-key organization
-  finops cost get --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
+  finops account get-cost --account-alias rh-control
+  finops account get-cost --payer rh-control --tag-key organization
+  finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
 
 Use --ou with --payer to query all accounts in an AWS Organizational Unit (recursive by default).
 Add --ou-direct to include only accounts directly in the OU, not descendant OUs.
 
 Examples:
-  finops cost get --ou ou-abcd-1234 --payer rh-control
-  finops cost get --ou ou-abcd-1234 --payer rh-control --ou-direct --days 7
+  finops account get-cost --ou ou-abcd-1234 --payer rh-control
+  finops account get-cost --ou ou-abcd-1234 --payer rh-control --ou-direct --days 7
 
 Authentication uses --auth-method when set, otherwise defaults.aws.auth_method in config (saml by default).
 
@@ -85,31 +86,34 @@ Only AWS is supported today; GCP will be added later.`,
 		}
 		return validateOrgCacheFlags(costGetSkipOrgCache, costGetRefreshOrgCache)
 	},
-	RunE: runCostGet,
+	RunE: runAccountGetCost,
 }
 
 func init() {
-	costCmd.AddCommand(costGetCmd)
-	costGetCmd.Flags().StringVar(&costGetAccount, "account", "", "Payer AWS account ID(s), comma-separated 12-digit IDs")
-	costGetCmd.Flags().StringVar(&costGetAccountAliases, "account-alias", "", "Configured account alias(es), comma-separated (e.g. rh-control)")
-	costGetCmd.Flags().StringVar(&costGetOU, "ou", "", "AWS OU ID(s), comma-separated (requires --payer; recursive by default)")
-	costGetCmd.Flags().BoolVar(&costGetOUDirect, "ou-direct", false, "Include only accounts directly in --ou, not descendant OUs")
-	costGetCmd.Flags().StringVar(&costGetPayer, "payer", "", "Registered payer alias for --account member IDs, --ou, or --tag-key (e.g. rhc)")
-	costGetCmd.Flags().StringVar(&costGetTagKey, "tag-key", "", "Select accounts by AWS Organizations tag key")
-	costGetCmd.Flags().StringVar(&costGetTagValue, "tag-value", "", "Optional tag value (omit to match any value for --tag-key)")
-	costGetCmd.Flags().StringVar(&costGetFormat, "format", string(output.FormatPrettyPrint),
+	accountCmd.AddCommand(accountGetCostCmd)
+	bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{
+		Account:         &costGetAccount,
+		AccountAliases:  &costGetAccountAliases,
+		OU:              &costGetOU,
+		OUDirect:        &costGetOUDirect,
+		Payer:           &costGetPayer,
+		TagKey:          &costGetTagKey,
+		TagValue:        &costGetTagValue,
+		SkipOrgCache:    &costGetSkipOrgCache,
+		RefreshOrgCache: &costGetRefreshOrgCache,
+	})
+	accountGetCostCmd.Flags().StringVar(&costGetFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
-	costGetCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
+	addOutputFlag(accountGetCostCmd, &costGetOutput)
+	accountGetCostCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
 		"Cloud provider: aws or gcp")
-	costGetCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
+	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
 		"Split results by dimension (supported: service, account)")
-	costGetCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
-	costGetCmd.Flags().BoolVar(&costGetSkipOrgCache, "skip-org-cache", false, "Bypass cached organization account/tag data (always fetch live from AWS)")
-	costGetCmd.Flags().BoolVar(&costGetRefreshOrgCache, "refresh-org-cache", false, "Ignore cached organization data and refresh the cache from AWS")
-	addPeriodFlags(costGetCmd)
+	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
+	addPeriodFlags(accountGetCostCmd)
 }
 
-func runCostGet(cmd *cobra.Command, _ []string) error {
+func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	format, err := output.ParseFormat(costGetFormat)
 	if err != nil {
 		return err
@@ -154,12 +158,21 @@ func runCostGet(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	out, closeOut, err := resolveCommandOutput(cmd, costGetOutput)
+	if err != nil {
+		return err
+	}
+	if closeOut != nil {
+		defer closeOut()
+	}
+
 	if len(targets) == 0 {
 		dateRange, err := resolveCostPeriod(time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		return output.WriteCostResult(cmd.OutOrStdout(), format, cost.EmptyResult(provider, dateRange, splitBy))
+		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, splitBy))
 	}
 
 	if provider == cost.ProviderAWS {
@@ -203,5 +216,5 @@ func runCostGet(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	return output.WriteCostResult(cmd.OutOrStdout(), format, result)
+	return output.WriteCostResult(out, format, result)
 }

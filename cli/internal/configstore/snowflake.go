@@ -106,7 +106,7 @@ func (f File) ResolveSnowflakeAccountAlias(explicit string) (alias string, acct 
 	accounts := f.ListSnowflakeAccounts()
 	switch len(accounts) {
 	case 0:
-		return "", SnowflakeAccount{}, fmt.Errorf("no snowflake accounts registered; run finops account add snowflake")
+		return "", SnowflakeAccount{}, fmt.Errorf("no snowflake accounts registered; run finops config account add snowflake")
 	case 1:
 		alias = accounts[0].Alias
 		acct, _ = f.SnowflakeAccountForAlias(alias)

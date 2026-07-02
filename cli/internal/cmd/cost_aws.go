@@ -168,10 +168,10 @@ func enrichCostTargetDisplayName(
 
 func mapCredentialError(accountID string, err error) error {
 	if errors.Is(err, awsconfig.ErrCredentialsNotFound) {
-		return fmt.Errorf("%w (run: finops account add aws %s)", err, accountID)
+		return fmt.Errorf("%w (run: finops config account add aws %s)", err, accountID)
 	}
 	if errors.Is(err, awsconfig.ErrCredentialsInvalid) {
-		return fmt.Errorf("%w (run: finops account add aws %s)", err, accountID)
+		return fmt.Errorf("%w (run: finops config account add aws %s)", err, accountID)
 	}
 	return err
 }
@@ -179,9 +179,9 @@ func mapCredentialError(accountID string, err error) error {
 func mapCredentialStatusError(accountID string, status awsconfig.ResolveStatus) error {
 	switch status {
 	case awsconfig.CredentialsInvalid:
-		return fmt.Errorf("%w (run: finops account add aws %s)", awsconfig.ErrCredentialsInvalid, accountID)
+		return fmt.Errorf("%w (run: finops config account add aws %s)", awsconfig.ErrCredentialsInvalid, accountID)
 	default:
-		return fmt.Errorf("%w (run: finops account add aws %s)", awsconfig.ErrCredentialsNotFound, accountID)
+		return fmt.Errorf("%w (run: finops config account add aws %s)", awsconfig.ErrCredentialsNotFound, accountID)
 	}
 }
 

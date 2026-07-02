@@ -92,10 +92,10 @@ func missingCredentialsError(method Method, accountName string, profileNames []s
 
 	switch method {
 	case MethodProfile:
-		return fmt.Errorf("%w: profiles %v (configure ~/.aws, or run: finops account add aws %s --auth-method profile)",
+		return fmt.Errorf("%w: profiles %v (configure ~/.aws, or run: finops config account add aws %s --auth-method profile)",
 			awsconfig.ErrCredentialsNotFound, profiles, accountName)
 	default:
-		return fmt.Errorf("%w: profiles %v (run: finops account add aws %s)",
+		return fmt.Errorf("%w: profiles %v (run: finops config account add aws %s)",
 			awsconfig.ErrCredentialsNotFound, profiles, accountName)
 	}
 }

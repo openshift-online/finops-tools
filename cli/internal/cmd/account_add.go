@@ -1,4 +1,4 @@
-// account_add.go implements "finops account add" to log in and register payer or linked AWS accounts.
+// config_account_add.go implements "finops config account add" to log in and register payer or linked AWS accounts.
 package cmd
 
 import (
@@ -43,16 +43,16 @@ For Snowflake, <account> is the Snowflake account identifier (e.g. orgname-accou
 OAuth uses Red Hat SSO with a client registered for Dataverse Snowflake. Configure the
 client ID and secret first:
 
-  finops config snowflake oauth set --client-id <id> --client-secret "$SECRET"
+  finops config oauth-client set --client-id <id> --client-secret "$SECRET"
 
 See: https://dataverse.pages.redhat.com/platform/snowflake/red-hat-sso-access/
 
 Payer account (Cost Explorer and org billing):
-  finops account add aws 123456789012 --alias rh-control
+  finops config account add aws 123456789012 --alias rh-control
 
 Linked account (assume a role from a registered payer):
-  finops account add aws 111111111111 --alias osd-tenant-1 --payer rh-control
-  finops account add aws 111111111111 --payer rh-control --role CustomRole
+  finops config account add aws 111111111111 --alias osd-tenant-1 --payer rh-control
+  finops config account add aws 111111111111 --payer rh-control --role CustomRole
 
 The role name defaults to OrganizationAccountAccessRole, or the value of
 defaults.aws.linked_role in the finops config (finops config default set).
@@ -60,7 +60,7 @@ defaults.aws.linked_role in the finops config (finops config default set).
 With --auth-method saml (default): runs built-in Red Hat SAML login for the payer when credentials are missing.
 With --auth-method profile: uses an existing ~/.aws profile when valid.
 
-cost get supports payer and linked account aliases. Linked accounts use payer credentials
+account get-cost supports payer and linked account aliases. Linked accounts use payer credentials
 and the configured auth method (defaults.aws.auth_method or --auth-method).`,
 	Args: cobra.ExactArgs(2),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -95,7 +95,7 @@ and the configured auth method (defaults.aws.auth_method or --auth-method).`,
 }
 
 func init() {
-	accountCmd.AddCommand(accountAddCmd)
+	configAccountCmd.AddCommand(accountAddCmd)
 	accountAddCmd.Flags().BoolVar(&accountAddForce, "force", false, "Re-run SAML login even if existing payer credentials are valid (AWS only)")
 	accountAddCmd.Flags().StringVar(&accountAddAlias, "alias", "", "Friendly alias for the account (e.g. rh-control)")
 	accountAddCmd.Flags().StringVar(&accountAddPayer, "payer", "", "Registered payer alias (linked account: assume role in <account> from this payer)")

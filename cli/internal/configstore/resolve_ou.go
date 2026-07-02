@@ -38,7 +38,7 @@ func ResolveOUAccountTargets(cfg File, memberAccountIDs []string, payerAlias str
 	}
 	payerAccountID, ok := cfg.PayerAccountIDForAlias(payerAlias)
 	if !ok {
-		return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
+		return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
 	}
 
 	var out []cost.AccountTarget

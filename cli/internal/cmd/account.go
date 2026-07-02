@@ -1,4 +1,4 @@
-// account.go registers the "finops account" noun command for payer and linked account management.
+// account.go registers the "finops account" noun command for account billing operations.
 package cmd
 
 import (
@@ -7,11 +7,12 @@ import (
 
 var accountCmd = &cobra.Command{
 	Use:   "account",
-	Short: "Manage cloud payer accounts and aliases",
+	Short: "Account billing and cost",
+	Long:  "Fetch cost and usage for registered or targeted cloud accounts.",
 }
 
 func init() {
-	accountCmd.GroupID = "setup"
+	accountCmd.GroupID = "core"
 	bindAWSPersistentFlags(accountCmd)
 	rootCmd.AddCommand(accountCmd)
 }

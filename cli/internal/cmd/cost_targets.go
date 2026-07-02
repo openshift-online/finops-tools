@@ -116,14 +116,14 @@ func awsReportSelectorSpecified(sel costTargetSelector) bool {
 		sel.OUDirectOnly
 }
 
-func validateReportCostTargetSelector(templateName string, sel costTargetSelector) error {
+func validateReportCostTargetSelector(templateName string, sel costTargetSelector, snowflakeAlias string) error {
 	switch reportpkg.AccountTargetModeFor(templateName) {
 	case reportpkg.AccountTargetsSnowflake:
-		if awsReportSelectorSpecified(sel) {
-			return fmt.Errorf("%q report does not use AWS account targets (--account, --ou, --tag-key, --payer)", templateName)
+		if awsReportSelectorSpecified(sel) || len(sel.Aliases) > 0 {
+			return fmt.Errorf("%q report does not use AWS account targets (--account, --account-alias, --ou, --tag-key, --payer)", templateName)
 		}
-		if len(sel.Aliases) > 1 {
-			return fmt.Errorf("%q report accepts a single Snowflake --account-alias", templateName)
+		if strings.TrimSpace(snowflakeAlias) == "" {
+			return nil
 		}
 		return nil
 	case reportpkg.AccountTargetsOptional:
@@ -217,7 +217,7 @@ func resolveCostTargetsWithOU(
 	if len(sel.OUIDs) > 0 {
 		payerID, ok := cfg.PayerAccountIDForAlias(sel.PayerAlias)
 		if !ok {
-			return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops account add aws <12-digit-id> --alias %s)", sel.PayerAlias, sel.PayerAlias)
+			return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", sel.PayerAlias, sel.PayerAlias)
 		}
 		payerTarget := cost.AccountTarget{AccountID: payerID}
 		if err := ensureCostCredentials(ctx, cmd, cfg, []cost.AccountTarget{payerTarget}, configPath, credentialsFile, authMethod); err != nil {
@@ -306,7 +306,7 @@ func resolveCostTargetsByTag(
 	payerAlias := sel.PayerAlias
 	payerID, ok := cfg.PayerAccountIDForAlias(payerAlias)
 	if !ok {
-		return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
+		return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
 	}
 
 	tagKey := sel.TagKey

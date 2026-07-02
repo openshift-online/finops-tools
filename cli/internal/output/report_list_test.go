@@ -10,7 +10,7 @@ import (
 
 func TestWriteReportTemplateList(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteReportTemplateList(&buf, reportpkg.Templates()); err != nil {
+	if err := WriteReportTemplateList(&buf, FormatPrettyPrint, reportpkg.Templates()); err != nil {
 		t.Fatal(err)
 	}
 	out := stripANSI(buf.String())

@@ -18,9 +18,11 @@ For user-facing list-style commands (for example: `list`, `list-tags`, `get` ret
 2. Wire output through a formatter switch (`pretty-print`, `json`, `csv`).
 3. Keep JSON/CSV raw (no ANSI, no pretty-table-only formatting assumptions).
 4. Mention all supported formats in command help text/examples.
+5. Provide `--output` / `-o` via `addOutputFlag` and write with `resolveCommandOutput`.
 
 ## Example
 
 ```go
 cmd.Flags().StringVar(&listFormat, "format", string(output.FormatPrettyPrint), "Output format: pretty-print, json, csv")
+addOutputFlag(cmd, &listOutput)
 ```

@@ -70,7 +70,7 @@ func TestRunAccountAddTagFailsWhenKeyExistsWithoutForce(t *testing.T) {
 		return coreaccount.AccountKindPayer, nil
 	}
 
-	err := runAccountAddTag(accountAddTagCmd, nil)
+	err := runTagAdd(tagAddCmd, nil)
 	if err == nil {
 		t.Fatal("expected duplicate tag error")
 	}
@@ -156,9 +156,9 @@ func TestRunAccountAddTagForceOnLinkedAliasUsesPayerCredentials(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	accountAddTagCmd.SetOut(buf)
-	accountAddTagCmd.SetErr(buf)
-	if err := runAccountAddTag(accountAddTagCmd, nil); err != nil {
+	tagAddCmd.SetOut(buf)
+	tagAddCmd.SetErr(buf)
+	if err := runTagAdd(tagAddCmd, nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !strings.Contains(buf.String(), "added") {

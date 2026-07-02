@@ -70,7 +70,7 @@ func TestRunAccountUpdateTagFailsWhenMissingWithoutForce(t *testing.T) {
 		return coreaccount.AccountKindPayer, nil
 	}
 
-	err := runAccountUpdateTag(accountUpdateTagCmd, nil)
+	err := runTagUpdate(tagUpdateCmd, nil)
 	if err == nil {
 		t.Fatal("expected missing tag error")
 	}
@@ -138,9 +138,9 @@ func TestRunAccountUpdateTagForceCreatesMissingTag(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	accountUpdateTagCmd.SetOut(buf)
-	accountUpdateTagCmd.SetErr(buf)
-	if err := runAccountUpdateTag(accountUpdateTagCmd, nil); err != nil {
+	tagUpdateCmd.SetOut(buf)
+	tagUpdateCmd.SetErr(buf)
+	if err := runTagUpdate(tagUpdateCmd, nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !strings.Contains(buf.String(), "created") {

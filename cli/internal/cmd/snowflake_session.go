@@ -38,7 +38,7 @@ func snowflakeOAuthConfig(cfg configstore.File, clientID, clientSecret, ssoEnv s
 	}
 	if strings.TrimSpace(clientID) == "" {
 		return snowflakeoauth.ClientConfig{}, fmt.Errorf(
-			"snowflake oauth client_id not configured; run finops config snowflake oauth set --client-id <id> or set FINOPS_SNOWFLAKE_OAUTH_CLIENT_ID",
+			"snowflake oauth client_id not configured; run finops config oauth-client set --client-id <id> or set FINOPS_SNOWFLAKE_OAUTH_CLIENT_ID",
 		)
 	}
 	return snowflakeoauth.ClientConfig{

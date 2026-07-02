@@ -11,12 +11,13 @@ import (
 var (
 	snowflakeQuerySQL    string
 	snowflakeQueryFormat string
+	snowflakeQueryOutput string
 )
 
 var snowflakeQueryCmd = &cobra.Command{
 	Use:   "query",
 	Short: "Run a SQL query against a registered Snowflake account",
-	Long: `Execute SQL using Red Hat SSO OAuth tokens stored by finops account add snowflake.
+	Long: `Execute SQL using Red Hat SSO OAuth tokens stored by finops config account add snowflake.
 
 Examples:
   finops snowflake query --sql "SELECT CURRENT_USER(), CURRENT_ROLE()"
@@ -30,6 +31,7 @@ func init() {
 	snowflakeQueryCmd.Flags().StringVar(&snowflakeQuerySQL, "sql", "", "SQL statement to execute (required)")
 	snowflakeQueryCmd.Flags().StringVar(&snowflakeQueryFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
+	addOutputFlag(snowflakeQueryCmd, &snowflakeQueryOutput)
 	_ = snowflakeQueryCmd.MarkFlagRequired("sql")
 }
 
@@ -86,5 +88,12 @@ func runSnowflakeQuery(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	return output.WriteSnowflakeQueryResult(cmd.OutOrStdout(), format, result)
+	out, closeOut, err := resolveCommandOutput(cmd, snowflakeQueryOutput)
+	if err != nil {
+		return err
+	}
+	if closeOut != nil {
+		defer closeOut()
+	}
+	return output.WriteSnowflakeQueryResult(out, format, result)
 }

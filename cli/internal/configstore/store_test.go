@@ -207,3 +207,22 @@ func TestResolveOUAccountTargets(t *testing.T) {
 		t.Fatal("expected error for unknown payer alias")
 	}
 }
+
+func TestRemoveAccountByAlias(t *testing.T) {
+	cfg := Default()
+	var err error
+	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = cfg.RemoveAccountByAlias("rh-control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.AWS.AccountAliases["rh-control"]; ok {
+		t.Fatal("alias should be removed")
+	}
+	if _, err := cfg.RemoveAccountByAlias("missing"); err == nil {
+		t.Fatal("expected error for unknown alias")
+	}
+}

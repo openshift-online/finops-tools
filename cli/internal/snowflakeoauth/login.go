@@ -55,7 +55,7 @@ func (t TokenSet) Valid() bool {
 // Login obtains tokens via browser authorization code flow with PKCE.
 func Login(ctx context.Context, cfg ClientConfig) (TokenSet, error) {
 	if strings.TrimSpace(cfg.ClientID) == "" {
-		return TokenSet{}, errors.New("oauth client_id is required (set via finops config snowflake oauth set or FINOPS_SNOWFLAKE_OAUTH_CLIENT_ID)")
+		return TokenSet{}, errors.New("oauth client_id is required (set via finops config oauth-client set or FINOPS_SNOWFLAKE_OAUTH_CLIENT_ID)")
 	}
 	audience := strings.TrimSpace(cfg.Audience)
 	if audience == "" {
