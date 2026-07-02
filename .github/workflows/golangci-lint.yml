@@ -36,8 +36,8 @@ jobs:
         with:
           go-version: "1.25"
       - name: golangci-lint (${{ matrix.modules }})
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.12
           working-directory: ${{ matrix.modules }}
           only-new-issues: true
