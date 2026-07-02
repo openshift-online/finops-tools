@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/jcmturner/gokrb5/v8/config"
 	"github.com/jcmturner/gokrb5/v8/credentials"
 	"github.com/jcmturner/gokrb5/v8/spnego"
+	"github.com/openshift-online/finops-tools/cli/internal/extrace"
 )
 
 type spnegoHTTPGetter interface {
@@ -34,7 +34,7 @@ func (g defaultSPNEGOHTTPGetter) Get(ctx context.Context, url string) (string, e
 }
 
 func (g defaultSPNEGOHTTPGetter) getWithGoSPNEGO(ctx context.Context, targetURL string) (string, error) {
-	cl, err := newKerberosClient()
+	cl, err := newKerberosClient(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +59,7 @@ func (g defaultSPNEGOHTTPGetter) getWithGoSPNEGO(ctx context.Context, targetURL 
 }
 
 func (g defaultSPNEGOHTTPGetter) getWithCurlSPNEGO(ctx context.Context, targetURL string) (string, error) {
-	cmd := exec.CommandContext(ctx, "curl",
+	cmd := extrace.CommandContext(ctx, "curl",
 		"--silent",
 		"--show-error",
 		"--fail",
@@ -81,8 +81,8 @@ func (g defaultSPNEGOHTTPGetter) getWithCurlSPNEGO(ctx context.Context, targetUR
 	return string(out), nil
 }
 
-func newKerberosClient() (*client.Client, error) {
-	ccachePath, err := kerberosCCachePath()
+func newKerberosClient(ctx context.Context) (*client.Client, error) {
+	ccachePath, err := kerberosCCachePath(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func newKerberosClient() (*client.Client, error) {
 	return cl, nil
 }
 
-func kerberosCCachePath() (string, error) {
+func kerberosCCachePath(ctx context.Context) (string, error) {
 	raw := strings.TrimSpace(os.Getenv("KRB5CCNAME"))
 	if raw != "" {
 		if strings.HasPrefix(raw, "FILE:") {
@@ -116,7 +116,7 @@ func kerberosCCachePath() (string, error) {
 		}
 		return raw, nil
 	}
-	uidOut, err := exec.Command("id", "-u").Output()
+	uidOut, err := extrace.CommandContext(ctx, "id", "-u").Output()
 	if err != nil {
 		return "", fmt.Errorf("resolve current uid for default Kerberos cache: %w", err)
 	}

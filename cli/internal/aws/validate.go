@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
 // Identity is the result of a successful STS GetCallerIdentity call.
@@ -70,6 +71,7 @@ func (STSValidator) Validate(ctx context.Context, sess ProfileSession) (Identity
 }
 
 func callerIdentity(ctx context.Context, client *sts.Client) (Identity, error) {
+	apilog.Log(ctx, "STS.GetCallerIdentity")
 	out, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
 		var apiErr smithy.APIError

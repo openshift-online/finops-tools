@@ -103,15 +103,16 @@ func runTagAdd(cmd *cobra.Command, args []string) error {
 	}
 	ensureOpts.AccountName = target.CredentialsAccountID
 	ensureOpts.ProfileNames = profiles
-	if _, err := accountAddTagEnsureCredentialsFn(cmd.Context(), ensureOpts); err != nil {
+	awsCtx := awsCommandContext(cmd)
+	if _, err := accountAddTagEnsureCredentialsFn(awsCtx, ensureOpts); err != nil {
 		return fmt.Errorf("%s: %w", target.CredentialsAccountID, mapCredentialError(target.CredentialsAccountID, err))
 	}
 
-	awsCfg, err := accountAddTagLoadConfigFn(cmd.Context(), cfg, target.CredentialsAccountID, awsFlags.CredentialsFile)
+	awsCfg, err := accountAddTagLoadConfigFn(awsCtx, cfg, target.CredentialsAccountID, awsFlags.CredentialsFile)
 	if err != nil {
 		return err
 	}
-	kind, err := accountAddTagDetectKindFn(cmd.Context(), awsCfg, target.CredentialsAccountID)
+	kind, err := accountAddTagDetectKindFn(awsCtx, awsCfg, target.CredentialsAccountID)
 	if err != nil {
 		return fmt.Errorf("account tag mutations require payer credentials; unable to verify account %s is a payer: %w", target.CredentialsAccountID, err)
 	}
@@ -119,14 +120,14 @@ func runTagAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("account tag mutations require payer credentials; account %s is %s (use --payer <payer-alias>)", target.CredentialsAccountID, kind)
 	}
 
-	tags, err := accountAddTagListTagsFn(cmd.Context(), awsCfg, target.AccountID)
+	tags, err := accountAddTagListTagsFn(awsCtx, awsCfg, target.AccountID)
 	if err != nil {
 		return fmt.Errorf("list tags for account %s: %w", target.AccountID, err)
 	}
 	if accountHasTagKey(tags, tagKey) && !accountAddTagForce {
 		return fmt.Errorf("tag %q already exists on account %s (use --force to overwrite)", tagKey, target.AccountID)
 	}
-	if err := accountAddTagSetAccountTagFn(cmd.Context(), awsCfg, target.AccountID, tagKey, tagValue); err != nil {
+	if err := accountAddTagSetAccountTagFn(awsCtx, awsCfg, target.AccountID, tagKey, tagValue); err != nil {
 		return fmt.Errorf("add tag %q on account %s: %w", tagKey, target.AccountID, err)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
+	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
 // RDSAPI is the subset of RDS used for snapshot discovery.
@@ -38,7 +39,7 @@ type RDSAPI interface {
 type rdsClientFactory func(aws.Config) RDSAPI
 
 func newRDSClient(cfg aws.Config) RDSAPI {
-	return rds.NewFromConfig(cfg)
+	return apilog.WrapRDS(rds.NewFromConfig(cfg))
 }
 
 type rdsLister interface {

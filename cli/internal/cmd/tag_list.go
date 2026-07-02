@@ -105,15 +105,16 @@ func runTagList(cmd *cobra.Command, args []string) error {
 	}
 	ensureOpts.AccountName = target.CredentialsAccountID
 	ensureOpts.ProfileNames = profiles
-	if _, err := accountTagsEnsureCredentials(cmd.Context(), ensureOpts); err != nil {
+	awsCtx := awsCommandContext(cmd)
+	if _, err := accountTagsEnsureCredentials(awsCtx, ensureOpts); err != nil {
 		return fmt.Errorf("%s: %w", target.CredentialsAccountID, mapCredentialError(target.CredentialsAccountID, err))
 	}
 
-	awsCfg, err := accountTagsLoadConfigForCreds(cmd.Context(), cfg, target.CredentialsAccountID, awsFlags.CredentialsFile)
+	awsCfg, err := accountTagsLoadConfigForCreds(awsCtx, cfg, target.CredentialsAccountID, awsFlags.CredentialsFile)
 	if err != nil {
 		return err
 	}
-	tags, err := accountTagsFetch(cmd.Context(), awsCfg, target.AccountID)
+	tags, err := accountTagsFetch(awsCtx, awsCfg, target.AccountID)
 	if err != nil {
 		return fmt.Errorf("list tags for account %s: %w", target.AccountID, err)
 	}

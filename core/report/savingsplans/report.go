@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
+	"github.com/openshift-online/finops-tools/core/apilog"
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
@@ -104,9 +105,10 @@ func defaultCEClientFactory(cfg aws.Config) SavingsPlansAPI {
 		region = costExplorerRegion
 	}
 	cfg.Region = region
-	return costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
+	inner := costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
 		o.Region = costExplorerRegion
 	})
+	return apilog.WrapSavingsPlans(inner)
 }
 
 func buildWith(ctx context.Context, newClient ceClientFactory, accounts []cost.AccountTarget, dr cost.DateRange) (Report, error) {

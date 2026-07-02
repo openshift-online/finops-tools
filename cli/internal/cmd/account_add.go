@@ -129,7 +129,8 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	res, err := addAccountFn(cmd.Context(), account.AddOptions{
+	awsCtx := awsCommandContext(cmd)
+	res, err := addAccountFn(awsCtx, account.AddOptions{
 		Provider:      provider,
 		AccountID:     accountID,
 		Alias:         accountAddAlias,
@@ -139,11 +140,11 @@ func runAccountAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if provider == account.ProviderAWS {
-		awsCfg, err := loadAWSAccountProfileFn(cmd.Context(), res.Profile)
+		awsCfg, err := loadAWSAccountProfileFn(awsCtx, res.Profile)
 		if err != nil {
 			return fmt.Errorf("load AWS profile %q: %w", res.Profile, err)
 		}
-		kind, kindErr := detectAWSAccountKindFn(cmd.Context(), awsCfg, res.AccountID)
+		kind, kindErr := detectAWSAccountKindFn(awsCtx, awsCfg, res.AccountID)
 		switch kind {
 		case coreaccount.AccountKindLinked:
 			return fmt.Errorf(
@@ -197,7 +198,8 @@ func runAccountAddLinked(cmd *cobra.Command, linkedAccountID string) error {
 		return err
 	}
 
-	res, err := account.AddAWSLinked(cmd.Context(), account.AddAWSLinkedOptions{
+	awsCtx := awsCommandContext(cmd)
+	res, err := account.AddAWSLinked(awsCtx, account.AddAWSLinkedOptions{
 		LinkedAccountID: linkedAccountID,
 		Alias:           accountAddAlias,
 		PayerAccountID:  payerAccountID,

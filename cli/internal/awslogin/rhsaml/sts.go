@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	awsconfig "github.com/openshift-online/finops-tools/cli/internal/aws"
+	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
 const redHatSAMLProviderName = "RedHatInternal"
@@ -35,6 +36,7 @@ func assumeRoleWithSAMLClient(ctx context.Context, client assumeRoleWithSAMLAPI,
 		SAMLAssertion:   aws.String(assertion),
 		DurationSeconds: aws.Int32(sessionTimeoutSeconds),
 	}
+	apilog.Log(ctx, fmt.Sprintf("STS.AssumeRoleWithSAML role=%s", account.RoleARN))
 	out, err := client.AssumeRoleWithSAML(ctx, input)
 	if err != nil {
 		return awsconfig.ProfileSession{}, fmt.Errorf("assume role with SAML for %s: %w", account.UID, err)

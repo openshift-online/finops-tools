@@ -171,7 +171,7 @@ func TestResolveCostTargetsByTag(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	targets, err := resolveCostTargets(context.Background(), cmd, cfg, costTargetSelector{
+	targets, err := resolveCostTargets(cmd, cfg, costTargetSelector{
 		PayerAlias: "rh-control",
 		TagKey:     "env",
 	}, path, "", "", nil)
@@ -220,7 +220,7 @@ func TestResolveCostTargetsByTagNoMatches(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	targets, err := resolveCostTargets(context.Background(), cmd, cfg, costTargetSelector{
+	targets, err := resolveCostTargets(cmd, cfg, costTargetSelector{
 		PayerAlias: "rh-control",
 		TagKey:     "env",
 		TagValue:   "prod",

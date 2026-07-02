@@ -103,15 +103,16 @@ func runTagUpdate(cmd *cobra.Command, args []string) error {
 	}
 	ensureOpts.AccountName = target.CredentialsAccountID
 	ensureOpts.ProfileNames = profiles
-	if _, err := accountUpdateTagEnsureCredentialsFn(cmd.Context(), ensureOpts); err != nil {
+	awsCtx := awsCommandContext(cmd)
+	if _, err := accountUpdateTagEnsureCredentialsFn(awsCtx, ensureOpts); err != nil {
 		return fmt.Errorf("%s: %w", target.CredentialsAccountID, mapCredentialError(target.CredentialsAccountID, err))
 	}
 
-	awsCfg, err := accountUpdateTagLoadConfigFn(cmd.Context(), cfg, target.CredentialsAccountID, awsFlags.CredentialsFile)
+	awsCfg, err := accountUpdateTagLoadConfigFn(awsCtx, cfg, target.CredentialsAccountID, awsFlags.CredentialsFile)
 	if err != nil {
 		return err
 	}
-	kind, err := accountUpdateTagDetectKindFn(cmd.Context(), awsCfg, target.CredentialsAccountID)
+	kind, err := accountUpdateTagDetectKindFn(awsCtx, awsCfg, target.CredentialsAccountID)
 	if err != nil {
 		return fmt.Errorf("account tag mutations require payer credentials; unable to verify account %s is a payer: %w", target.CredentialsAccountID, err)
 	}
@@ -119,7 +120,7 @@ func runTagUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("account tag mutations require payer credentials; account %s is %s (use --payer <payer-alias>)", target.CredentialsAccountID, kind)
 	}
 
-	tags, err := accountUpdateTagListTagsFn(cmd.Context(), awsCfg, target.AccountID)
+	tags, err := accountUpdateTagListTagsFn(awsCtx, awsCfg, target.AccountID)
 	if err != nil {
 		return fmt.Errorf("list tags for account %s: %w", target.AccountID, err)
 	}
@@ -127,7 +128,7 @@ func runTagUpdate(cmd *cobra.Command, args []string) error {
 	if !exists && !accountUpdateTagForce {
 		return fmt.Errorf("tag %q does not exist on account %s (use --force to create it)", tagKey, target.AccountID)
 	}
-	if err := accountUpdateTagSetAccountTagFn(cmd.Context(), awsCfg, target.AccountID, tagKey, tagValue); err != nil {
+	if err := accountUpdateTagSetAccountTagFn(awsCtx, awsCfg, target.AccountID, tagKey, tagValue); err != nil {
 		return fmt.Errorf("update tag %q on account %s: %w", tagKey, target.AccountID, err)
 	}
 

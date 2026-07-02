@@ -24,12 +24,12 @@ var (
 )
 
 func ensureSnapshotCredentialsImpl(
-	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
 	configPath, credentialsFile, authMethod string,
 ) error {
+	ctx := awsCommandContext(cmd)
 	seen := make(map[string]struct{})
 	for i := range targets {
 		credID := targets[i].CredentialsAccountID()
@@ -57,13 +57,13 @@ func ensureSnapshotCredentialsImpl(
 }
 
 func prepareSnapshotTargetsImpl(
-	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
 	status costStepper,
 ) ([]snapshot.AccountTarget, error) {
+	ctx := awsCommandContext(cmd)
 	configCache := make(map[string]aws.Config)
 	out := make([]snapshot.AccountTarget, 0, len(targets))
 

@@ -27,9 +27,12 @@ func TestReportCreateHelpSeparatesAWSFlags(t *testing.T) {
 	if strings.Contains(flagsSection, "--auth-method") || strings.Contains(flagsSection, "--credentials-file") {
 		t.Errorf("AWS flags should not appear under Flags:\n%s", flagsSection)
 	}
-	for _, flag := range []string{"--auth-method", "--config", "--credentials-file"} {
+	for _, flag := range []string{"--auth-method", "--config", "--credentials-file", "--verbose"} {
 		if !strings.Contains(globalSection, flag) {
 			t.Errorf("Global Flags missing %s:\n%s", flag, globalSection)
 		}
+	}
+	if !strings.Contains(globalSection, "-v,") && !strings.Contains(globalSection, "-v ") {
+		t.Errorf("Global Flags missing -v shorthand:\n%s", globalSection)
 	}
 }

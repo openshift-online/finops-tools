@@ -176,7 +176,6 @@ func validateCostTargetSelector(sel costTargetSelector) (costTargetSelectionMode
 }
 
 func resolveCostTargets(
-	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
 	sel costTargetSelector,
@@ -188,6 +187,7 @@ func resolveCostTargets(
 		return nil, err
 	}
 
+	ctx := awsCommandContext(cmd)
 	switch mode {
 	case costTargetModeTag:
 		return resolveCostTargetsByTag(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod, status)

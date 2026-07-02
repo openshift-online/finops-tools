@@ -140,6 +140,10 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	}
 
 	status := progress.New(cmd.ErrOrStderr(), costGetQuiet)
+	awsCtx := cmd.Context()
+	if provider == cost.ProviderAWS {
+		awsCtx = awsCommandContext(cmd)
+	}
 
 	sel, err := parseCostTargetSelector(
 		costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
@@ -151,7 +155,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	}
 
 	targets, err := resolveCostTargets(
-		cmd.Context(), cmd, cfg, sel,
+		cmd, cfg, sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
 	)
@@ -177,13 +181,13 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 
 	if provider == cost.ProviderAWS {
 		status.Step("Ensuring AWS credentials…")
-		if err := ensureCostCredentials(cmd.Context(), cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+		if err := ensureCostCredentials(awsCtx, cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 			return err
 		}
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(cmd.Context(), cfg, targets, awsFlags.CredentialsFile, status)
+		targets, err = prepareCostTargets(awsCtx, cfg, targets, awsFlags.CredentialsFile, status)
 		if err != nil {
 			return err
 		}
@@ -211,7 +215,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	result, err := cost.Fetch(cmd.Context(), costQuery)
+	result, err := cost.Fetch(awsCtx, costQuery)
 	if err != nil {
 		return err
 	}

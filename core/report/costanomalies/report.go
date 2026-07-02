@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
+	"github.com/openshift-online/finops-tools/core/apilog"
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
@@ -75,9 +76,10 @@ func defaultCEClientFactory(cfg aws.Config) CostAnomaliesAPI {
 		region = costExplorerRegion
 	}
 	cfg.Region = region
-	return costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
+	inner := costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
 		o.Region = costExplorerRegion
 	})
+	return apilog.WrapCostAnomalies(inner)
 }
 
 // buildWith is the testable core: accepts any CostAnomaliesAPI factory.

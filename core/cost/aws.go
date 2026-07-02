@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
+	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
 const costExplorerRegion = "us-east-1"
@@ -340,9 +341,10 @@ func fetchAWSDailyNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchA
 
 func defaultCostExplorerFactory() func(aws.Config) CostExplorerAPI {
 	return func(cfg aws.Config) CostExplorerAPI {
-		return costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
+		inner := costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
 			o.Region = costExplorerRegion
 		})
+		return apilog.WrapGetCostAndUsage(inner)
 	}
 }
 

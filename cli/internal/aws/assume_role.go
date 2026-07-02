@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
 // AssumeRole obtains temporary credentials by assuming roleARN using payer credentials.
@@ -42,6 +43,7 @@ func AssumeRole(ctx context.Context, payerSession ProfileSession, roleARN, sessi
 		return ProfileSession{}, fmt.Errorf("load AWS config for assume role: %w", err)
 	}
 
+	apilog.Log(ctx, fmt.Sprintf("STS.AssumeRole role=%s", roleARN))
 	out, err := sts.NewFromConfig(cfg).AssumeRole(ctx, &sts.AssumeRoleInput{
 		RoleArn:         aws.String(roleARN),
 		RoleSessionName: aws.String(sessionName),

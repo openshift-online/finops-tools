@@ -136,7 +136,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	default:
 		if targetMode != reportpkg.AccountTargetsOptional || costTargetSelectorSpecified(sel) {
 			targets, err = resolveCostTargets(
-				cmd.Context(), cmd, cfg, sel,
+				cmd, cfg, sel,
 				awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 				status,
 			)
@@ -164,15 +164,17 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	reportCtx := cmd.Context()
 	if len(targets) > 0 {
+		reportCtx = awsCommandContext(cmd)
 		status.Step("Ensuring AWS credentials…")
-		if err := ensureCostCredentials(cmd.Context(), cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+		if err := ensureCostCredentials(reportCtx, cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 			return err
 		}
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(cmd.Context(), cfg, targets, awsFlags.CredentialsFile, status)
+		targets, err = prepareCostTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, status)
 		if err != nil {
 			return err
 		}
@@ -188,7 +190,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	}
 	in.Out = out
 
-	if err := gen.Generate(cmd.Context(), in); err != nil {
+	if err := gen.Generate(reportCtx, in); err != nil {
 		return err
 	}
 

@@ -90,17 +90,18 @@ func runAWSListOUs(cmd *cobra.Command, _ []string) error {
 	}
 	ensureOpts.AccountName = payerID
 	ensureOpts.ProfileNames = profiles
-	if _, err := accountListOUsEnsureCredentials(cmd.Context(), ensureOpts); err != nil {
+	awsCtx := awsCommandContext(cmd)
+	if _, err := accountListOUsEnsureCredentials(awsCtx, ensureOpts); err != nil {
 		return fmt.Errorf("%s: %w", payerID, mapCredentialError(payerID, err))
 	}
 
-	awsCfg, err := accountListOUsLoadConfigForCreds(cmd.Context(), cfg, payerID, awsFlags.CredentialsFile)
+	awsCfg, err := accountListOUsLoadConfigForCreds(awsCtx, cfg, payerID, awsFlags.CredentialsFile)
 	if err != nil {
 		return err
 	}
 
 	parentID := strings.TrimSpace(accountListOUsParent)
-	ous, err := accountListOUsFetch(cmd.Context(), awsCfg, parentID)
+	ous, err := accountListOUsFetch(awsCtx, awsCfg, parentID)
 	if err != nil {
 		return fmt.Errorf("list organizational units: %w", err)
 	}

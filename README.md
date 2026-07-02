@@ -461,6 +461,19 @@ finops aws list-ous --payer rh-control --format json
 
 Static secrets (API keys, etc.) for other tools live in `~/.config/finops/.env`; AWS sessions use `~/.aws/credentials` profiles.
 
+### AWS global flags
+
+These persistent flags are available on AWS-backed commands (`account`, `snapshot`, `report`, `tag`, `aws`, `config account`):
+
+| Flag | Description |
+|------|-------------|
+| `--auth-method` | `saml` (default) or `profile`; when omitted, uses `defaults.aws.auth_method` from config |
+| `--config` | Path to finops config file (default: OS-specific config dir) |
+| `--credentials-file` | Path to AWS credentials file (default: `~/.aws/credentials`) |
+| `--verbose` / `-v` | Log external commands (`klist`, `curl`, …) and selected AWS API calls (STS, Organizations, EC2, RDS, Cost Explorer) to stderr |
+
+Verbose output uses two line prefixes: `+ "command" "args"` for external binaries and `+ AWS Service.Operation …` for cloud API calls. Organizations tag reads log `ListTagsForResource`; tag writes log `TagResource` (matching the AWS API operation names).
+
 ### AWS payer credentials
 
 Store and verify temporary AWS credentials for a payer account (same profile layout as finops-mcp-aws):
@@ -550,8 +563,7 @@ finops report create costs --payer rh-control --tag-key env --tag-value prod -o 
 | `--from` | Start date `YYYY-MM-DD` inclusive (optional `--to`; otherwise through the latest stable day) |
 | `--to` | End date `YYYY-MM-DD` inclusive (requires `--from`; historical only — future dates are rejected) |
 | `--exclude-recent-days` | Omit the last N UTC days from the end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |
-| `--auth-method` | `saml` (default) or `profile`; when omitted, uses `defaults.aws.auth_method` from config |
-| `--config` | Path to finops config file (default: OS-specific config dir) |
+| `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr (cost/CSV/JSON still go to stdout) |
 | `--split-by` | Group costs by dimension: `service` (AWS service) or `account` (linked AWS account ID); includes share % and relative cost bars in `pretty-print` |
@@ -581,6 +593,7 @@ finops snapshot list --account 333333333333 --payer rhc --older-than-days 90 --f
 | `--role` | Linked-account IAM role name (default: `defaults.aws.linked_role` in config) |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr |
+| `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 
 When Cost Explorer data is available, the summary shows **attributed** storage cost for listed snapshots (scaled to billed `EBS:SnapshotUsage` and `RDS:ChargedBackupUsage` for the last complete calendar month). Account-wide billed amounts are in JSON only (`summary.billed_costs`). Per-snapshot **$/MO** is each snapshot's share of that attributed cost; **—** on EBS means no incremental blocks. Without CE data, summary falls back to API estimates. Payer credentials need `ce:GetCostAndUsage` with `LINKED_ACCOUNT` scope.
 
@@ -616,9 +629,7 @@ The **costs** template includes:
 | `--tag-value` | Optional tag value with `--tag-key` (omit to match any value) |
 | `--skip-org-cache` | Bypass cached organization account/tag data |
 | `--refresh-org-cache` | Refresh organization cache from AWS |
-| `--auth-method` | `saml` (default) or `profile` |
-| `--config` | Path to finops config file |
-| `--credentials-file` | Path to AWS credentials file |
+| `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 | `--output` / `-o` | Write HTML to a file instead of stdout |
 | `--quiet` | Suppress progress messages on stderr (HTML still goes to stdout or `--output`) |
 | `--days`, `--months`, `--from`, `--to`, `--exclude-recent-days` | Same period options as `finops account get-cost` |

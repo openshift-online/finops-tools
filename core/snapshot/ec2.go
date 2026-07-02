@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ectypes "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
 // EC2API is the subset of EC2 used for snapshot discovery.
@@ -28,7 +29,7 @@ type EC2API interface {
 type ec2ClientFactory func(aws.Config) EC2API
 
 func newEC2Client(cfg aws.Config) EC2API {
-	return ec2.NewFromConfig(cfg)
+	return apilog.WrapEC2(ec2.NewFromConfig(cfg))
 }
 
 type ebsLister interface {

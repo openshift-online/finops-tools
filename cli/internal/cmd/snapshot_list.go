@@ -164,7 +164,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 
 	targets, err := resolveCostTargets(
-		cmd.Context(), cmd, cfg, sel,
+		cmd, cfg, sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
 	)
@@ -190,14 +190,15 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 
 	status.Step("Ensuring AWS credentials…")
-	if err := ensureSnapshotCredentials(cmd.Context(), cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+	awsCtx := awsCommandContext(cmd)
+	if err := ensureSnapshotCredentials(cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 		return err
 	}
 	if len(targets) <= 1 {
 		status.Step("Preparing account configuration…")
 	}
 	snapshotTargets, err := prepareSnapshotTargets(
-		cmd.Context(), cmd, cfg, targets,
+		cmd, cfg, targets,
 		awsFlags.CredentialsFile, awsFlags.ConfigPath, snapshotListRole,
 		status,
 	)
@@ -209,7 +210,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		status.Step(fmt.Sprintf("Scanning %d account(s) for snapshots…", len(snapshotTargets)))
 	}
 
-	result, err := snapshotListFetch(cmd.Context(), snapshot.Query{
+	result, err := snapshotListFetch(awsCtx, snapshot.Query{
 		Targets:    snapshotTargets,
 		OlderThan:  time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
 		Types:      types,
@@ -222,7 +223,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 
 	status.Step("Fetching billed snapshot costs from Cost Explorer…")
-	billed, err := fetchSnapshotBilledCosts(cmd.Context(), cfg, targets, awsFlags.CredentialsFile, time.Now().UTC())
+	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, targets, awsFlags.CredentialsFile, time.Now().UTC())
 	if err != nil {
 		status.Step(fmt.Sprintf("Warning: billed snapshot costs unavailable: %v", err))
 	} else {
