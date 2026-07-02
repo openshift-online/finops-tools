@@ -1,8 +1,23 @@
-.PHONY: test build run clean build-backend test-backend podman-build podman-push \
+.PHONY: test lint lint-install build run clean build-backend test-backend podman-build podman-push \
 	openshift-apply openshift-restart openshift-refresh
+
+GOPATH_BIN := $(shell go env GOPATH)/bin
+GOLANGCI_LINT := $(GOPATH_BIN)/golangci-lint
+GOLANGCI_VERSION := v2.12.2
+GOLANGCI_PACKAGES := $(shell go list -f '{{.Dir}}/...' -m)
 
 test:
 	go test ./core/... ./cli/... ./backend/...
+
+lint-install:
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+
+$(GOLANGCI_LINT):
+	$(MAKE) lint-install
+
+# golangci-lint cannot use ./... at the go.work root; lint each workspace module.
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run $(GOLANGCI_PACKAGES)
 
 build:
 	go build -o bin/finops ./cli/cmd/finops

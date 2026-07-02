@@ -1,0 +1,7 @@
+# https://docs.coderabbit.ai/reference/configuration
+language: en-US
+reviews:
+  tools:
+    golangci-lint:
+      enabled: true
+      config_file: .golangci.yml
