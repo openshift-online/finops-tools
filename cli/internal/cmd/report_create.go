@@ -134,15 +134,13 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	case reportpkg.AccountTargetsSnowflake:
 		snowflakeAlias = strings.TrimSpace(reportCreateSnowflakeAlias)
 	default:
-		if targetMode != reportpkg.AccountTargetsOptional || costTargetSelectorSpecified(sel) {
-			targets, err = resolveCostTargets(
-				cmd, cfg, sel,
-				awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
-				status,
-			)
-			if err != nil {
-				return err
-			}
+		targets, err = resolveCostTargets(
+			cmd, cfg, sel,
+			awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
+			status,
+		)
+		if err != nil {
+			return err
 		}
 	}
 

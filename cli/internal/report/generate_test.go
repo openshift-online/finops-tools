@@ -36,13 +36,14 @@ func TestSavingsPlansGeneratorRequiresTargets(t *testing.T) {
 	}
 }
 
-func TestCostsGeneratorAllowsZeroTargets(t *testing.T) {
+func TestCostsGeneratorRequiresTargets(t *testing.T) {
 	gen, err := GeneratorFor(TemplateCosts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gen.Validate(GenerateInput{Format: FormatHTML}); err != nil {
-		t.Fatalf("Validate: %v", err)
+	err = gen.Validate(GenerateInput{Format: FormatHTML})
+	if err == nil {
+		t.Fatal("expected error for zero targets")
 	}
 }
 
@@ -50,8 +51,8 @@ func TestAccountTargetModeFor(t *testing.T) {
 	if got := AccountTargetModeFor(TemplateHCPHierarchy); got != AccountTargetsSnowflake {
 		t.Fatalf("hcp-hierarchy mode = %v, want snowflake", got)
 	}
-	if got := AccountTargetModeFor(TemplateCosts); got != AccountTargetsOptional {
-		t.Fatalf("costs mode = %v, want optional", got)
+	if got := AccountTargetModeFor(TemplateCosts); got != AccountTargetsRequired {
+		t.Fatalf("costs mode = %v, want required", got)
 	}
 	if got := AccountTargetModeFor(TemplateSavingsPlans); got != AccountTargetsRequired {
 		t.Fatalf("savings-plans mode = %v, want required", got)

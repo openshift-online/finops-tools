@@ -99,15 +99,6 @@ func validateOrgCacheFlags(skip, refresh bool) error {
 	return nil
 }
 
-func costTargetSelectorSpecified(sel costTargetSelector) bool {
-	return len(sel.AccountIDs) > 0 ||
-		len(sel.Aliases) > 0 ||
-		len(sel.OUIDs) > 0 ||
-		sel.TagKey != "" ||
-		sel.PayerAlias != "" ||
-		sel.OUDirectOnly
-}
-
 func awsReportSelectorSpecified(sel costTargetSelector) bool {
 	return len(sel.AccountIDs) > 0 ||
 		len(sel.OUIDs) > 0 ||
@@ -126,12 +117,6 @@ func validateReportCostTargetSelector(templateName string, sel costTargetSelecto
 			return nil
 		}
 		return nil
-	case reportpkg.AccountTargetsOptional:
-		if !costTargetSelectorSpecified(sel) {
-			return nil
-		}
-		_, err := validateCostTargetSelector(sel)
-		return err
 	default:
 		_, err := validateCostTargetSelector(sel)
 		return err

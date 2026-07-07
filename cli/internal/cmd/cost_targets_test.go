@@ -106,9 +106,10 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 			wantErr:  "does not use AWS account targets",
 		},
 		{
-			name:     "costs optional empty",
+			name:     "costs requires targets",
 			template: reportpkg.TemplateCosts,
 			sel:      costTargetSelector{},
+			wantErr:  "provide --account/--account-alias, --ou, or --tag-key",
 		},
 		{
 			name:     "savings-plans requires targets",

@@ -69,8 +69,6 @@ type AccountTargetMode int
 const (
 	// AccountTargetsRequired needs --account/--account-alias, --ou, or --tag-key.
 	AccountTargetsRequired AccountTargetMode = iota
-	// AccountTargetsOptional allows zero targets (empty costs report).
-	AccountTargetsOptional
 	// AccountTargetsSnowflake uses --snowflake-alias, not AWS targets.
 	AccountTargetsSnowflake
 )
@@ -80,8 +78,6 @@ func AccountTargetModeFor(templateName string) AccountTargetMode {
 	switch templateName {
 	case TemplateHCPHierarchy:
 		return AccountTargetsSnowflake
-	case TemplateCosts:
-		return AccountTargetsOptional
 	default:
 		return AccountTargetsRequired
 	}

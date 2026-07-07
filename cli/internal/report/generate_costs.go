@@ -12,17 +12,18 @@ import (
 type costsGenerator struct{}
 
 func (costsGenerator) Validate(in GenerateInput) error {
-	return validateTemplateFormat(TemplateCosts, in.Format)
+	if err := validateTemplateFormat(TemplateCosts, in.Format); err != nil {
+		return err
+	}
+	if len(in.Targets) == 0 {
+		return fmt.Errorf("costs report requires an account target (--account-alias, --account, --ou, or --tag-key)")
+	}
+	return nil
 }
 
 func (costsGenerator) Generate(ctx context.Context, in GenerateInput) error {
 	if len(in.Targets) == 0 {
-		report := corereport.EmptyCostsReport(cost.CostQuery{
-			Provider: cost.ProviderAWS,
-			Range:    in.Range,
-		}, in.Now)
-		in.Progress.Step("Rendering HTML report…")
-		return RenderCostsHTML(in.Out, report)
+		return fmt.Errorf("costs report requires an account target (--account-alias, --account, --ou, or --tag-key)")
 	}
 
 	if len(in.Targets) > 1 {
