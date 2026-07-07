@@ -1,4 +1,4 @@
-// cost_targets.go resolves cost query account targets from explicit IDs/aliases, OUs, or org tags.
+// account_target_resolve.go resolves account targets from explicit IDs/aliases, OUs, or org tags.
 package cmd
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type costTargetSelector struct {
+type accountTargetSelector struct {
 	AccountIDs      []string
 	Aliases         []string
 	OUIDs           []string
@@ -28,16 +28,16 @@ type costTargetSelector struct {
 	OrgCacheRefresh bool
 }
 
-type costTargetSelectionMode int
+type accountTargetSelectionMode int
 
 const (
-	costTargetModeNone costTargetSelectionMode = iota
-	costTargetModeExplicit
-	costTargetModeTag
-	costTargetModeOU
+	accountTargetModeNone accountTargetSelectionMode = iota
+	accountTargetModeExplicit
+	accountTargetModeTag
+	accountTargetModeOU
 )
 
-type costStepper interface {
+type stepper interface {
 	Step(string)
 }
 
@@ -57,11 +57,11 @@ var filterOrganizationAccountsByTag = func(
 	})
 }
 
-func parseCostTargetSelector(
+func parseAccountTargetSelector(
 	accountFlag, aliasFlag, ouFlag, payerFlag, tagKey, tagValue string,
 	ouDirect, orgCacheSkip, orgCacheRefresh bool,
-) (costTargetSelector, error) {
-	sel := costTargetSelector{
+) (accountTargetSelector, error) {
+	sel := accountTargetSelector{
 		PayerAlias:      strings.TrimSpace(payerFlag),
 		OUDirectOnly:    ouDirect,
 		TagKey:          strings.TrimSpace(tagKey),
@@ -74,19 +74,19 @@ func parseCostTargetSelector(
 	if strings.TrimSpace(accountFlag) != "" {
 		sel.AccountIDs, err = configstore.ParseAWSAccountIDs(accountFlag)
 		if err != nil {
-			return costTargetSelector{}, err
+			return accountTargetSelector{}, err
 		}
 	}
 	if strings.TrimSpace(aliasFlag) != "" {
 		sel.Aliases, err = configstore.ParseAccountAliases(aliasFlag)
 		if err != nil {
-			return costTargetSelector{}, err
+			return accountTargetSelector{}, err
 		}
 	}
 	if strings.TrimSpace(ouFlag) != "" {
 		sel.OUIDs, err = configstore.ParseOUIDs(ouFlag)
 		if err != nil {
-			return costTargetSelector{}, err
+			return accountTargetSelector{}, err
 		}
 	}
 	return sel, nil
@@ -99,7 +99,7 @@ func validateOrgCacheFlags(skip, refresh bool) error {
 	return nil
 }
 
-func costTargetSelectorSpecified(sel costTargetSelector) bool {
+func accountTargetSelectorSpecified(sel accountTargetSelector) bool {
 	return len(sel.AccountIDs) > 0 ||
 		len(sel.Aliases) > 0 ||
 		len(sel.OUIDs) > 0 ||
@@ -108,7 +108,7 @@ func costTargetSelectorSpecified(sel costTargetSelector) bool {
 		sel.OUDirectOnly
 }
 
-func awsReportSelectorSpecified(sel costTargetSelector) bool {
+func reportAccountTargetSpecified(sel accountTargetSelector) bool {
 	return len(sel.AccountIDs) > 0 ||
 		len(sel.OUIDs) > 0 ||
 		sel.TagKey != "" ||
@@ -116,10 +116,10 @@ func awsReportSelectorSpecified(sel costTargetSelector) bool {
 		sel.OUDirectOnly
 }
 
-func validateReportCostTargetSelector(templateName string, sel costTargetSelector, snowflakeAlias string) error {
+func validateReportAccountTargetSelector(templateName string, sel accountTargetSelector, snowflakeAlias string) error {
 	switch reportpkg.AccountTargetModeFor(templateName) {
 	case reportpkg.AccountTargetsSnowflake:
-		if awsReportSelectorSpecified(sel) || len(sel.Aliases) > 0 {
+		if reportAccountTargetSpecified(sel) || len(sel.Aliases) > 0 {
 			return fmt.Errorf("%q report does not use AWS account targets (--account, --account-alias, --ou, --tag-key, --payer)", templateName)
 		}
 		if strings.TrimSpace(snowflakeAlias) == "" {
@@ -127,88 +127,88 @@ func validateReportCostTargetSelector(templateName string, sel costTargetSelecto
 		}
 		return nil
 	case reportpkg.AccountTargetsOptional:
-		if !costTargetSelectorSpecified(sel) {
+		if !accountTargetSelectorSpecified(sel) {
 			return nil
 		}
-		_, err := validateCostTargetSelector(sel)
+		_, err := validateAccountTargetSelector(sel)
 		return err
 	default:
-		_, err := validateCostTargetSelector(sel)
+		_, err := validateAccountTargetSelector(sel)
 		return err
 	}
 }
 
-func validateCostTargetSelector(sel costTargetSelector) (costTargetSelectionMode, error) {
+func validateAccountTargetSelector(sel accountTargetSelector) (accountTargetSelectionMode, error) {
 	tag := sel.TagKey != ""
 	explicit := len(sel.AccountIDs) > 0 || len(sel.Aliases) > 0
 	ou := len(sel.OUIDs) > 0
 
 	if tag {
 		if explicit || ou {
-			return costTargetModeNone, fmt.Errorf("provide either --account/--account-alias/--ou or --tag-key, not both")
+			return accountTargetModeNone, fmt.Errorf("provide either --account/--account-alias/--ou or --tag-key, not both")
 		}
 		if sel.PayerAlias == "" {
-			return costTargetModeNone, fmt.Errorf("--payer is required with --tag-key")
+			return accountTargetModeNone, fmt.Errorf("--payer is required with --tag-key")
 		}
-		return costTargetModeTag, nil
+		return accountTargetModeTag, nil
 	}
 
 	if sel.PayerAlias != "" && !explicit && !ou {
-		return costTargetModeNone, fmt.Errorf("--payer requires --account or --ou")
+		return accountTargetModeNone, fmt.Errorf("--payer requires --account or --ou")
 	}
 	if !explicit && !ou {
-		return costTargetModeNone, fmt.Errorf("provide --account/--account-alias, --ou, or --tag-key")
+		return accountTargetModeNone, fmt.Errorf("provide --account/--account-alias, --ou, or --tag-key")
 	}
 	if ou && sel.PayerAlias == "" {
-		return costTargetModeNone, fmt.Errorf("--ou requires --payer")
+		return accountTargetModeNone, fmt.Errorf("--ou requires --payer")
 	}
 	if sel.OUDirectOnly && !ou {
-		return costTargetModeNone, fmt.Errorf("--ou-direct requires --ou")
+		return accountTargetModeNone, fmt.Errorf("--ou-direct requires --ou")
 	}
 	if sel.PayerAlias != "" && explicit && len(sel.AccountIDs) == 0 {
-		return costTargetModeNone, fmt.Errorf("--payer requires --account")
+		return accountTargetModeNone, fmt.Errorf("--payer requires --account")
 	}
 
 	if ou {
-		return costTargetModeOU, nil
+		return accountTargetModeOU, nil
 	}
-	return costTargetModeExplicit, nil
+	return accountTargetModeExplicit, nil
 }
 
-func resolveCostTargets(
+func resolveAccountTargets(
 	cmd *cobra.Command,
 	cfg configstore.File,
-	sel costTargetSelector,
+	sel accountTargetSelector,
 	configPath, credentialsFile, authMethod string,
-	status costStepper,
+	status stepper,
 ) ([]cost.AccountTarget, error) {
-	mode, err := validateCostTargetSelector(sel)
+	mode, err := validateAccountTargetSelector(sel)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx := awsCommandContext(cmd)
 	switch mode {
-	case costTargetModeTag:
-		return resolveCostTargetsByTag(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod, status)
-	case costTargetModeOU:
-		return resolveCostTargetsWithOU(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod)
-	case costTargetModeExplicit:
-		return resolveCostTargetsExplicit(cfg, sel)
+	case accountTargetModeTag:
+		return resolveAccountTargetsByTag(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod, status)
+	case accountTargetModeOU:
+		return resolveAccountTargetsWithOU(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod)
+	case accountTargetModeExplicit:
+		return resolveAccountTargetsExplicit(cfg, sel)
 	default:
 		return nil, fmt.Errorf("invalid account selection")
 	}
 }
 
-func resolveCostTargetsExplicit(cfg configstore.File, sel costTargetSelector) ([]cost.AccountTarget, error) {
+func resolveAccountTargetsExplicit(cfg configstore.File, sel accountTargetSelector) ([]cost.AccountTarget, error) {
 	return configstore.ResolveCostTargets(cfg, sel.AccountIDs, sel.Aliases, sel.PayerAlias)
 }
 
-func resolveCostTargetsWithOU(
+func resolveAccountTargetsWithOU(
 	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
-	sel costTargetSelector,
+	sel accountTargetSelector,
 	configPath, credentialsFile, authMethod string,
 ) ([]cost.AccountTarget, error) {
 	var ouTargets, explicitTargets []cost.AccountTarget
@@ -220,7 +220,7 @@ func resolveCostTargetsWithOU(
 			return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", sel.PayerAlias, sel.PayerAlias)
 		}
 		payerTarget := cost.AccountTarget{AccountID: payerID}
-		if err := ensureCostCredentials(ctx, cmd, cfg, []cost.AccountTarget{payerTarget}, configPath, credentialsFile, authMethod); err != nil {
+		if err := ensureAccountCredentials(ctx, cmd, cfg, []cost.AccountTarget{payerTarget}, configPath, credentialsFile, authMethod); err != nil {
 			return nil, err
 		}
 		payerCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payerID, credentialsFile)
@@ -256,20 +256,20 @@ func resolveCostTargetsWithOU(
 	}
 
 	if len(sel.AccountIDs) > 0 || len(sel.Aliases) > 0 {
-		explicitTargets, err = resolveCostTargetsExplicit(cfg, sel)
+		explicitTargets, err = resolveAccountTargetsExplicit(cfg, sel)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	targets := mergeCostTargets(ouTargets, explicitTargets)
+	targets := mergeAccountTargets(ouTargets, explicitTargets)
 	if len(targets) == 0 {
 		return nil, errors.New("no accounts selected")
 	}
 	return targets, nil
 }
 
-func mergeCostTargets(segments ...[]cost.AccountTarget) []cost.AccountTarget {
+func mergeAccountTargets(segments ...[]cost.AccountTarget) []cost.AccountTarget {
 	seen := make(map[string]cost.AccountTarget)
 	order := make([]string, 0)
 	for _, segment := range segments {
@@ -295,13 +295,13 @@ func mergeCostTargets(segments ...[]cost.AccountTarget) []cost.AccountTarget {
 	return out
 }
 
-func resolveCostTargetsByTag(
+func resolveAccountTargetsByTag(
 	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
-	sel costTargetSelector,
+	sel accountTargetSelector,
 	configPath, credentialsFile, authMethod string,
-	status costStepper,
+	status stepper,
 ) ([]cost.AccountTarget, error) {
 	payerAlias := sel.PayerAlias
 	payerID, ok := cfg.PayerAccountIDForAlias(payerAlias)
@@ -312,9 +312,9 @@ func resolveCostTargetsByTag(
 	tagKey := sel.TagKey
 	tagValue := sel.TagValue
 
-	costStep(status, "Ensuring AWS credentials for payer…")
+	progressStep(status, "Ensuring AWS credentials for payer…")
 	payerTarget := cost.AccountTarget{AccountID: payerID}
-	if err := ensureCostCredentials(ctx, cmd, cfg, []cost.AccountTarget{payerTarget}, configPath, credentialsFile, authMethod); err != nil {
+	if err := ensureAccountCredentials(ctx, cmd, cfg, []cost.AccountTarget{payerTarget}, configPath, credentialsFile, authMethod); err != nil {
 		return nil, err
 	}
 
@@ -324,9 +324,9 @@ func resolveCostTargetsByTag(
 	}
 
 	if tagValue != "" {
-		costStep(status, fmt.Sprintf("Resolving accounts with tag %s=%q…", tagKey, tagValue))
+		progressStep(status, fmt.Sprintf("Resolving accounts with tag %s=%q…", tagKey, tagValue))
 	} else {
-		costStep(status, fmt.Sprintf("Resolving accounts with tag key %q…", tagKey))
+		progressStep(status, fmt.Sprintf("Resolving accounts with tag key %q…", tagKey))
 	}
 	matches, err := filterOrganizationAccountsByTag(ctx, awsCfg, payerID, tagKey, tagValue, status, configPath, sel.OrgCacheSkip, sel.OrgCacheRefresh)
 	if err != nil {
@@ -334,9 +334,9 @@ func resolveCostTargetsByTag(
 	}
 	if len(matches) == 0 {
 		if tagValue != "" {
-			costStep(status, fmt.Sprintf("No accounts matched tag %s=%q", tagKey, tagValue))
+			progressStep(status, fmt.Sprintf("No accounts matched tag %s=%q", tagKey, tagValue))
 		} else {
-			costStep(status, fmt.Sprintf("No accounts matched tag key %q", tagKey))
+			progressStep(status, fmt.Sprintf("No accounts matched tag key %q", tagKey))
 		}
 		return nil, nil
 	}
@@ -358,7 +358,7 @@ func resolveCostTargetsByTag(
 	return targets, nil
 }
 
-func costStep(status costStepper, message string) {
+func progressStep(status stepper, message string) {
 	if status == nil {
 		return
 	}

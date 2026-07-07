@@ -99,7 +99,7 @@ func TestRunSnapshotListUsesFetchHook(t *testing.T) {
 	fetchSnapshotBilledCosts = func(_ context.Context, _ configstore.File, _ []cost.AccountTarget, _ string, _ time.Time) ([]snapshot.AccountBilledSnapshotCosts, error) {
 		return nil, nil
 	}
-	prepareSnapshotTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ costStepper) ([]snapshot.AccountTarget, error) {
+	prepareSnapshotTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ stepper) ([]snapshot.AccountTarget, error) {
 		out := make([]snapshot.AccountTarget, 0, len(targets))
 		for _, target := range targets {
 			out = append(out, snapshot.AccountTarget{AccountID: target.AccountID})

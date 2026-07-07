@@ -14,18 +14,18 @@ import (
 )
 
 var (
-	reportGenerateAccount         string
-	reportGenerateAccountAliases  string
-	reportGenerateFormat          string
-	reportGenerateOU              string
-	reportGenerateOUDirect        bool
-	reportGenerateOutput          string
-	reportGeneratePayer           string
-	reportGenerateQuiet           bool
-	reportGenerateTagKey          string
-	reportGenerateTagValue        string
-	reportGenerateSkipOrgCache    bool
-	reportGenerateRefreshOrgCache bool
+	reportCreateAccount         string
+	reportCreateAccountAliases  string
+	reportCreateFormat          string
+	reportCreateOU              string
+	reportCreateOUDirect        bool
+	reportCreateOutput          string
+	reportCreatePayer           string
+	reportCreateQuiet           bool
+	reportCreateTagKey          string
+	reportCreateTagValue        string
+	reportCreateSkipOrgCache    bool
+	reportCreateRefreshOrgCache bool
 	reportCreateSnowflakeAlias    string
 )
 
@@ -48,24 +48,24 @@ Example:
 		if err != nil {
 			return err
 		}
-		sel, err := parseCostTargetSelector(
-			reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
-			reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
-			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+		sel, err := parseAccountTargetSelector(
+			reportCreateAccount, reportCreateAccountAliases, reportCreateOU, reportCreatePayer,
+			reportCreateTagKey, reportCreateTagValue, reportCreateOUDirect,
+			reportCreateSkipOrgCache, reportCreateRefreshOrgCache,
 		)
 		if err != nil {
 			return err
 		}
-		if err := validateReportCostTargetSelector(templateName, sel, reportCreateSnowflakeAlias); err != nil {
+		if err := validateReportAccountTargetSelector(templateName, sel, reportCreateSnowflakeAlias); err != nil {
 			return err
 		}
 		if err := validatePeriodFlags(cmd); err != nil {
 			return err
 		}
-		if _, err := reportpkg.ParseFormat(reportGenerateFormat); err != nil {
+		if _, err := reportpkg.ParseFormat(reportCreateFormat); err != nil {
 			return err
 		}
-		return validateOrgCacheFlags(reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache)
+		return validateOrgCacheFlags(reportCreateSkipOrgCache, reportCreateRefreshOrgCache)
 	},
 	RunE: runReportCreate,
 }
@@ -73,20 +73,20 @@ Example:
 func init() {
 	reportCmd.AddCommand(reportCreateCmd)
 	bindAWSTargetFlags(reportCreateCmd, awsTargetFlagRefs{
-		Account:         &reportGenerateAccount,
-		AccountAliases:  &reportGenerateAccountAliases,
-		OU:              &reportGenerateOU,
-		OUDirect:        &reportGenerateOUDirect,
-		Payer:           &reportGeneratePayer,
-		TagKey:          &reportGenerateTagKey,
-		TagValue:        &reportGenerateTagValue,
-		SkipOrgCache:    &reportGenerateSkipOrgCache,
-		RefreshOrgCache: &reportGenerateRefreshOrgCache,
+		Account:         &reportCreateAccount,
+		AccountAliases:  &reportCreateAccountAliases,
+		OU:              &reportCreateOU,
+		OUDirect:        &reportCreateOUDirect,
+		Payer:           &reportCreatePayer,
+		TagKey:          &reportCreateTagKey,
+		TagValue:        &reportCreateTagValue,
+		SkipOrgCache:    &reportCreateSkipOrgCache,
+		RefreshOrgCache: &reportCreateRefreshOrgCache,
 	})
-	reportCreateCmd.Flags().StringVar(&reportGenerateFormat, "format", reportpkg.FormatHTML, "Output format (supported: html)")
+	reportCreateCmd.Flags().StringVar(&reportCreateFormat, "format", reportpkg.FormatHTML, "Output format (supported: html)")
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
-	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
-	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
+	addOutputFlag(reportCreateCmd, &reportCreateOutput)
+	reportCreateCmd.Flags().BoolVar(&reportCreateQuiet, "quiet", false, "Suppress progress messages on stderr")
 	addPeriodFlags(reportCreateCmd)
 }
 
@@ -95,7 +95,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	format, err := reportpkg.ParseFormat(reportGenerateFormat)
+	format, err := reportpkg.ParseFormat(reportCreateFormat)
 	if err != nil {
 		return err
 	}
@@ -116,12 +116,12 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	status := progress.New(cmd.ErrOrStderr(), reportGenerateQuiet)
+	status := progress.New(cmd.ErrOrStderr(), reportCreateQuiet)
 
-	sel, err := parseCostTargetSelector(
-		reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
-		reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
-		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+	sel, err := parseAccountTargetSelector(
+		reportCreateAccount, reportCreateAccountAliases, reportCreateOU, reportCreatePayer,
+		reportCreateTagKey, reportCreateTagValue, reportCreateOUDirect,
+		reportCreateSkipOrgCache, reportCreateRefreshOrgCache,
 	)
 	if err != nil {
 		return err
@@ -134,8 +134,8 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	case reportpkg.AccountTargetsSnowflake:
 		snowflakeAlias = strings.TrimSpace(reportCreateSnowflakeAlias)
 	default:
-		if targetMode != reportpkg.AccountTargetsOptional || costTargetSelectorSpecified(sel) {
-			targets, err = resolveCostTargets(
+		if targetMode != reportpkg.AccountTargetsOptional || accountTargetSelectorSpecified(sel) {
+			targets, err = resolveAccountTargets(
 				cmd, cfg, sel,
 				awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 				status,
@@ -168,20 +168,20 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if len(targets) > 0 {
 		reportCtx = awsCommandContext(cmd)
 		status.Step("Ensuring AWS credentials…")
-		if err := ensureCostCredentials(reportCtx, cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+		if err := ensureAccountCredentials(reportCtx, cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 			return err
 		}
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, status)
+		targets, err = prepareAccountTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, status)
 		if err != nil {
 			return err
 		}
 		in.Targets = targets
 	}
 
-	out, closeOut, err := resolveCommandOutput(cmd, reportGenerateOutput)
+	out, closeOut, err := resolveCommandOutput(cmd, reportCreateOutput)
 	if err != nil {
 		return err
 	}
@@ -194,8 +194,8 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if !reportGenerateQuiet {
-		if path := strings.TrimSpace(reportGenerateOutput); path != "" {
+	if !reportCreateQuiet {
+		if path := strings.TrimSpace(reportCreateOutput); path != "" {
 			status.Step(fmt.Sprintf("Wrote report to %s", path))
 		} else {
 			status.Step("Report written to stdout")

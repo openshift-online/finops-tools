@@ -49,7 +49,7 @@ func init() {
 	tagUpdateCmd.Flags().StringVar(&accountUpdateTagKey, "tag-key", "", "Tag key")
 	tagUpdateCmd.Flags().StringVar(&accountUpdateTagValue, "tag-value", "", "Tag value")
 	tagUpdateCmd.Flags().BoolVar(&accountUpdateTagForce, "force", false, "Create the tag when the key does not already exist")
-	bindAWSAccountSelectorFlags(tagUpdateCmd, awsAccountSelectorFlagRefs{
+	bindAccountSelectorFlags(tagUpdateCmd, accountSelectorFlagRefs{
 		Payer:     &accountUpdateTagPayer,
 		Alias:     &accountUpdateTagAlias,
 		AccountID: &accountUpdateTagAccountID,

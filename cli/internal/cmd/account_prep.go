@@ -1,4 +1,4 @@
-// cost_aws.go ensures AWS credentials for each cost target (payer and linked) before calling core/cost.
+// account_target_prep.go ensures credentials and enriches account targets before cost, snapshot, or report work.
 package cmd
 
 import (
@@ -17,9 +17,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ensureCostCredentials = ensureCostCredentialsImpl
+var ensureAccountCredentials = ensureAccountCredentialsImpl
 
-func ensureCostCredentialsImpl(
+func ensureAccountCredentialsImpl(
 	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
@@ -52,21 +52,21 @@ func ensureCostCredentialsImpl(
 	return nil
 }
 
-func prepareCostTargets(
+func prepareAccounts(
 	ctx context.Context,
 	store configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile string,
-	status costStepper,
+	status stepper,
 ) ([]cost.AccountTarget, error) {
 	credConfigs := make(map[string]aws.Config)
 	total := len(targets)
 	for i := range targets {
-		reportPrepareProgress(status, i+1, total)
+		indexedPrepareProgress(status, i+1, total)
 		credID := targets[i].CredentialsAccountID()
 		if awsCfg, ok := credConfigs[credID]; ok {
 			targets[i].AWSConfig = awsCfg
-			if err := enrichCostTargetDisplayName(ctx, &targets[i], store); err != nil {
+			if err := enrichAccountDisplayName(ctx, &targets[i], store); err != nil {
 				return nil, err
 			}
 			continue
@@ -79,14 +79,14 @@ func prepareCostTargets(
 		credConfigs[credID] = awsCfg
 		targets[i].AWSConfig = awsCfg
 
-		if err := enrichCostTargetDisplayName(ctx, &targets[i], store); err != nil {
+		if err := enrichAccountDisplayName(ctx, &targets[i], store); err != nil {
 			return nil, err
 		}
 	}
 	return targets, nil
 }
 
-func reportPrepareProgress(status costStepper, index, total int) {
+func indexedPrepareProgress(status stepper, index, total int) {
 	if status == nil || total <= 1 || !shouldReportIndexedProgress(index, total) {
 		return
 	}
@@ -125,7 +125,7 @@ func loadAWSConfigForCredentialsAccountImpl(
 	return awsCfg, nil
 }
 
-func enrichCostTargetDisplayName(
+func enrichAccountDisplayName(
 	ctx context.Context,
 	target *cost.AccountTarget,
 	store configstore.File,

@@ -6,20 +6,20 @@ import (
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
-func TestValidateCostTargetSelectorOU(t *testing.T) {
-	if _, err := validateCostTargetSelector(costTargetSelector{}); err == nil {
+func TestValidateAccountSelectorOU(t *testing.T) {
+	if _, err := validateAccountSelector(accountSelector{}); err == nil {
 		t.Fatal("expected error when no selector provided")
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{OUIDs: []string{"ou-abcd-1234"}}); err == nil {
+	if _, err := validateAccountSelector(accountSelector{OUIDs: []string{"ou-abcd-1234"}}); err == nil {
 		t.Fatal("expected error when --ou without --payer")
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{OUDirectOnly: true}); err == nil {
+	if _, err := validateAccountSelector(accountSelector{OUDirectOnly: true}); err == nil {
 		t.Fatal("expected error when --ou-direct without --ou")
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{PayerAlias: "rh-control"}); err == nil {
+	if _, err := validateAccountSelector(accountSelector{PayerAlias: "rh-control"}); err == nil {
 		t.Fatal("expected error when --payer without --account or --ou")
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{
+	if _, err := validateAccountSelector(accountSelector{
 		OUIDs:      []string{"ou-abcd-1234"},
 		PayerAlias: "rh-control",
 	}); err != nil {
@@ -27,8 +27,8 @@ func TestValidateCostTargetSelectorOU(t *testing.T) {
 	}
 }
 
-func TestMergeCostTargets(t *testing.T) {
-	merged := mergeCostTargets(
+func TestMergeAccounts(t *testing.T) {
+	merged := mergeAccounts(
 		[]cost.AccountTarget{{AccountID: "111111111111", DisplayAlias: "a"}},
 		[]cost.AccountTarget{{AccountID: "111111111111", DisplayAlias: "b"}},
 	)
@@ -39,7 +39,7 @@ func TestMergeCostTargets(t *testing.T) {
 		t.Fatalf("expected alias from first segment, got %q", merged[0].DisplayAlias)
 	}
 
-	merged = mergeCostTargets(
+	merged = mergeAccounts(
 		[]cost.AccountTarget{{AccountID: "222222222222"}},
 		[]cost.AccountTarget{{AccountID: "222222222222", DisplayAlias: "linked"}},
 	)

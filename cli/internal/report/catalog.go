@@ -51,7 +51,7 @@ func Templates() []TemplateInfo {
 	}
 }
 
-// ParseTemplate validates a report template name (positional argument to generate).
+// ParseTemplate validates a report template name (positional argument to create).
 func ParseTemplate(s string) (string, error) {
 	name := strings.ToLower(strings.TrimSpace(s))
 	for _, t := range Templates() {

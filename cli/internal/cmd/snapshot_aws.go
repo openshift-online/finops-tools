@@ -61,14 +61,14 @@ func prepareSnapshotTargetsImpl(
 	cfg configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
-	status costStepper,
+	status stepper,
 ) ([]snapshot.AccountTarget, error) {
 	ctx := awsCommandContext(cmd)
 	configCache := make(map[string]aws.Config)
 	out := make([]snapshot.AccountTarget, 0, len(targets))
 
 	for i := range targets {
-		reportPrepareProgress(status, i+1, len(targets))
+		indexedPrepareProgress(status, i+1, len(targets))
 		target := targets[i]
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
@@ -208,7 +208,7 @@ func enrichSnapshotTargetDisplayName(
 		AWSConfig:      target.AWSConfig,
 		DisplayAlias:   source.DisplayAlias,
 	}
-	if err := enrichCostTargetDisplayName(ctx, &ct, store); err != nil {
+	if err := enrichAccountTargetDisplayName(ctx, &ct, store); err != nil {
 		return err
 	}
 	target.DisplayName = ct.DisplayName

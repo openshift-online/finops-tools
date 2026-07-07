@@ -62,7 +62,7 @@ Examples:
   finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
-		sel, err := parseCostTargetSelector(
+		sel, err := parseAccountTargetSelector(
 			snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 			snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
 			snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
@@ -70,7 +70,7 @@ Examples:
 		if err != nil {
 			return err
 		}
-		if _, err := validateCostTargetSelector(sel); err != nil {
+		if _, err := validateAccountTargetSelector(sel); err != nil {
 			return err
 		}
 		if _, err := output.ParseFormat(snapshotListFormat); err != nil {
@@ -154,7 +154,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 
 	status := progress.New(cmd.ErrOrStderr(), snapshotListQuiet)
 
-	sel, err := parseCostTargetSelector(
+	sel, err := parseAccountTargetSelector(
 		snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 		snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
 		snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
@@ -163,7 +163,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	targets, err := resolveCostTargets(
+	targets, err := resolveAccountTargets(
 		cmd, cfg, sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,

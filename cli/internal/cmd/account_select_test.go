@@ -15,49 +15,49 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestValidateCostTargetSelector(t *testing.T) {
+func TestValidateAccountSelector(t *testing.T) {
 	tests := []struct {
 		name    string
-		sel     costTargetSelector
+		sel     accountSelector
 		wantErr string
 	}{
 		{
 			name: "explicit account",
-			sel:  costTargetSelector{Aliases: []string{"rh-control"}},
+			sel:  accountSelector{Aliases: []string{"rh-control"}},
 		},
 		{
 			name: "tag mode",
-			sel:  costTargetSelector{PayerAlias: "rh-control", TagKey: "env"},
+			sel:  accountSelector{PayerAlias: "rh-control", TagKey: "env"},
 		},
 		{
 			name: "ou mode",
-			sel:  costTargetSelector{OUIDs: []string{"ou-abcd-1234"}, PayerAlias: "rh-control"},
+			sel:  accountSelector{OUIDs: []string{"ou-abcd-1234"}, PayerAlias: "rh-control"},
 		},
 		{
 			name:    "neither",
-			sel:     costTargetSelector{},
+			sel:     accountSelector{},
 			wantErr: "provide --account/--account-alias, --ou, or --tag-key",
 		},
 		{
 			name:    "both modes",
-			sel:     costTargetSelector{Aliases: []string{"rh-control"}, TagKey: "env", PayerAlias: "rh-control"},
+			sel:     accountSelector{Aliases: []string{"rh-control"}, TagKey: "env", PayerAlias: "rh-control"},
 			wantErr: "not both",
 		},
 		{
 			name:    "tag without payer",
-			sel:     costTargetSelector{TagKey: "env"},
+			sel:     accountSelector{TagKey: "env"},
 			wantErr: "--payer is required with --tag-key",
 		},
 		{
 			name:    "payer alone",
-			sel:     costTargetSelector{PayerAlias: "rh-control"},
+			sel:     accountSelector{PayerAlias: "rh-control"},
 			wantErr: "--payer requires --account or --ou",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := validateCostTargetSelector(tc.sel)
+			_, err := validateAccountSelector(tc.sel)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -74,53 +74,53 @@ func TestValidateCostTargetSelector(t *testing.T) {
 	}
 }
 
-func TestValidateReportCostTargetSelector(t *testing.T) {
+func TestValidateReportAccountSelector(t *testing.T) {
 	tests := []struct {
 		name           string
 		template       string
-		sel            costTargetSelector
+		sel            accountSelector
 		snowflakeAlias string
 		wantErr        string
 	}{
 		{
 			name:     "hcp-hierarchy no alias",
 			template: reportpkg.TemplateHCPHierarchy,
-			sel:      costTargetSelector{},
+			sel:      accountSelector{},
 		},
 		{
 			name:             "hcp-hierarchy snowflake alias",
 			template:         reportpkg.TemplateHCPHierarchy,
-			sel:              costTargetSelector{},
+			sel:              accountSelector{},
 			snowflakeAlias:   "rhsandbox",
 		},
 		{
 			name:     "hcp-hierarchy rejects aws alias flags",
 			template: reportpkg.TemplateHCPHierarchy,
-			sel:      costTargetSelector{AccountIDs: []string{"111111111111"}},
+			sel:      accountSelector{AccountIDs: []string{"111111111111"}},
 			wantErr:  "does not use AWS account targets",
 		},
 		{
 			name:     "hcp-hierarchy rejects aws account aliases",
 			template: reportpkg.TemplateHCPHierarchy,
-			sel:      costTargetSelector{Aliases: []string{"rh-control"}},
+			sel:      accountSelector{Aliases: []string{"rh-control"}},
 			wantErr:  "does not use AWS account targets",
 		},
 		{
 			name:     "costs optional empty",
 			template: reportpkg.TemplateCosts,
-			sel:      costTargetSelector{},
+			sel:      accountSelector{},
 		},
 		{
 			name:     "savings-plans requires targets",
 			template: reportpkg.TemplateSavingsPlans,
-			sel:      costTargetSelector{},
+			sel:      accountSelector{},
 			wantErr:  "provide --account/--account-alias, --ou, or --tag-key",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateReportCostTargetSelector(tc.template, tc.sel, tc.snowflakeAlias)
+			err := validateReportAccountSelector(tc.template, tc.sel, tc.snowflakeAlias)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -137,7 +137,7 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 	}
 }
 
-func TestResolveCostTargetsByTag(t *testing.T) {
+func TestResolveAccountsByTag(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
@@ -148,16 +148,16 @@ func TestResolveCostTargetsByTag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origEnsure := ensureCostCredentials
+	origEnsure := ensureAccountCredentials
 	origLoad := loadAWSConfigForCredentialsAccount
 	origFilter := filterOrganizationAccountsByTag
 	t.Cleanup(func() {
-		ensureCostCredentials = origEnsure
+		ensureAccountCredentials = origEnsure
 		loadAWSConfigForCredentialsAccount = origLoad
 		filterOrganizationAccountsByTag = origFilter
 	})
 
-	ensureCostCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
+	ensureAccountCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
 		return nil
 	}
 	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
@@ -171,7 +171,7 @@ func TestResolveCostTargetsByTag(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	targets, err := resolveCostTargets(cmd, cfg, costTargetSelector{
+	targets, err := resolveAccounts(cmd, cfg, accountSelector{
 		PayerAlias: "rh-control",
 		TagKey:     "env",
 	}, path, "", "", nil)
@@ -189,7 +189,7 @@ func TestResolveCostTargetsByTag(t *testing.T) {
 	}
 }
 
-func TestResolveCostTargetsByTagNoMatches(t *testing.T) {
+func TestResolveAccountsByTagNoMatches(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
@@ -200,16 +200,16 @@ func TestResolveCostTargetsByTagNoMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origEnsure := ensureCostCredentials
+	origEnsure := ensureAccountCredentials
 	origLoad := loadAWSConfigForCredentialsAccount
 	origFilter := filterOrganizationAccountsByTag
 	t.Cleanup(func() {
-		ensureCostCredentials = origEnsure
+		ensureAccountCredentials = origEnsure
 		loadAWSConfigForCredentialsAccount = origLoad
 		filterOrganizationAccountsByTag = origFilter
 	})
 
-	ensureCostCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
+	ensureAccountCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
 		return nil
 	}
 	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
@@ -220,13 +220,13 @@ func TestResolveCostTargetsByTagNoMatches(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	targets, err := resolveCostTargets(cmd, cfg, costTargetSelector{
+	targets, err := resolveAccounts(cmd, cfg, accountSelector{
 		PayerAlias: "rh-control",
 		TagKey:     "env",
 		TagValue:   "prod",
 	}, path, "", "", nil)
 	if err != nil {
-		t.Fatalf("resolveCostTargets: %v", err)
+		t.Fatalf("resolveAccounts: %v", err)
 	}
 	if len(targets) != 0 {
 		t.Fatalf("got %d targets, want 0", len(targets))
@@ -242,24 +242,24 @@ func TestValidateOrgCacheFlags(t *testing.T) {
 	}
 }
 
-func TestCostGetPreRunETagMode(t *testing.T) {
-	costGetAccount = ""
-	costGetAccountAliases = ""
-	costGetPayer = "rh-control"
-	costGetTagKey = "env"
-	costGetTagValue = ""
-	costGetFormat = string(output.FormatPrettyPrint)
-	costGetProvider = string(cost.ProviderAWS)
-	costGetSplitBy = ""
+func TestAccountGetCostPreRunETagMode(t *testing.T) {
+	accountGetCostAccount = ""
+	accountGetCostAccountAliases = ""
+	accountGetCostPayer = "rh-control"
+	accountGetCostTagKey = "env"
+	accountGetCostTagValue = ""
+	accountGetCostFormat = string(output.FormatPrettyPrint)
+	accountGetCostProvider = string(cost.ProviderAWS)
+	accountGetCostSplitBy = ""
 	t.Cleanup(func() {
-		costGetAccount = ""
-		costGetAccountAliases = ""
-		costGetPayer = ""
-		costGetTagKey = ""
-		costGetTagValue = ""
-		costGetFormat = ""
-		costGetProvider = ""
-		costGetSplitBy = ""
+		accountGetCostAccount = ""
+		accountGetCostAccountAliases = ""
+		accountGetCostPayer = ""
+		accountGetCostTagKey = ""
+		accountGetCostTagValue = ""
+		accountGetCostFormat = ""
+		accountGetCostProvider = ""
+		accountGetCostSplitBy = ""
 	})
 
 	if err := accountGetCostCmd.PreRunE(accountGetCostCmd, nil); err != nil {

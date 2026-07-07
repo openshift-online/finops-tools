@@ -14,20 +14,20 @@ import (
 )
 
 var (
-	costGetAccount         string
-	costGetAccountAliases  string
-	costGetFormat          string
-	costGetOutput          string
-	costGetOU              string
-	costGetOUDirect        bool
-	costGetPayer           string
-	costGetProvider        string
-	costGetSplitBy         string
-	costGetTagKey          string
-	costGetTagValue        string
-	costGetQuiet           bool
-	costGetSkipOrgCache    bool
-	costGetRefreshOrgCache bool
+	accountGetCostAccount         string
+	accountGetCostAccountAliases  string
+	accountGetCostFormat          string
+	accountGetCostOutput          string
+	accountGetCostOU              string
+	accountGetCostOUDirect        bool
+	accountGetCostPayer           string
+	accountGetCostProvider        string
+	accountGetCostSplitBy         string
+	accountGetCostTagKey          string
+	accountGetCostTagValue        string
+	accountGetCostQuiet           bool
+	accountGetCostSkipOrgCache    bool
+	accountGetCostRefreshOrgCache bool
 )
 
 var accountGetCostCmd = &cobra.Command{
@@ -61,30 +61,30 @@ Authentication uses --auth-method when set, otherwise defaults.aws.auth_method i
 Only AWS is supported today; GCP will be added later.`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		sel, err := parseCostTargetSelector(
-			costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
-			costGetTagKey, costGetTagValue, costGetOUDirect,
-			costGetSkipOrgCache, costGetRefreshOrgCache,
+		sel, err := parseAccountTargetSelector(
+			accountGetCostAccount, accountGetCostAccountAliases, accountGetCostOU, accountGetCostPayer,
+			accountGetCostTagKey, accountGetCostTagValue, accountGetCostOUDirect,
+			accountGetCostSkipOrgCache, accountGetCostRefreshOrgCache,
 		)
 		if err != nil {
 			return err
 		}
-		if _, err := validateCostTargetSelector(sel); err != nil {
+		if _, err := validateAccountTargetSelector(sel); err != nil {
 			return err
 		}
 		if err := validatePeriodFlags(cmd); err != nil {
 			return err
 		}
-		if _, err := output.ParseFormat(costGetFormat); err != nil {
+		if _, err := output.ParseFormat(accountGetCostFormat); err != nil {
 			return err
 		}
-		if _, err := cost.ParseProvider(costGetProvider); err != nil {
+		if _, err := cost.ParseProvider(accountGetCostProvider); err != nil {
 			return err
 		}
-		if _, err := cost.ParseSplitBy(costGetSplitBy); err != nil {
+		if _, err := cost.ParseSplitBy(accountGetCostSplitBy); err != nil {
 			return err
 		}
-		return validateOrgCacheFlags(costGetSkipOrgCache, costGetRefreshOrgCache)
+		return validateOrgCacheFlags(accountGetCostSkipOrgCache, accountGetCostRefreshOrgCache)
 	},
 	RunE: runAccountGetCost,
 }
@@ -92,37 +92,37 @@ Only AWS is supported today; GCP will be added later.`,
 func init() {
 	accountCmd.AddCommand(accountGetCostCmd)
 	bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{
-		Account:         &costGetAccount,
-		AccountAliases:  &costGetAccountAliases,
-		OU:              &costGetOU,
-		OUDirect:        &costGetOUDirect,
-		Payer:           &costGetPayer,
-		TagKey:          &costGetTagKey,
-		TagValue:        &costGetTagValue,
-		SkipOrgCache:    &costGetSkipOrgCache,
-		RefreshOrgCache: &costGetRefreshOrgCache,
+		Account:         &accountGetCostAccount,
+		AccountAliases:  &accountGetCostAccountAliases,
+		OU:              &accountGetCostOU,
+		OUDirect:        &accountGetCostOUDirect,
+		Payer:           &accountGetCostPayer,
+		TagKey:          &accountGetCostTagKey,
+		TagValue:        &accountGetCostTagValue,
+		SkipOrgCache:    &accountGetCostSkipOrgCache,
+		RefreshOrgCache: &accountGetCostRefreshOrgCache,
 	})
-	accountGetCostCmd.Flags().StringVar(&costGetFormat, "format", string(output.FormatPrettyPrint),
+	accountGetCostCmd.Flags().StringVar(&accountGetCostFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
-	addOutputFlag(accountGetCostCmd, &costGetOutput)
-	accountGetCostCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
+	addOutputFlag(accountGetCostCmd, &accountGetCostOutput)
+	accountGetCostCmd.Flags().StringVar(&accountGetCostProvider, "provider", string(cost.ProviderAWS),
 		"Cloud provider: aws or gcp")
-	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
+	accountGetCostCmd.Flags().StringVar(&accountGetCostSplitBy, "split-by", "",
 		"Split results by dimension (supported: service, account)")
-	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
+	accountGetCostCmd.Flags().BoolVar(&accountGetCostQuiet, "quiet", false, "Suppress progress messages on stderr")
 	addPeriodFlags(accountGetCostCmd)
 }
 
 func runAccountGetCost(cmd *cobra.Command, _ []string) error {
-	format, err := output.ParseFormat(costGetFormat)
+	format, err := output.ParseFormat(accountGetCostFormat)
 	if err != nil {
 		return err
 	}
-	provider, err := cost.ParseProvider(costGetProvider)
+	provider, err := cost.ParseProvider(accountGetCostProvider)
 	if err != nil {
 		return err
 	}
-	splitBy, err := cost.ParseSplitBy(costGetSplitBy)
+	splitBy, err := cost.ParseSplitBy(accountGetCostSplitBy)
 	if err != nil {
 		return err
 	}
@@ -139,22 +139,22 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	status := progress.New(cmd.ErrOrStderr(), costGetQuiet)
+	status := progress.New(cmd.ErrOrStderr(), accountGetCostQuiet)
 	awsCtx := cmd.Context()
 	if provider == cost.ProviderAWS {
 		awsCtx = awsCommandContext(cmd)
 	}
 
-	sel, err := parseCostTargetSelector(
-		costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
-		costGetTagKey, costGetTagValue, costGetOUDirect,
-		costGetSkipOrgCache, costGetRefreshOrgCache,
+	sel, err := parseAccountTargetSelector(
+		accountGetCostAccount, accountGetCostAccountAliases, accountGetCostOU, accountGetCostPayer,
+		accountGetCostTagKey, accountGetCostTagValue, accountGetCostOUDirect,
+		accountGetCostSkipOrgCache, accountGetCostRefreshOrgCache,
 	)
 	if err != nil {
 		return err
 	}
 
-	targets, err := resolveCostTargets(
+	targets, err := resolveAccountTargets(
 		cmd, cfg, sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
@@ -163,7 +163,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	out, closeOut, err := resolveCommandOutput(cmd, costGetOutput)
+	out, closeOut, err := resolveCommandOutput(cmd, accountGetCostOutput)
 	if err != nil {
 		return err
 	}
@@ -181,13 +181,13 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 
 	if provider == cost.ProviderAWS {
 		status.Step("Ensuring AWS credentials…")
-		if err := ensureCostCredentials(awsCtx, cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+		if err := ensureAccountCredentials(awsCtx, cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 			return err
 		}
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(awsCtx, cfg, targets, awsFlags.CredentialsFile, status)
+		targets, err = prepareAccountTargets(awsCtx, cfg, targets, awsFlags.CredentialsFile, status)
 		if err != nil {
 			return err
 		}

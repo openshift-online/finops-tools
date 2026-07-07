@@ -22,7 +22,7 @@ bindAWSAccountSelectorFlags(tagListCmd, awsAccountSelectorFlagRefs{
 }, "...")
 
 // ✅ GOOD — get-cost / snapshot / report create
-bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{Account: &costGetAccount, ...})
+bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{Account: &accountGetCostAccount, ...})
 
 // ❌ BAD — ambiguous positional
 Use: "list <account>"

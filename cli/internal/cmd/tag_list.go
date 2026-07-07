@@ -55,7 +55,7 @@ func init() {
 	tagListCmd.Flags().StringVar(&accountTagsFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
 	addOutputFlag(tagListCmd, &accountTagsOutput)
-	bindAWSAccountSelectorFlags(tagListCmd, awsAccountSelectorFlagRefs{
+	bindAccountSelectorFlags(tagListCmd, accountSelectorFlagRefs{
 		Payer:     &accountTagsPayer,
 		Alias:     &accountTagsAlias,
 		AccountID: &accountTagsAccountID,
