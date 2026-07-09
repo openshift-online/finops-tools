@@ -68,7 +68,7 @@ func TestFetchBilledSnapshotCosts(t *testing.T) {
 		},
 	}
 	now := time.Date(2026, 6, 17, 0, 0, 0, 0, time.UTC)
-	got, err := FetchBilledSnapshotCosts(context.Background(), ce, []string{"111111111111"}, now)
+	got, err := FetchBilledSnapshotCosts(context.Background(), ce, []string{"111111111111"}, now, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +103,7 @@ func TestFetchBilledSnapshotCostsDeduplicatesAccountIDs(t *testing.T) {
 		ce,
 		[]string{"111111111111", " 111111111111 ", "111111111111"},
 		now,
+		1,
 	)
 	if err != nil {
 		t.Fatal(err)

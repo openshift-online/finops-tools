@@ -568,6 +568,7 @@ finops report create costs --payer rh-control --tag-key env --tag-value prod -o 
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr (cost/CSV/JSON still go to stdout) |
+| `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `10`; use `1` for sequential) |
 | `--split-by` | Group costs by dimension: `service` (AWS service) or `account` (linked AWS account ID); includes share % and relative cost bars in `pretty-print` |
 | `--provider` | `aws` (default). `gcp` is reserved for a future release |
 
@@ -596,6 +597,7 @@ finops snapshot list --account 333333333333 --payer rhc --older-than-days 90 --f
 | `--role` | Linked-account IAM role name (default: `defaults.aws.linked_role` in config) |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr |
+| `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `10`; use `1` for sequential) |
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 
 When Cost Explorer data is available, the summary shows **attributed** storage cost for listed snapshots (scaled to billed `EBS:SnapshotUsage` and `RDS:ChargedBackupUsage` for the last complete calendar month). Account-wide billed amounts are in JSON only (`summary.billed_costs`). Per-snapshot **$/MO** is each snapshot's share of that attributed cost; **—** on EBS means no incremental blocks. Without CE data, summary falls back to API estimates. Payer credentials need `ce:GetCostAndUsage` with `LINKED_ACCOUNT` scope.
@@ -637,6 +639,7 @@ The **costs** template includes:
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 | `--output` / `-o` | Write HTML to a file instead of stdout |
 | `--quiet` | Suppress progress messages on stderr (HTML still goes to stdout or `--output`) |
+| `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `10`; use `1` for sequential; **costs** template only) |
 | `--days`, `--months`, `--from`, `--to`, `--exclude-recent-days` | Same period options as `finops account get-cost` |
 
 Progress lines (tag resolution, credential checks, Cost Explorer queries) are printed to **stderr** so you can redirect output safely, e.g. `finops account get-cost ... --format json > costs.json`.
@@ -645,7 +648,7 @@ Use `--quiet` to suppress progress messages.
 
 Tag-based account selection caches organization account and tag listings via the shared finops cache service (`cli/internal/cache`) under `cache/org/<payer-account-id>.json` next to your config (default TTL: 1 hour). Use `--refresh-org-cache` to force a refresh or `--skip-org-cache` to always query AWS live.
 
-When many linked accounts under the same payer are queried together (typical for `--all-linked` or `--tag-key`), finops uses **one bulk Cost Explorer query** grouped by linked account instead of one API call per account. `--split-by service` uses batched queries (~100 accounts per call).
+When many linked accounts under the same payer are queried together (typical for `--all-linked`, `--tag-key`, or `--ou`), `finops account get-cost` uses **bulk Cost Explorer queries** grouped by linked account instead of one API call per account (usually a single CE call for up to 100 linked accounts; use `--workers` to parallelize batched CE calls when there are more than 100 accounts). `finops snapshot list` and `finops report create costs` use `--workers` (default `10`) to parallelize per-account scans, assume-role setup, and batched CE queries when selections are large.
 
 ## Cross-compile (local)
 

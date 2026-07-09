@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 	"github.com/openshift-online/finops-tools/core/apilog"
+	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
 const costExplorerRegion = "us-east-1"
@@ -55,6 +56,7 @@ func FetchBilledSnapshotCosts(
 	ce CostExplorerAPI,
 	accountIDs []string,
 	now time.Time,
+	workers int,
 ) ([]AccountBilledSnapshotCosts, error) {
 	if ce == nil {
 		return nil, fmt.Errorf("cost explorer client is required")
@@ -67,19 +69,24 @@ func FetchBilledSnapshotCosts(
 
 	accountIDs = uniqueTrimmedAccountIDs(accountIDs)
 
-	byAccount := make(map[string]*AccountBilledSnapshotCosts, len(accountIDs))
-	for _, accountID := range accountIDs {
+	results := make([]*AccountBilledSnapshotCosts, len(accountIDs))
+	err := parallel.ForEach(ctx, workers, len(accountIDs), func(ctx context.Context, i int) error {
+		accountID := accountIDs[i]
 		costs, err := fetchAccountBilledSnapshotCosts(ctx, ce, accountID, start, end)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", accountID, err)
+			return fmt.Errorf("%s: %w", accountID, err)
 		}
 		costs.Period = period
-		byAccount[accountID] = &costs
+		results[i] = &costs
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	out := make([]AccountBilledSnapshotCosts, 0, len(accountIDs))
-	for _, accountID := range accountIDs {
-		out = append(out, *byAccount[accountID])
+	for _, costs := range results {
+		out = append(out, *costs)
 	}
 	return out, nil
 }

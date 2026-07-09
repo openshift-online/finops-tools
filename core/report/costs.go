@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/openshift-online/finops-tools/core/cost"
+	"github.com/openshift-online/finops-tools/core/parallel"
+	"golang.org/x/sync/errgroup"
 )
 
 // CostsReport is aggregated cost data for the costs HTML template.
@@ -47,34 +49,70 @@ func BuildCostsReport(ctx context.Context, q cost.CostQuery, progress Progress) 
 
 	dr := cost.EffectiveRange(q, time.Now().UTC())
 	period := fmt.Sprintf("%s – %s", dr.Start.Format("2006-01-02"), dr.End.AddDate(0, 0, -1).Format("2006-01-02"))
-	progress.Step(fmt.Sprintf("Fetching total costs from AWS Cost Explorer (%s)…", period))
-	totalQ := q
-	totalQ.SplitBy = cost.SplitByNone
-	totalRes, err := cost.Fetch(ctx, totalQ)
-	if err != nil {
-		return CostsReport{}, fmt.Errorf("total costs: %w", err)
-	}
 
-	progress.Step("Fetching costs by linked account…")
-	byAccountQ := q
-	byAccountQ.SplitBy = cost.SplitByAccount
-	byAccountRes, err := cost.Fetch(ctx, byAccountQ)
-	if err != nil {
-		return CostsReport{}, fmt.Errorf("costs by account: %w", err)
-	}
+	var (
+		totalRes     cost.CostResult
+		byAccountRes cost.CostResult
+		byServiceRes cost.CostResult
+		daily        []cost.DailyCostItem
+		dailyCurrency string
+	)
 
-	progress.Step("Fetching costs by service…")
-	byServiceQ := q
-	byServiceQ.SplitBy = cost.SplitByService
-	byServiceRes, err := cost.Fetch(ctx, byServiceQ)
-	if err != nil {
-		return CostsReport{}, fmt.Errorf("costs by service: %w", err)
+	workers := parallel.WorkersOrDefault(q.Workers)
+	if workers > 4 {
+		workers = 4
 	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
 
-	progress.Step("Fetching daily cost trend…")
-	daily, dailyCurrency, err := cost.FetchDaily(ctx, q)
-	if err != nil {
-		return CostsReport{}, fmt.Errorf("daily costs: %w", err)
+	g.Go(func() error {
+		progress.Step(fmt.Sprintf("Fetching total costs from AWS Cost Explorer (%s)…", period))
+		totalQ := q
+		totalQ.SplitBy = cost.SplitByNone
+		var err error
+		totalRes, err = cost.Fetch(gctx, totalQ)
+		if err != nil {
+			return fmt.Errorf("total costs: %w", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		progress.Step("Fetching costs by linked account…")
+		byAccountQ := q
+		byAccountQ.SplitBy = cost.SplitByAccount
+		var err error
+		byAccountRes, err = cost.Fetch(gctx, byAccountQ)
+		if err != nil {
+			return fmt.Errorf("costs by account: %w", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		progress.Step("Fetching costs by service…")
+		byServiceQ := q
+		byServiceQ.SplitBy = cost.SplitByService
+		var err error
+		byServiceRes, err = cost.Fetch(gctx, byServiceQ)
+		if err != nil {
+			return fmt.Errorf("costs by service: %w", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		progress.Step("Fetching daily cost trend…")
+		var err error
+		daily, dailyCurrency, err = cost.FetchDaily(gctx, q)
+		if err != nil {
+			return fmt.Errorf("daily costs: %w", err)
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return CostsReport{}, err
 	}
 	if dailyCurrency != "" && dailyCurrency != totalRes.Currency {
 		return CostsReport{}, fmt.Errorf("daily currency %s does not match total currency %s", dailyCurrency, totalRes.Currency)

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
 const defaultRegionConcurrency = 5
@@ -36,21 +38,22 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		rdsContexts []RDSRegionContext
 		ebsRunRate  float64
 	)
-	for i, target := range q.Targets {
+	err := parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
+		target := q.Targets[i]
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
-			return Result{}, fmt.Errorf("account target %d: account ID is required", i+1)
+			return fmt.Errorf("account target %d: account ID is required", i+1)
 		}
 		q.reportProgress(fmt.Sprintf("Scanning account %s (%d/%d)…", accountID, i+1, len(q.Targets)))
 
 		regions, err := q.regionLister.ListEnabledRegions(ctx, target.AWSConfig, q.Regions)
 		if err != nil {
-			return Result{}, fmt.Errorf("%s: list regions: %w", accountID, err)
+			return fmt.Errorf("%s: list regions: %w", accountID, err)
 		}
 
 		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, target, accountID, regions, cutoff, typeSet)
 		if err != nil {
-			return Result{}, err
+			return err
 		}
 		mu.Lock()
 		records = append(records, accountRecords...)
@@ -58,6 +61,10 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		rdsContexts = append(rdsContexts, accountRDSContexts...)
 		ebsRunRate += accountEBSRunRate
 		mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		return Result{}, err
 	}
 
 	sortRecords(records)

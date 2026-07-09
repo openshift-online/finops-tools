@@ -33,6 +33,7 @@ var (
 	snapshotListTagValue       string
 	snapshotListTypes          string
 	snapshotListProvider       string
+	snapshotListWorkers        int
 	snapshotListFetch          = snapshot.Fetch
 )
 
@@ -93,6 +94,9 @@ Examples:
 		if _, err := snapshot.ParseRegions(snapshotListRegions); err != nil {
 			return err
 		}
+		if err := validateWorkers(snapshotListWorkers); err != nil {
+			return err
+		}
 		return validateOrgCacheFlags(snapshotListSkipOrgCache, snapshotListRefreshOrgCache)
 	},
 	RunE: runSnapshotList,
@@ -123,6 +127,7 @@ func init() {
 		"Cloud provider: aws or gcp")
 	snapshotListCmd.Flags().StringVar(&snapshotListRole, "role", "", "Linked-account IAM role name (default: config defaults.aws.linked_role)")
 	snapshotListCmd.Flags().BoolVar(&snapshotListQuiet, "quiet", false, "Suppress progress messages on stderr")
+	bindWorkersFlag(snapshotListCmd, &snapshotListWorkers, "")
 }
 
 func runSnapshotList(cmd *cobra.Command, _ []string) error {
@@ -203,6 +208,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	snapshotTargets, err := prepareSnapshotTargets(
 		cmd, cfg, targets,
 		awsFlags.CredentialsFile, awsFlags.ConfigPath, snapshotListRole,
+		snapshotListWorkers,
 		status,
 	)
 	if err != nil {
@@ -220,13 +226,14 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		Regions:    regions,
 		MinSizeGiB: snapshotListMinSizeGiB,
 		Progress:   status.Step,
+		Workers:    snapshotListWorkers,
 	})
 	if err != nil {
 		return err
 	}
 
 	status.Step("Fetching billed snapshot costs from Cost Explorer…")
-	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, targets, awsFlags.CredentialsFile, time.Now().UTC())
+	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, targets, awsFlags.CredentialsFile, time.Now().UTC(), snapshotListWorkers)
 	if err != nil {
 		status.Step(fmt.Sprintf("Warning: billed snapshot costs unavailable: %v", err))
 	} else {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/openshift-online/finops-tools/cli/internal/aws"
@@ -12,6 +13,7 @@ import (
 	"github.com/openshift-online/finops-tools/cli/internal/awsauth"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
+	"github.com/openshift-online/finops-tools/core/parallel"
 	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -61,23 +63,25 @@ func prepareSnapshotTargetsImpl(
 	cfg configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
+	workers int,
 	status costStepper,
 ) ([]snapshot.AccountTarget, error) {
 	ctx := awsCommandContext(cmd)
+	var configMu sync.Mutex
 	configCache := make(map[string]aws.Config)
-	out := make([]snapshot.AccountTarget, 0, len(targets))
+	out := make([]snapshot.AccountTarget, len(targets))
 
-	for i := range targets {
+	err := parallel.ForEach(ctx, workers, len(targets), func(ctx context.Context, i int) error {
 		reportPrepareProgress(status, i+1, len(targets))
 		target := targets[i]
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
-			return nil, fmt.Errorf("account target %d: account ID is required", i+1)
+			return fmt.Errorf("account target %d: account ID is required", i+1)
 		}
 
-		awsCfg, err := awsConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, configCache)
+		awsCfg, err := awsConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, configCache, &configMu)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		bt := snapshot.AccountTarget{
@@ -86,9 +90,13 @@ func prepareSnapshotTargetsImpl(
 			AWSConfig:    awsCfg,
 		}
 		if err := enrichSnapshotTargetDisplayName(ctx, &bt, cfg, target); err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, bt)
+		out[i] = bt
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -100,20 +108,26 @@ func awsConfigForSnapshotTarget(
 	target cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
 	configCache map[string]aws.Config,
+	configMu *sync.Mutex,
 ) (aws.Config, error) {
 	if target.IsLinked() {
-		return linkedAWSConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, configCache)
+		return linkedAWSConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, configCache, configMu)
 	}
 
 	credID := target.CredentialsAccountID()
-	if cached, ok := configCache[credID]; ok {
+	configMu.Lock()
+	cached, ok := configCache[credID]
+	configMu.Unlock()
+	if ok {
 		return cached, nil
 	}
 	awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, credID, credentialsFile)
 	if err != nil {
 		return aws.Config{}, err
 	}
+	configMu.Lock()
 	configCache[credID] = awsCfg
+	configMu.Unlock()
 	return awsCfg, nil
 }
 
@@ -124,11 +138,12 @@ func linkedAWSConfigForSnapshotTarget(
 	target cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
 	configCache map[string]aws.Config,
+	configMu *sync.Mutex,
 ) (aws.Config, error) {
 	accountID := strings.TrimSpace(target.AccountID)
 	payerID := target.CredentialsAccountID()
 
-	if _, err := cachedOrLoadConfig(ctx, cfg, payerID, credentialsFile, configCache); err != nil {
+	if _, err := cachedOrLoadConfig(ctx, cfg, payerID, credentialsFile, configCache, configMu); err != nil {
 		return aws.Config{}, err
 	}
 
@@ -158,7 +173,9 @@ func linkedAWSConfigForSnapshotTarget(
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("%s: load linked profile %q: %w", accountID, profile, err)
 	}
+	configMu.Lock()
 	configCache[accountID] = awsCfg
+	configMu.Unlock()
 	return awsCfg, nil
 }
 
@@ -167,15 +184,21 @@ func cachedOrLoadConfig(
 	cfg configstore.File,
 	accountID, credentialsFile string,
 	configCache map[string]aws.Config,
+	configMu *sync.Mutex,
 ) (aws.Config, error) {
-	if cached, ok := configCache[accountID]; ok {
+	configMu.Lock()
+	cached, ok := configCache[accountID]
+	configMu.Unlock()
+	if ok {
 		return cached, nil
 	}
 	awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, accountID, credentialsFile)
 	if err != nil {
 		return aws.Config{}, err
 	}
+	configMu.Lock()
 	configCache[accountID] = awsCfg
+	configMu.Unlock()
 	return awsCfg, nil
 }
 

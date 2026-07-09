@@ -1,6 +1,6 @@
 module github.com/openshift-online/finops-tools/core
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.42.0
@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.51.3
 	github.com/aws/aws-sdk-go-v2/service/rds v1.119.3
 	github.com/snowflakedb/gosnowflake/v2 v2.1.0
+	golang.org/x/sync v0.20.0
 )
 
 require (
@@ -60,7 +61,6 @@ require (
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/telemetry v0.0.0-20251111182119-bc8e575c7b54 // indirect
 	golang.org/x/term v0.38.0 // indirect

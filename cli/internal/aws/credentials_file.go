@@ -6,7 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// credentialsFileMu serializes read-modify-write on the shared credentials file.
+var credentialsFileMu sync.Mutex
 
 // ProfileSession holds temporary AWS credentials for a credentials file profile.
 type ProfileSession struct {
@@ -72,6 +76,9 @@ func WriteProfile(path, profile string, sess ProfileSession) error {
 	if sess.Region == "" {
 		sess.Region = "us-east-1"
 	}
+
+	credentialsFileMu.Lock()
+	defer credentialsFileMu.Unlock()
 
 	sections, err := parseINI(path)
 	if err != nil {

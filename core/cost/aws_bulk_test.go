@@ -2,10 +2,13 @@ package cost
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 )
 
@@ -83,5 +86,87 @@ func TestBatchStrings(t *testing.T) {
 	batches := batchStrings([]string{"a", "b", "c", "d", "e"}, 2)
 	if len(batches) != 3 || len(batches[0]) != 2 || len(batches[2]) != 1 {
 		t.Fatalf("batches = %+v", batches)
+	}
+}
+
+type concurrentCE struct {
+	active        int32
+	maxConcurrent int32
+	calls         int32
+}
+
+func (f *concurrentCE) GetCostAndUsage(
+	ctx context.Context,
+	params *costexplorer.GetCostAndUsageInput,
+	_ ...func(*costexplorer.Options),
+) (*costexplorer.GetCostAndUsageOutput, error) {
+	cur := atomic.AddInt32(&f.active, 1)
+	for {
+		prev := atomic.LoadInt32(&f.maxConcurrent)
+		if cur <= prev || atomic.CompareAndSwapInt32(&f.maxConcurrent, prev, cur) {
+			break
+		}
+	}
+	atomic.AddInt32(&f.calls, 1)
+
+	select {
+	case <-time.After(20 * time.Millisecond):
+	case <-ctx.Done():
+		atomic.AddInt32(&f.active, -1)
+		return nil, ctx.Err()
+	}
+	atomic.AddInt32(&f.active, -1)
+
+	var groups []types.Group
+	if params.Filter != nil && params.Filter.Dimensions != nil {
+		for _, accountID := range params.Filter.Dimensions.Values {
+			groups = append(groups, types.Group{
+				Keys: []string{accountID},
+				Metrics: map[string]types.MetricValue{
+					MetricNetAmortized: {Amount: aws.String("1"), Unit: aws.String("USD")},
+				},
+			})
+		}
+	}
+	return &costexplorer.GetCostAndUsageOutput{
+		ResultsByTime: []types.ResultByTime{{Groups: groups}},
+	}, nil
+}
+
+func TestFetchBulkParallelBatches(t *testing.T) {
+	const accountCount = 150
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	ce := &concurrentCE{}
+	targets := make([]AccountTarget, accountCount)
+	for i := 0; i < accountCount; i++ {
+		id := fmt.Sprintf("%012d", i+1)
+		targets[i] = AccountTarget{
+			AccountID:        id,
+			PayerAccountID:   "123456789012",
+			ScopeAccountOnly: true,
+			AWSConfig:        aws.Config{},
+		}
+	}
+
+	res, err := fetchAWSNetAmortizedBulk(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Range:    LastNDaysRange(30, now),
+		SplitBy:  SplitByAccount,
+		Workers:  4,
+	}, targets, fetchAWSOptions{
+		Now:             now,
+		NewCostExplorer: func(aws.Config) CostExplorerAPI { return ce },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ce.calls != 2 {
+		t.Fatalf("expected 2 batched Cost Explorer calls, got %d", ce.calls)
+	}
+	if ce.maxConcurrent < 2 {
+		t.Fatalf("expected parallel batch execution, max concurrent = %d", ce.maxConcurrent)
+	}
+	if res.Amount != float64(accountCount) {
+		t.Fatalf("Amount = %v, want %d", res.Amount, accountCount)
 	}
 }

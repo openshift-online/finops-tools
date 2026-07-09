@@ -23,6 +23,7 @@ func fetchSnapshotBilledCostsImpl(
 	targets []cost.AccountTarget,
 	credentialsFile string,
 	now time.Time,
+	workers int,
 ) ([]snapshot.AccountBilledSnapshotCosts, error) {
 	type group struct {
 		accountIDs []string
@@ -66,6 +67,7 @@ func fetchSnapshotBilledCostsImpl(
 			snapshot.NewCostExplorerClient(awsCfg),
 			g.accountIDs,
 			now,
+			workers,
 		)
 		if err != nil {
 			return nil, err

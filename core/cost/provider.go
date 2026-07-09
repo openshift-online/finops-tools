@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
 // Provider identifies a cloud cost data source.
@@ -87,6 +88,8 @@ type CostQuery struct {
 	SplitBy  SplitBy
 	AWSFetch *AWSFetchOptions
 	Progress FetchProgress
+	// Workers bounds concurrent Cost Explorer queries for multi-account fetches (0 = default).
+	Workers int
 }
 
 // AccountTarget identifies an AWS account whose costs are fetched.
@@ -213,8 +216,9 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		}
 	}
 
-	results := make([]CostResult, 0, len(targets))
-	for i, acct := range targets {
+	results := make([]CostResult, len(targets))
+	err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
+		acct := targets[i]
 		reportFetchProgress(q.Progress, acct, i+1, len(targets), q.SplitBy)
 		single := q
 		single.Accounts = []AccountTarget{acct}
@@ -230,9 +234,13 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 			err = fmt.Errorf("unknown provider %q", q.Provider)
 		}
 		if err != nil {
-			return CostResult{}, fmt.Errorf("%s: %w", acct.AccountID, err)
+			return fmt.Errorf("%s: %w", acct.AccountID, err)
 		}
-		results = append(results, r)
+		results[i] = r
+		return nil
+	})
+	if err != nil {
+		return CostResult{}, err
 	}
 	return MergeResults(results)
 }
@@ -250,22 +258,31 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 			opts := fetchAWSOptions{Now: time.Now()}
 			return fetchAWSDailyNetAmortizedBulk(ctx, q, targets, opts)
 		}
-		series := make([][]DailyCostItem, 0, len(targets))
-		var currency string
-		for i, acct := range targets {
+		series := make([][]DailyCostItem, len(targets))
+		currencies := make([]string, len(targets))
+		err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
+			acct := targets[i]
 			reportFetchProgress(q.Progress, acct, i+1, len(targets), SplitByNone)
 			single := q
 			single.Accounts = []AccountTarget{acct}
 			daily, cur, err := fetchAWSDailyNetAmortized(ctx, single)
 			if err != nil {
-				return nil, "", fmt.Errorf("%s: %w", acct.AccountID, err)
+				return fmt.Errorf("%s: %w", acct.AccountID, err)
 			}
+			series[i] = daily
+			currencies[i] = cur
+			return nil
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		var currency string
+		for _, cur := range currencies {
 			if currency == "" {
 				currency = cur
-			} else if cur != currency {
+			} else if cur != "" && cur != currency {
 				return nil, "", fmt.Errorf("cannot merge accounts with different currencies (%s vs %s)", currency, cur)
 			}
-			series = append(series, daily)
 		}
 		return MergeDaily(series), currency, nil
 	case ProviderGCP:

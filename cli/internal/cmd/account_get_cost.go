@@ -29,6 +29,7 @@ var (
 	costGetQuiet           bool
 	costGetSkipOrgCache    bool
 	costGetRefreshOrgCache bool
+	costGetWorkers         int
 )
 
 var accountGetCostCmd = &cobra.Command{
@@ -87,6 +88,9 @@ Only AWS is supported today; GCP will be added later.`,
 		if _, err := cost.ParseSplitBy(costGetSplitBy); err != nil {
 			return err
 		}
+		if err := validateWorkers(costGetWorkers); err != nil {
+			return err
+		}
 		return validateOrgCacheFlags(costGetSkipOrgCache, costGetRefreshOrgCache)
 	},
 	RunE: runAccountGetCost,
@@ -114,6 +118,7 @@ func init() {
 	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
 		"Split results by dimension (supported: service, account)")
 	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
+	bindWorkersFlag(accountGetCostCmd, &costGetWorkers, "")
 	addPeriodFlags(accountGetCostCmd)
 }
 
@@ -212,6 +217,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		Range:    dateRange,
 		SplitBy:  splitBy,
 		Progress: status,
+		Workers:  costGetWorkers,
 	}
 	if provider == cost.ProviderAWS && splitBy == cost.SplitByAccount {
 		costQuery.AWSFetch = &cost.AWSFetchOptions{

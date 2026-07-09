@@ -96,6 +96,8 @@ type Query struct {
 	MinSizeGiB   float64
 	Progress     func(string)
 	Now          time.Time
+	// Workers bounds concurrent account scans (0 = default).
+	Workers      int
 	regionLister regionLister
 	ebsLister    ebsLister
 	rdsLister    rdsLister

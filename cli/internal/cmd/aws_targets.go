@@ -1,7 +1,12 @@
 // aws_targets.go registers shared AWS account target flags for get-cost, snapshot list, and report create.
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+
+	"github.com/openshift-online/finops-tools/core/parallel"
+	"github.com/spf13/cobra"
+)
 
 type awsTargetFlagRefs struct {
 	Account         *string
@@ -45,4 +50,18 @@ func bindAWSAccountSelectorFlags(cmd *cobra.Command, refs awsAccountSelectorFlag
 	cmd.Flags().StringVar(refs.Payer, "payer", "", payerHelp)
 	cmd.Flags().StringVar(refs.Alias, "account-alias", "", "Registered account alias")
 	cmd.Flags().StringVar(refs.AccountID, "account-id", "", "12-digit AWS account ID")
+}
+
+// bindWorkersFlag registers --workers for bounded parallel AWS queries when multiple accounts are selected.
+// usagePrefix is prepended to the flag description (e.g. "costs template only; ").
+func bindWorkersFlag(cmd *cobra.Command, workers *int, usagePrefix string) {
+	cmd.Flags().IntVar(workers, "workers", parallel.DefaultWorkers,
+		usagePrefix+"Maximum concurrent workers for multi-account AWS queries (default 10; use 1 for sequential)")
+}
+
+func validateWorkers(workers int) error {
+	if workers < 1 {
+		return fmt.Errorf("--workers must be at least 1")
+	}
+	return nil
 }

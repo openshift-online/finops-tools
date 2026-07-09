@@ -28,6 +28,7 @@ var (
 	reportGenerateSkipOrgCache    bool
 	reportGenerateRefreshOrgCache bool
 	reportCreateSnowflakeAlias    string
+	reportGenerateWorkers         int
 )
 
 var reportCreateCmd = &cobra.Command{
@@ -67,6 +68,9 @@ Example:
 		if _, err := reportpkg.ParseFormat(reportGenerateFormat); err != nil {
 			return err
 		}
+		if err := validateWorkers(reportGenerateWorkers); err != nil {
+			return err
+		}
 		return validateOrgCacheFlags(reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache)
 	},
 	RunE: runReportCreate,
@@ -90,6 +94,7 @@ func init() {
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
+	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
 	addPeriodFlags(reportCreateCmd)
 }
 
@@ -160,6 +165,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		Now:            time.Now().UTC(),
 		ConfigPath:     cfgPath,
 		SnowflakeAlias: snowflakeAlias,
+		Workers:        reportGenerateWorkers,
 	}
 	if err := gen.Validate(in); err != nil {
 		return err
