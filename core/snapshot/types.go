@@ -87,15 +87,20 @@ type AccountTarget struct {
 	AWSConfig    aws.Config
 }
 
+// AccountProgress reports completion of per-account snapshot scans.
+type AccountProgress interface {
+	Advance()
+}
+
 // Query describes a snapshot discovery request.
 type Query struct {
-	Targets      []AccountTarget
-	OlderThan    time.Duration
-	Types        []Kind
-	Regions      []string
-	MinSizeGiB   float64
-	Progress     func(string)
-	Now          time.Time
+	Targets         []AccountTarget
+	OlderThan       time.Duration
+	Types           []Kind
+	Regions         []string
+	MinSizeGiB      float64
+	AccountProgress AccountProgress
+	Now             time.Time
 	// Workers bounds concurrent account scans (0 = default).
 	Workers      int
 	regionLister regionLister

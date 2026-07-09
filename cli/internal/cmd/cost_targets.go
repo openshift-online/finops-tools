@@ -421,15 +421,3 @@ func costStep(status costStepper, message string) {
 	status.Step(message)
 }
 
-func shouldReportIndexedProgress(index, total int) bool {
-	if total <= 1 {
-		return false
-	}
-	if index == 1 || index == total {
-		return true
-	}
-	if total <= 10 {
-		return true
-	}
-	return index%25 == 0
-}

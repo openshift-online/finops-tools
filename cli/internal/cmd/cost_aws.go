@@ -12,6 +12,7 @@ import (
 	awsconfig "github.com/openshift-online/finops-tools/cli/internal/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/awsauth"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
+	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -57,40 +58,36 @@ func prepareCostTargets(
 	store configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile string,
-	status costStepper,
+	bar *progress.Bar,
 ) ([]cost.AccountTarget, error) {
+	if bar != nil {
+		defer bar.Finish()
+	}
 	credConfigs := make(map[string]aws.Config)
-	total := len(targets)
 	for i := range targets {
-		reportPrepareProgress(status, i+1, total)
 		credID := targets[i].CredentialsAccountID()
 		if awsCfg, ok := credConfigs[credID]; ok {
 			targets[i].AWSConfig = awsCfg
 			if err := enrichCostTargetDisplayName(ctx, &targets[i], store); err != nil {
 				return nil, err
 			}
-			continue
-		}
+		} else {
+			awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, store, credID, credentialsFile)
+			if err != nil {
+				return nil, err
+			}
+			credConfigs[credID] = awsCfg
+			targets[i].AWSConfig = awsCfg
 
-		awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, store, credID, credentialsFile)
-		if err != nil {
-			return nil, err
+			if err := enrichCostTargetDisplayName(ctx, &targets[i], store); err != nil {
+				return nil, err
+			}
 		}
-		credConfigs[credID] = awsCfg
-		targets[i].AWSConfig = awsCfg
-
-		if err := enrichCostTargetDisplayName(ctx, &targets[i], store); err != nil {
-			return nil, err
+		if bar != nil {
+			bar.Advance()
 		}
 	}
 	return targets, nil
-}
-
-func reportPrepareProgress(status costStepper, index, total int) {
-	if status == nil || total <= 1 || !shouldReportIndexedProgress(index, total) {
-		return
-	}
-	status.Step(fmt.Sprintf("Preparing account configuration (%d/%d)…", index, total))
 }
 
 var loadAWSConfigForCredentialsAccount = loadAWSConfigForCredentialsAccountImpl

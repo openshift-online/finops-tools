@@ -9,6 +9,7 @@ import (
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
+	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -99,7 +100,7 @@ func TestRunSnapshotListUsesFetchHook(t *testing.T) {
 	fetchSnapshotBilledCosts = func(_ context.Context, _ configstore.File, _ []cost.AccountTarget, _ string, _ time.Time, _ int) ([]snapshot.AccountBilledSnapshotCosts, error) {
 		return nil, nil
 	}
-	prepareSnapshotTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ int, _ costStepper) ([]snapshot.AccountTarget, error) {
+	prepareSnapshotTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ int, _ *progress.Bar) ([]snapshot.AccountTarget, error) {
 		out := make([]snapshot.AccountTarget, 0, len(targets))
 		for _, target := range targets {
 			out = append(out, snapshot.AccountTarget{AccountID: target.AccountID})

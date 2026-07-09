@@ -70,20 +70,51 @@ func TestFetchContinuesWhenRegionFails(t *testing.T) {
 	}
 }
 
-func TestFetchFailsWhenAllRegionsFail(t *testing.T) {
-	errTimeout := errors.New("dial tcp: i/o timeout")
-	_, err := Fetch(context.Background(), Query{
+func TestFetchSkipsAccountWhenAllRegionsFail(t *testing.T) {
+	errDenied := errors.New("ec2:DescribeSnapshots because no identity-based policy allows the ec2:DescribeSnapshots action")
+	result, err := Fetch(context.Background(), Query{
 		Targets:   []AccountTarget{{AccountID: "111111111111"}},
 		OlderThan: 180 * 24 * time.Hour,
 		Types:     []Kind{KindEBSSnapshot},
-		regionLister: fakeRegionLister{regions: []string{"me-south-1"}},
+		regionLister: fakeRegionLister{regions: []string{"us-east-1", "us-west-2"}},
 		ebsLister: flakyEBSLister{
-			failRegions: map[string]error{"me-south-1": errTimeout},
+			failRegions: map[string]error{
+				"us-east-1": errDenied,
+				"us-west-2": errDenied,
+			},
 		},
 		rdsLister: fakeRDSLister{},
 	})
-	if err == nil {
-		t.Fatal("expected error when all regions fail")
+	if err != nil {
+		t.Fatalf("Fetch() error = %v, want nil so other accounts can continue", err)
+	}
+	if len(result.Records) != 0 {
+		t.Fatalf("records = %d, want 0", len(result.Records))
+	}
+	if len(result.Summary.SkippedRegions) != 1 {
+		t.Fatalf("skipped = %#v, want one collapsed warning", result.Summary.SkippedRegions)
+	}
+	if result.Summary.SkippedRegions[0].Region != "all" {
+		t.Fatalf("region = %q, want all", result.Summary.SkippedRegions[0].Region)
+	}
+}
+
+func TestCollapseRegionWarnings(t *testing.T) {
+	warnings := []RegionWarning{
+		{AccountID: "111111111111", Region: "us-east-1", Message: "access denied"},
+		{AccountID: "111111111111", Region: "us-west-2", Message: "access denied"},
+	}
+	got := collapseRegionWarnings("111111111111", []string{"us-east-1", "us-west-2"}, warnings)
+	if len(got) != 1 || got[0].Region != "all" {
+		t.Fatalf("got %#v", got)
+	}
+
+	mixed := []RegionWarning{
+		{AccountID: "111111111111", Region: "us-east-1", Message: "access denied"},
+		{AccountID: "111111111111", Region: "us-west-2", Message: "timeout"},
+	}
+	if len(collapseRegionWarnings("111111111111", []string{"us-east-1", "us-west-2"}, mixed)) != 2 {
+		t.Fatal("expected distinct warnings to remain separate")
 	}
 }
 

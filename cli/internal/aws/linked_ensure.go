@@ -17,8 +17,10 @@ type EnsureLinkedOptions struct {
 	LinkedProfileNames []string
 	RoleARN            string
 	CredentialsPath    string
-	Validator          CredentialValidator
-	AssumeRoleFn       AssumeRoleFunc
+	// PayerSession skips payer credential resolution when already loaded.
+	PayerSession ProfileSession
+	Validator    CredentialValidator
+	AssumeRoleFn AssumeRoleFunc
 }
 
 // AssumeLinkedCredentials assumes a role into the linked account using payer credentials
@@ -35,42 +37,14 @@ func AssumeLinkedCredentials(ctx context.Context, opts EnsureLinkedOptions) (Pro
 		return ProfileSession{}, Identity{}, fmt.Errorf("role ARN is required")
 	}
 
-	path := opts.CredentialsPath
-	if path == "" {
-		var err error
-		path, err = DefaultCredentialsPath()
-		if err != nil {
-			return ProfileSession{}, Identity{}, err
-		}
-	}
-
-	payerProfiles := profileNamesForAccount(opts.PayerAccountID, opts.PayerProfileNames)
 	validator := opts.Validator
 	if validator == nil {
 		validator = STSValidator{}
 	}
 
-	payerRes, status, err := resolveFirstValidProfile(ctx, payerProfiles, path, validator)
+	payerSess, err := resolvePayerProfileSession(ctx, opts)
 	if err != nil {
 		return ProfileSession{}, Identity{}, err
-	}
-	if status != CredentialsValid {
-		return ProfileSession{}, Identity{}, fmt.Errorf("payer credentials: %w", errPayerCredentialsUnavailable(status, payerProfiles))
-	}
-	if payerRes.AccountID != opts.PayerAccountID {
-		return ProfileSession{}, Identity{}, fmt.Errorf("payer session is account %s, expected %s", payerRes.AccountID, opts.PayerAccountID)
-	}
-
-	payerProfile := payerRes.Profile
-	if payerProfile == "" {
-		payerProfile = SanitizeProfileName(opts.PayerAccountID)
-	}
-	payerSess, ok, err := ReadProfile(path, payerProfile)
-	if err != nil {
-		return ProfileSession{}, Identity{}, err
-	}
-	if !ok {
-		return ProfileSession{}, Identity{}, fmt.Errorf("%w: payer profile %q", ErrCredentialsNotFound, payerProfile)
 	}
 
 	assume := opts.AssumeRoleFn
@@ -91,6 +65,59 @@ func AssumeLinkedCredentials(ctx context.Context, opts EnsureLinkedOptions) (Pro
 	}
 
 	return linkedSess, id, nil
+}
+
+// ResolvePayerProfileSession loads validated payer credentials from disk or returns PayerSession when set.
+func ResolvePayerProfileSession(ctx context.Context, opts EnsureLinkedOptions) (ProfileSession, error) {
+	return resolvePayerProfileSession(ctx, opts)
+}
+
+func resolvePayerProfileSession(ctx context.Context, opts EnsureLinkedOptions) (ProfileSession, error) {
+	if opts.PayerSession.complete() {
+		return opts.PayerSession, nil
+	}
+	if opts.PayerAccountID == "" {
+		return ProfileSession{}, fmt.Errorf("payer account ID is required")
+	}
+
+	path := opts.CredentialsPath
+	if path == "" {
+		var err error
+		path, err = DefaultCredentialsPath()
+		if err != nil {
+			return ProfileSession{}, err
+		}
+	}
+
+	payerProfiles := profileNamesForAccount(opts.PayerAccountID, opts.PayerProfileNames)
+	validator := opts.Validator
+	if validator == nil {
+		validator = STSValidator{}
+	}
+
+	payerRes, status, err := resolveFirstValidProfile(ctx, payerProfiles, path, validator)
+	if err != nil {
+		return ProfileSession{}, err
+	}
+	if status != CredentialsValid {
+		return ProfileSession{}, fmt.Errorf("payer credentials: %w", errPayerCredentialsUnavailable(status, payerProfiles))
+	}
+	if payerRes.AccountID != opts.PayerAccountID {
+		return ProfileSession{}, fmt.Errorf("payer session is account %s, expected %s", payerRes.AccountID, opts.PayerAccountID)
+	}
+
+	payerProfile := payerRes.Profile
+	if payerProfile == "" {
+		payerProfile = SanitizeProfileName(opts.PayerAccountID)
+	}
+	payerSess, ok, err := ReadProfile(path, payerProfile)
+	if err != nil {
+		return ProfileSession{}, err
+	}
+	if !ok {
+		return ProfileSession{}, fmt.Errorf("%w: payer profile %q", ErrCredentialsNotFound, payerProfile)
+	}
+	return payerSess, nil
 }
 
 // EnsureLinkedCredentials assumes a role into the linked account and persists linked credentials

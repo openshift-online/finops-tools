@@ -12,6 +12,7 @@ import (
 	"github.com/openshift-online/finops-tools/cli/internal/account"
 	"github.com/openshift-online/finops-tools/cli/internal/awsauth"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
+	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
 	"github.com/openshift-online/finops-tools/core/parallel"
 	"github.com/openshift-online/finops-tools/core/snapshot"
@@ -64,22 +65,28 @@ func prepareSnapshotTargetsImpl(
 	targets []cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
 	workers int,
-	status costStepper,
+	bar *progress.Bar,
 ) ([]snapshot.AccountTarget, error) {
 	ctx := awsCommandContext(cmd)
+	if bar != nil {
+		defer bar.Finish()
+	}
+	payerSessions, err := loadPayerProfileSessions(ctx, cfg, targets, credentialsFile)
+	if err != nil {
+		return nil, err
+	}
 	var configMu sync.Mutex
 	configCache := make(map[string]aws.Config)
 	out := make([]snapshot.AccountTarget, len(targets))
 
-	err := parallel.ForEach(ctx, workers, len(targets), func(ctx context.Context, i int) error {
-		reportPrepareProgress(status, i+1, len(targets))
+	err = parallel.ForEach(ctx, workers, len(targets), func(ctx context.Context, i int) error {
 		target := targets[i]
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
 			return fmt.Errorf("account target %d: account ID is required", i+1)
 		}
 
-		awsCfg, err := awsConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, configCache, &configMu)
+		awsCfg, err := awsConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, payerSessions, configCache, &configMu)
 		if err != nil {
 			return err
 		}
@@ -93,6 +100,9 @@ func prepareSnapshotTargetsImpl(
 			return err
 		}
 		out[i] = bt
+		if bar != nil {
+			bar.Advance()
+		}
 		return nil
 	})
 	if err != nil {
@@ -101,17 +111,49 @@ func prepareSnapshotTargetsImpl(
 	return out, nil
 }
 
+func loadPayerProfileSessions(
+	ctx context.Context,
+	cfg configstore.File,
+	targets []cost.AccountTarget,
+	credentialsFile string,
+) (map[string]awsconfig.ProfileSession, error) {
+	seen := make(map[string]struct{})
+	sessions := make(map[string]awsconfig.ProfileSession)
+	for i := range targets {
+		if !targets[i].IsLinked() {
+			continue
+		}
+		payerID := targets[i].CredentialsAccountID()
+		if _, ok := seen[payerID]; ok {
+			continue
+		}
+		seen[payerID] = struct{}{}
+		payerAlias := cfg.PayerAliasForAccountID(payerID)
+		sess, err := awsconfig.ResolvePayerProfileSession(ctx, awsconfig.EnsureLinkedOptions{
+			PayerAccountID:    payerID,
+			PayerProfileNames: account.AWSProfileNames(payerID, payerAlias, nil),
+			CredentialsPath:   credentialsFile,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", payerID, err)
+		}
+		sessions[payerID] = sess
+	}
+	return sessions, nil
+}
+
 func awsConfigForSnapshotTarget(
 	ctx context.Context,
 	cmd *cobra.Command,
 	cfg configstore.File,
 	target cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
+	payerSessions map[string]awsconfig.ProfileSession,
 	configCache map[string]aws.Config,
 	configMu *sync.Mutex,
 ) (aws.Config, error) {
 	if target.IsLinked() {
-		return linkedAWSConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, configCache, configMu)
+		return linkedAWSConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, payerSessions, configCache, configMu)
 	}
 
 	credID := target.CredentialsAccountID()
@@ -137,14 +179,18 @@ func linkedAWSConfigForSnapshotTarget(
 	cfg configstore.File,
 	target cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
+	payerSessions map[string]awsconfig.ProfileSession,
 	configCache map[string]aws.Config,
 	configMu *sync.Mutex,
 ) (aws.Config, error) {
 	accountID := strings.TrimSpace(target.AccountID)
 	payerID := target.CredentialsAccountID()
 
-	if _, err := cachedOrLoadConfig(ctx, cfg, payerID, credentialsFile, configCache, configMu); err != nil {
-		return aws.Config{}, err
+	configMu.Lock()
+	cached, ok := configCache[accountID]
+	configMu.Unlock()
+	if ok {
+		return cached, nil
 	}
 
 	roleARN, err := resolveSnapshotLinkedRoleARN(cmd, cfg, target, flagRole)
@@ -159,6 +205,7 @@ func linkedAWSConfigForSnapshotTarget(
 		RoleARN:           roleARN,
 		CredentialsPath:   credentialsFile,
 		PayerProfileNames: account.AWSProfileNames(payerID, payerAlias, nil),
+		PayerSession:      payerSessions[payerID],
 	})
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("%s: %w", accountID, err)
@@ -167,29 +214,6 @@ func linkedAWSConfigForSnapshotTarget(
 	awsCfg, err := awsconfig.LoadConfigFromSession(ctx, linkedSess)
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("%s: load linked session: %w", accountID, err)
-	}
-	configMu.Lock()
-	configCache[accountID] = awsCfg
-	configMu.Unlock()
-	return awsCfg, nil
-}
-
-func cachedOrLoadConfig(
-	ctx context.Context,
-	cfg configstore.File,
-	accountID, credentialsFile string,
-	configCache map[string]aws.Config,
-	configMu *sync.Mutex,
-) (aws.Config, error) {
-	configMu.Lock()
-	cached, ok := configCache[accountID]
-	configMu.Unlock()
-	if ok {
-		return cached, nil
-	}
-	awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, accountID, credentialsFile)
-	if err != nil {
-		return aws.Config{}, err
 	}
 	configMu.Lock()
 	configCache[accountID] = awsCfg

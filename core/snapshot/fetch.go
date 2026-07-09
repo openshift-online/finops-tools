@@ -31,6 +31,11 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	cutoff := now.Add(-q.OlderThan)
 	typeSet := kindSet(q.Types)
 
+	regions, err := q.resolveScanRegions(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+
 	var (
 		mu          sync.Mutex
 		records     []Record
@@ -38,17 +43,11 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		rdsContexts []RDSRegionContext
 		ebsRunRate  float64
 	)
-	err := parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
+	err = parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
 		target := q.Targets[i]
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
 			return fmt.Errorf("account target %d: account ID is required", i+1)
-		}
-		q.reportProgress(fmt.Sprintf("Scanning account %s (%d/%d)…", accountID, i+1, len(q.Targets)))
-
-		regions, err := q.regionLister.ListEnabledRegions(ctx, target.AWSConfig, q.Regions)
-		if err != nil {
-			return fmt.Errorf("%s: list regions: %w", accountID, err)
 		}
 
 		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, target, accountID, regions, cutoff, typeSet)
@@ -61,6 +60,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		rdsContexts = append(rdsContexts, accountRDSContexts...)
 		ebsRunRate += accountEBSRunRate
 		mu.Unlock()
+		q.advanceAccountProgress()
 		return nil
 	})
 	if err != nil {
@@ -89,9 +89,22 @@ func (q Query) withDefaults() Query {
 	return q
 }
 
-func (q Query) reportProgress(message string) {
-	if q.Progress != nil {
-		q.Progress(message)
+func (q Query) resolveScanRegions(ctx context.Context) ([]string, error) {
+	if len(q.Targets) == 0 {
+		return nil, nil
+	}
+	// When --regions is unset, enabled regions are usually identical across org members;
+	// discover once instead of calling DescribeRegions per account.
+	regions, err := q.regionLister.ListEnabledRegions(ctx, q.Targets[0].AWSConfig, q.Regions)
+	if err != nil {
+		return nil, fmt.Errorf("%s: list regions: %w", strings.TrimSpace(q.Targets[0].AccountID), err)
+	}
+	return regions, nil
+}
+
+func (q Query) advanceAccountProgress() {
+	if q.AccountProgress != nil {
+		q.AccountProgress.Advance()
 	}
 }
 
@@ -129,7 +142,6 @@ func scanAccountRegions(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			q.reportProgress(fmt.Sprintf("Scanning account %s, region %s…", accountID, region))
 			regionRecords, regionRDSContext, regionEBSRunRate, err := scanRegion(ctx, q, target, accountID, region, cutoff, typeSet)
 			mu.Lock()
 			defer mu.Unlock()
@@ -144,7 +156,6 @@ func scanAccountRegions(
 					Message:   regionErrorMessage(err),
 				}
 				warnings = append(warnings, warning)
-				q.reportProgress(fmt.Sprintf("Skipping account %s, region %s: %s", accountID, region, warning.Message))
 				return
 			}
 			records = append(records, regionRecords...)
@@ -159,10 +170,7 @@ func scanAccountRegions(
 	if scanErr != nil {
 		return records, rdsContexts, ebsRunRate, warnings, scanErr
 	}
-	if len(regions) > 0 && len(warnings) == len(regions) {
-		return records, rdsContexts, ebsRunRate, warnings, fmt.Errorf("%s: all %d region(s) failed; first: %s", accountID, len(regions), warnings[0].Message)
-	}
-	return records, rdsContexts, ebsRunRate, warnings, nil
+	return records, rdsContexts, ebsRunRate, collapseRegionWarnings(accountID, regions, warnings), nil
 }
 
 func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {

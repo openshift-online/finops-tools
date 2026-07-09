@@ -553,3 +553,44 @@ func (f *fakeRDS) DescribeDBClusterSnapshots(
 ) (*rds.DescribeDBClusterSnapshotsOutput, error) {
 	return &rds.DescribeDBClusterSnapshotsOutput{DBClusterSnapshots: f.clusterSnapshots}, nil
 }
+
+type countingRegionLister struct {
+	calls   int
+	regions []string
+}
+
+func (c *countingRegionLister) ListEnabledRegions(_ context.Context, _ aws.Config, _ []string) ([]string, error) {
+	c.calls++
+	return c.regions, nil
+}
+
+func TestFetchListsRegionsOnceForMultipleAccounts(t *testing.T) {
+	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	lister := &countingRegionLister{regions: []string{"us-east-1"}}
+	ebs := Record{
+		AccountID:  "111111111111",
+		Region:     "us-east-1",
+		Kind:       KindEBSSnapshot,
+		ResourceID: "snap-old",
+		SizeGiB:    100,
+	}
+
+	_, err := Fetch(context.Background(), Query{
+		Targets: []AccountTarget{
+			{AccountID: "111111111111"},
+			{AccountID: "222222222222"},
+		},
+		OlderThan: 180 * 24 * time.Hour,
+		Types:     []Kind{KindEBSSnapshot},
+		Now:       now,
+		Workers:   1,
+		regionLister: lister,
+		ebsLister: fakeEBSLister{records: []Record{ebs}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lister.calls != 1 {
+		t.Fatalf("ListEnabledRegions calls = %d, want 1", lister.calls)
+	}
+}

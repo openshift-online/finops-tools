@@ -62,3 +62,21 @@ func regionErrorMessage(err error) string {
 	}
 	return msg
 }
+
+// collapseRegionWarnings merges identical per-region failures into one row when every region failed.
+func collapseRegionWarnings(accountID string, regions []string, warnings []RegionWarning) []RegionWarning {
+	if len(regions) <= 1 || len(warnings) != len(regions) {
+		return warnings
+	}
+	msg := warnings[0].Message
+	for _, warning := range warnings[1:] {
+		if warning.Message != msg {
+			return warnings
+		}
+	}
+	return []RegionWarning{{
+		AccountID: accountID,
+		Region:    "all",
+		Message:   msg,
+	}}
+}

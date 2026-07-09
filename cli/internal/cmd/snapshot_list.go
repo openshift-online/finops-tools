@@ -205,28 +205,33 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	if len(targets) <= 1 {
 		status.Step("Preparing account configuration…")
 	}
+	prepareBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Preparing account configuration…", len(targets))
 	snapshotTargets, err := prepareSnapshotTargets(
 		cmd, cfg, targets,
 		awsFlags.CredentialsFile, awsFlags.ConfigPath, snapshotListRole,
 		snapshotListWorkers,
-		status,
+		prepareBar,
 	)
 	if err != nil {
 		return err
 	}
 
-	if len(snapshotTargets) > 1 {
-		status.Step(fmt.Sprintf("Scanning %d account(s) for snapshots…", len(snapshotTargets)))
+	if len(snapshotTargets) <= 1 {
+		status.Step("Scanning account for snapshots…")
+	}
+	scanBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Scanning accounts for snapshots…", len(snapshotTargets))
+	if scanBar != nil {
+		defer scanBar.Finish()
 	}
 
 	result, err := snapshotListFetch(awsCtx, snapshot.Query{
-		Targets:    snapshotTargets,
-		OlderThan:  time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
-		Types:      types,
-		Regions:    regions,
-		MinSizeGiB: snapshotListMinSizeGiB,
-		Progress:   status.Step,
-		Workers:    snapshotListWorkers,
+		Targets:         snapshotTargets,
+		OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
+		Types:           types,
+		Regions:         regions,
+		MinSizeGiB:      snapshotListMinSizeGiB,
+		AccountProgress: scanBar,
+		Workers:         snapshotListWorkers,
 	})
 	if err != nil {
 		return err

@@ -181,7 +181,8 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, status)
+		prepareBar := progress.NewBar(cmd.ErrOrStderr(), reportGenerateQuiet, "Preparing account configuration…", len(targets))
+		targets, err = prepareCostTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, prepareBar)
 		if err != nil {
 			return err
 		}

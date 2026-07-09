@@ -147,6 +147,42 @@ func TestAssumeLinkedCredentialsDoesNotWriteProfile(t *testing.T) {
 	}
 }
 
+func TestAssumeLinkedCredentialsUsesProvidedPayerSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	payerID := "123456789012"
+	linkedID := "111111111111"
+
+	validator := fakeValidatorFunc(func(_ context.Context, sess ProfileSession) (Identity, error) {
+		if sess.AccessKeyID == "LINKED" {
+			return Identity{AccountID: linkedID}, nil
+		}
+		return Identity{}, ErrCredentialsInvalid
+	})
+
+	_, _, err := AssumeLinkedCredentials(context.Background(), EnsureLinkedOptions{
+		PayerAccountID:  payerID,
+		LinkedAccountID: linkedID,
+		RoleARN:         "arn:aws:iam::111111111111:role/FinOpsReadOnly",
+		CredentialsPath: path,
+		PayerSession: ProfileSession{
+			AccessKeyID: "PAYER", SecretAccessKey: "SK", SessionToken: "ST", Region: "us-east-1",
+		},
+		Validator: validator,
+		AssumeRoleFn: func(_ context.Context, payerSess ProfileSession, roleARN, _ string) (ProfileSession, error) {
+			if payerSess.AccessKeyID != "PAYER" {
+				t.Fatalf("payer session = %+v", payerSess)
+			}
+			return ProfileSession{
+				AccessKeyID: "LINKED", SecretAccessKey: "SK", SessionToken: "ST", Region: "us-east-1",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnsureLinkedCredentialsRequiresPayerCredentials(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials")

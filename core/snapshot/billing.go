@@ -14,7 +14,10 @@ import (
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
-const costExplorerRegion = "us-east-1"
+const (
+	costExplorerRegion       = "us-east-1"
+	snapshotBillingBatchSize = 100
+)
 
 // CostExplorerAPI is the subset of Cost Explorer used for billed snapshot costs.
 type CostExplorerAPI interface {
@@ -33,12 +36,12 @@ type BilledSnapshotPeriod struct {
 
 // AccountBilledSnapshotCosts is actual billed snapshot storage from Cost Explorer.
 type AccountBilledSnapshotCosts struct {
-	AccountID            string               `json:"account_id"`
-	Period               BilledSnapshotPeriod `json:"period"`
-	EBSSnapshotUSD       float64              `json:"ebs_snapshot_usd"`
-	EBSSnapshotGiBMonth  float64              `json:"ebs_snapshot_gib_month,omitempty"`
-	RDSBackupUSD         float64              `json:"rds_backup_usd"`
-	RDSBackupGiBMonth    float64              `json:"rds_backup_usage_gib_month,omitempty"`
+	AccountID           string               `json:"account_id"`
+	Period              BilledSnapshotPeriod `json:"period"`
+	EBSSnapshotUSD      float64              `json:"ebs_snapshot_usd"`
+	EBSSnapshotGiBMonth float64              `json:"ebs_snapshot_gib_month,omitempty"`
+	RDSBackupUSD        float64              `json:"rds_backup_usd"`
+	RDSBackupGiBMonth   float64              `json:"rds_backup_usage_gib_month,omitempty"`
 }
 
 // LastCompleteMonthRange returns the Cost Explorer date range for the last full calendar month.
@@ -68,25 +71,41 @@ func FetchBilledSnapshotCosts(
 	}
 
 	accountIDs = uniqueTrimmedAccountIDs(accountIDs)
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
 
-	results := make([]*AccountBilledSnapshotCosts, len(accountIDs))
-	err := parallel.ForEach(ctx, workers, len(accountIDs), func(ctx context.Context, i int) error {
-		accountID := accountIDs[i]
-		costs, err := fetchAccountBilledSnapshotCosts(ctx, ce, accountID, start, end)
+	batches := batchAccountIDs(accountIDs, snapshotBillingBatchSize)
+	batchResults := make([]map[string]AccountBilledSnapshotCosts, len(batches))
+	err := parallel.ForEach(ctx, workers, len(batches), func(ctx context.Context, i int) error {
+		partial, err := fetchBatchBilledSnapshotCosts(ctx, ce, batches[i], start, end, period)
 		if err != nil {
-			return fmt.Errorf("%s: %w", accountID, err)
+			return err
 		}
-		costs.Period = period
-		results[i] = &costs
+		batchResults[i] = partial
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	byAccount := make(map[string]AccountBilledSnapshotCosts, len(accountIDs))
+	for _, partial := range batchResults {
+		for accountID, costs := range partial {
+			byAccount[accountID] = costs
+		}
+	}
+
 	out := make([]AccountBilledSnapshotCosts, 0, len(accountIDs))
-	for _, costs := range results {
-		out = append(out, *costs)
+	for _, accountID := range accountIDs {
+		if costs, ok := byAccount[accountID]; ok {
+			out = append(out, costs)
+			continue
+		}
+		out = append(out, AccountBilledSnapshotCosts{
+			AccountID: accountID,
+			Period:    period,
+		})
 	}
 	return out, nil
 }
@@ -108,13 +127,36 @@ func uniqueTrimmedAccountIDs(ids []string) []string {
 	return out
 }
 
-func fetchAccountBilledSnapshotCosts(
+func batchAccountIDs(ids []string, size int) [][]string {
+	if size <= 0 || len(ids) == 0 {
+		return nil
+	}
+	out := make([][]string, 0, (len(ids)+size-1)/size)
+	for i := 0; i < len(ids); i += size {
+		end := i + size
+		if end > len(ids) {
+			end = len(ids)
+		}
+		out = append(out, ids[i:end])
+	}
+	return out
+}
+
+func fetchBatchBilledSnapshotCosts(
 	ctx context.Context,
 	ce CostExplorerAPI,
-	accountID string,
+	accountIDs []string,
 	start, end time.Time,
-) (AccountBilledSnapshotCosts, error) {
-	result := AccountBilledSnapshotCosts{AccountID: accountID}
+	period BilledSnapshotPeriod,
+) (map[string]AccountBilledSnapshotCosts, error) {
+	results := make(map[string]AccountBilledSnapshotCosts, len(accountIDs))
+	for _, accountID := range accountIDs {
+		results[accountID] = AccountBilledSnapshotCosts{
+			AccountID: accountID,
+			Period:    period,
+		}
+	}
+
 	var token *string
 	for {
 		out, err := ce.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
@@ -124,39 +166,38 @@ func fetchAccountBilledSnapshotCosts(
 			},
 			Granularity: types.GranularityMonthly,
 			Metrics:     []string{"UnblendedCost", "UsageQuantity"},
-			GroupBy: []types.GroupDefinition{{
-				Type: types.GroupDefinitionTypeDimension,
-				Key:  aws.String("USAGE_TYPE"),
-			}},
-			Filter: accountCEFilter(accountID),
+			GroupBy: []types.GroupDefinition{
+				{
+					Type: types.GroupDefinitionTypeDimension,
+					Key:  aws.String("LINKED_ACCOUNT"),
+				},
+				{
+					Type: types.GroupDefinitionTypeDimension,
+					Key:  aws.String("USAGE_TYPE"),
+				},
+			},
+			Filter:        linkedAccountsCEFilter(accountIDs),
 			NextPageToken: token,
 		})
 		if err != nil {
-			return AccountBilledSnapshotCosts{}, fmt.Errorf("cost explorer GetCostAndUsage: %w", err)
+			return nil, fmt.Errorf("cost explorer GetCostAndUsage: %w", err)
 		}
 
 		for _, row := range out.ResultsByTime {
 			for _, group := range row.Groups {
-				if len(group.Keys) == 0 {
+				if len(group.Keys) < 2 {
 					continue
 				}
-				usageType := group.Keys[0]
-				if isEBSSnapshotUsageType(usageType) {
-					cost, usage, err := parseCEMetrics(group.Metrics)
-					if err != nil {
-						return AccountBilledSnapshotCosts{}, err
-					}
-					result.EBSSnapshotUSD += cost
-					result.EBSSnapshotGiBMonth += usage
+				accountID := strings.TrimSpace(group.Keys[0])
+				usageType := group.Keys[1]
+				costs, ok := results[accountID]
+				if !ok {
+					continue
 				}
-				if isRDSBackupUsageType(usageType) {
-					cost, usage, err := parseCEMetrics(group.Metrics)
-					if err != nil {
-						return AccountBilledSnapshotCosts{}, err
-					}
-					result.RDSBackupUSD += cost
-					result.RDSBackupGiBMonth += usage
+				if err := applyCEUsageTypeToCosts(&costs, usageType, group.Metrics); err != nil {
+					return nil, err
 				}
+				results[accountID] = costs
 			}
 		}
 
@@ -165,7 +206,22 @@ func fetchAccountBilledSnapshotCosts(
 		}
 		token = out.NextPageToken
 	}
-	return result, nil
+	return results, nil
+}
+
+func linkedAccountsCEFilter(accountIDs []string) *types.Expression {
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	if len(accountIDs) == 1 {
+		return accountCEFilter(accountIDs[0])
+	}
+	return &types.Expression{
+		Dimensions: &types.DimensionValues{
+			Key:    types.DimensionLinkedAccount,
+			Values: accountIDs,
+		},
+	}
 }
 
 func accountCEFilter(accountID string) *types.Expression {
@@ -175,6 +231,22 @@ func accountCEFilter(accountID string) *types.Expression {
 			Values: []string{accountID},
 		},
 	}
+}
+
+func applyCEUsageTypeToCosts(costs *AccountBilledSnapshotCosts, usageType string, metrics map[string]types.MetricValue) error {
+	cost, usage, err := parseCEMetrics(metrics)
+	if err != nil {
+		return err
+	}
+	if isEBSSnapshotUsageType(usageType) {
+		costs.EBSSnapshotUSD += cost
+		costs.EBSSnapshotGiBMonth += usage
+	}
+	if isRDSBackupUsageType(usageType) {
+		costs.RDSBackupUSD += cost
+		costs.RDSBackupGiBMonth += usage
+	}
+	return nil
 }
 
 func isEBSSnapshotUsageType(usageType string) bool {
