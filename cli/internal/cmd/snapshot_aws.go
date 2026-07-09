@@ -22,7 +22,7 @@ import (
 var (
 	ensureSnapshotCredentials = ensureSnapshotCredentialsImpl
 	prepareSnapshotTargets    = prepareSnapshotTargetsImpl
-	ensureSnapshotLinked      = awsconfig.EnsureLinkedCredentials
+	assumeSnapshotLinked      = awsconfig.AssumeLinkedCredentials
 )
 
 func ensureSnapshotCredentialsImpl(
@@ -153,25 +153,20 @@ func linkedAWSConfigForSnapshotTarget(
 	}
 
 	payerAlias := cfg.PayerAliasForAccountID(payerID)
-	res, err := ensureSnapshotLinked(ctx, awsconfig.EnsureLinkedOptions{
-		PayerAccountID:     payerID,
-		LinkedAccountID:    accountID,
-		RoleARN:            roleARN,
-		CredentialsPath:    credentialsFile,
-		PayerProfileNames:  account.AWSProfileNames(payerID, payerAlias, nil),
-		LinkedProfileNames: account.AWSProfileNames(accountID, target.DisplayAlias, nil),
+	linkedSess, _, err := assumeSnapshotLinked(ctx, awsconfig.EnsureLinkedOptions{
+		PayerAccountID:    payerID,
+		LinkedAccountID:   accountID,
+		RoleARN:           roleARN,
+		CredentialsPath:   credentialsFile,
+		PayerProfileNames: account.AWSProfileNames(payerID, payerAlias, nil),
 	})
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("%s: %w", accountID, err)
 	}
 
-	profile := res.Profile
-	if profile == "" {
-		profile = awsconfig.SanitizeProfileName(accountID)
-	}
-	awsCfg, err := awsconfig.LoadSharedConfigProfile(ctx, profile)
+	awsCfg, err := awsconfig.LoadConfigFromSession(ctx, linkedSess)
 	if err != nil {
-		return aws.Config{}, fmt.Errorf("%s: load linked profile %q: %w", accountID, profile, err)
+		return aws.Config{}, fmt.Errorf("%s: load linked session: %w", accountID, err)
 	}
 	configMu.Lock()
 	configCache[accountID] = awsCfg
