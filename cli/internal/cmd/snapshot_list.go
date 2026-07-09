@@ -44,6 +44,7 @@ var snapshotListCmd = &cobra.Command{
 
 Account selection matches finops account get-cost: --account, --account-alias, --ou, --tag-key, or --all-linked with --payer.
 Linked member accounts are scanned using role assumption from the payer.
+Accounts that cannot be assumed into are skipped and listed under "Skipped accounts" in the output.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
 When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots.
@@ -206,7 +207,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		status.Step("Preparing account configuration…")
 	}
 	prepareBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Preparing account configuration…", len(targets))
-	snapshotTargets, err := prepareSnapshotTargets(
+	snapshotTargets, skippedAccounts, err := prepareSnapshotTargets(
 		cmd, cfg, targets,
 		awsFlags.CredentialsFile, awsFlags.ConfigPath, snapshotListRole,
 		snapshotListWorkers,
@@ -214,6 +215,15 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	)
 	if err != nil {
 		return err
+	}
+	if len(snapshotTargets) == 0 {
+		return output.WriteSnapshotListResult(out, format, snapshot.Result{
+			Summary: snapshot.Summary{
+				OlderThanDays:   snapshotListOlderThanDays,
+				SkippedAccounts: skippedAccounts,
+				CostDisclaimer:  "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
+			},
+		})
 	}
 
 	if len(snapshotTargets) <= 1 {
@@ -236,6 +246,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	result.Summary.SkippedAccounts = skippedAccounts
 
 	status.Step("Fetching billed snapshot costs from Cost Explorer…")
 	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, targets, awsFlags.CredentialsFile, time.Now().UTC(), snapshotListWorkers)

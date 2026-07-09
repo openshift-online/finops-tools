@@ -20,6 +20,9 @@ func writeSnapshotPretty(w io.Writer, r snapshot.Result) error {
 	if err := writeSnapshotRegionWarnings(w, s, r.Summary.SkippedRegions); err != nil {
 		return err
 	}
+	if err := writeSnapshotAccountWarnings(w, s, r.Summary.SkippedAccounts); err != nil {
+		return err
+	}
 	if len(r.Records) == 0 {
 		return nil
 	}
@@ -107,6 +110,38 @@ func writeSnapshotRegionWarnings(w io.Writer, s styler, warnings []snapshot.Regi
 	})
 	for _, warning := range warnings {
 		table.Append([]string{warning.AccountID, warning.Region, warning.Message})
+	}
+	table.Render()
+	return nil
+}
+
+func writeSnapshotAccountWarnings(w io.Writer, s styler, warnings []snapshot.AccountWarning) error {
+	if len(warnings) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	title := "Skipped accounts"
+	if s.enabled {
+		title = s.bold(s.cyan(title))
+	}
+	if _, err := fmt.Fprintln(w, title); err != nil {
+		return err
+	}
+
+	table := newSnapshotTable(w)
+	table.SetHeader([]string{
+		cell(s, s.bold, "ACCOUNT"),
+		cell(s, s.bold, "ALIAS"),
+		cell(s, s.bold, "MESSAGE"),
+	})
+	for _, warning := range warnings {
+		alias := warning.DisplayAlias
+		if alias == "" {
+			alias = "-"
+		}
+		table.Append([]string{warning.AccountID, alias, warning.Message})
 	}
 	table.Render()
 	return nil

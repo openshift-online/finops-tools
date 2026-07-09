@@ -152,6 +152,7 @@ type Summary struct {
 	ByKind                  []KindSummary    `json:"by_kind"`
 	ByAccount               []AccountSummary `json:"by_account"`
 	SkippedRegions          []RegionWarning  `json:"skipped_regions,omitempty"`
+	SkippedAccounts         []AccountWarning `json:"skipped_accounts,omitempty"`
 	CostDisclaimer          string           `json:"cost_disclaimer"`
 }
 

@@ -14,6 +14,13 @@ type RegionWarning struct {
 	Message   string `json:"message"`
 }
 
+// AccountWarning records an account that could not be prepared for scanning.
+type AccountWarning struct {
+	AccountID    string `json:"account_id"`
+	DisplayAlias string `json:"display_alias,omitempty"`
+	Message      string `json:"message"`
+}
+
 func isSkippableRegionError(err error) bool {
 	if err == nil {
 		return false

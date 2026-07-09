@@ -4,6 +4,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -24,6 +25,7 @@ var (
 	ensureSnapshotCredentials = ensureSnapshotCredentialsImpl
 	prepareSnapshotTargets    = prepareSnapshotTargetsImpl
 	assumeSnapshotLinked      = awsconfig.AssumeLinkedCredentials
+	loadPayerProfileSessions  = loadPayerProfileSessionsImpl
 )
 
 func ensureSnapshotCredentialsImpl(
@@ -66,18 +68,23 @@ func prepareSnapshotTargetsImpl(
 	credentialsFile, configPath, flagRole string,
 	workers int,
 	bar *progress.Bar,
-) ([]snapshot.AccountTarget, error) {
+) ([]snapshot.AccountTarget, []snapshot.AccountWarning, error) {
 	ctx := awsCommandContext(cmd)
 	if bar != nil {
 		defer bar.Finish()
 	}
 	payerSessions, err := loadPayerProfileSessions(ctx, cfg, targets, credentialsFile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var configMu sync.Mutex
+	var (
+		configMu sync.Mutex
+		outMu    sync.Mutex
+		skipMu   sync.Mutex
+	)
 	configCache := make(map[string]aws.Config)
-	out := make([]snapshot.AccountTarget, len(targets))
+	var out []snapshot.AccountTarget
+	var skipped []snapshot.AccountWarning
 
 	err = parallel.ForEach(ctx, workers, len(targets), func(ctx context.Context, i int) error {
 		target := targets[i]
@@ -88,6 +95,19 @@ func prepareSnapshotTargetsImpl(
 
 		awsCfg, err := awsConfigForSnapshotTarget(ctx, cmd, cfg, target, credentialsFile, configPath, flagRole, payerSessions, configCache, &configMu)
 		if err != nil {
+			if target.IsLinked() {
+				skipMu.Lock()
+				skipped = append(skipped, snapshot.AccountWarning{
+					AccountID:    accountID,
+					DisplayAlias: target.DisplayAlias,
+					Message:      snapshotAccountErrorMessage(err),
+				})
+				skipMu.Unlock()
+				if bar != nil {
+					bar.Advance()
+				}
+				return nil
+			}
 			return err
 		}
 
@@ -99,19 +119,47 @@ func prepareSnapshotTargetsImpl(
 		if err := enrichSnapshotTargetDisplayName(ctx, &bt, cfg, target); err != nil {
 			return err
 		}
-		out[i] = bt
+		outMu.Lock()
+		out = append(out, bt)
+		outMu.Unlock()
 		if bar != nil {
 			bar.Advance()
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	sort.Slice(skipped, func(i, j int) bool {
+		return skipped[i].AccountID < skipped[j].AccountID
+	})
+	return out, skipped, nil
 }
 
-func loadPayerProfileSessions(
+func snapshotAccountErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if idx := strings.Index(msg, ": "); idx >= 0 {
+		prefix := strings.TrimSpace(msg[:idx])
+		if len(prefix) == 12 {
+			tail := strings.TrimSpace(msg[idx+2:])
+			if tail != "" {
+				return tail
+			}
+		}
+	}
+	if idx := strings.LastIndex(msg, ": "); idx >= 0 {
+		tail := strings.TrimSpace(msg[idx+2:])
+		if tail != "" {
+			return tail
+		}
+	}
+	return msg
+}
+
+func loadPayerProfileSessionsImpl(
 	ctx context.Context,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
