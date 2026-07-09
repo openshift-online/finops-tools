@@ -71,7 +71,9 @@ func Login(ctx context.Context, cfg ClientConfig) (TokenSet, error) {
 	if err != nil {
 		return TokenSet{}, err
 	}
-	defer listener.Close()
+	defer func() {
+		_ = listener.Close()
+	}()
 
 	oauth2cfg := &oauth2.Config{
 		ClientID:     cfg.ClientID,
@@ -146,8 +148,13 @@ func Refresh(ctx context.Context, cfg ClientConfig, refreshToken string) (TokenS
 			TokenURL: cfg.Issuer.TokenURL,
 		},
 	}
-	src := oauth2cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
-	tok, err := src.Token()
+
+	tok, err := oauth2cfg.Exchange(ctx, "",
+		oauth2.SetAuthURLParam("grant_type", "refresh_token"),
+		oauth2.SetAuthURLParam("refresh_token", refreshToken),
+		oauth2.SetAuthURLParam("audience", audience),
+	)
+
 	if err != nil {
 		return TokenSet{}, fmt.Errorf("refresh oauth token: %w", err)
 	}

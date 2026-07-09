@@ -73,21 +73,21 @@ type SavingsPlansAccountView struct {
 
 // SavingsPlansDashboardAccountView is one row in the performance summary table.
 type SavingsPlansDashboardAccountView struct {
-	AccountName         string
-	Color               string
-	CoverageFormatted   string
-	CoverageRingSVG     template.HTML
-	CoverageStatus      string
-	CoverageStatusClass string
-	UtilizationFormatted string
-	UtilizationRingSVG  template.HTML
-	UtilizationStatus   string
+	AccountName            string
+	Color                  string
+	CoverageFormatted      string
+	CoverageRingSVG        template.HTML
+	CoverageStatus         string
+	CoverageStatusClass    string
+	UtilizationFormatted   string
+	UtilizationRingSVG     template.HTML
+	UtilizationStatus      string
 	UtilizationStatusClass string
-	SavingsFormatted    string
-	SavingsCompact      string
-	SavingsBarWidthPct  int
-	SavingsPctFormatted string
-	SavingsDonutSVG     template.HTML
+	SavingsFormatted       string
+	SavingsCompact         string
+	SavingsBarWidthPct     int
+	SavingsPctFormatted    string
+	SavingsDonutSVG        template.HTML
 }
 
 // SavingsPlansReportView is the template context for savings-plans.html.
@@ -144,14 +144,14 @@ func NewSavingsPlansReportView(r coresp.Report) SavingsPlansReportView {
 
 func populateDashboard(view *SavingsPlansReportView, accounts []coresp.AccountReport) {
 	var (
-		totalSavings   float64
-		totalOnDemand  float64
+		totalSavings     float64
+		totalOnDemand    float64
 		coverageSum      float64
 		coverageWeight   float64
 		coverageOnDemand float64
 		coverageCount    int
-		utilSum        float64
-		utilCount      int
+		utilSum          float64
+		utilCount        int
 	)
 
 	bubbles := make([]spBubblePoint, 0, len(accounts))
@@ -307,9 +307,10 @@ func dashboardStatusHTML(pct float64, isCoverage bool) template.HTML {
 	}
 	color := spStatusColor(class)
 	icon := "&#x2713;"
-	if class == "status-watch" {
+	switch class {
+	case "status-watch":
 		icon = "&#x26A0;"
-	} else if class == "status-poor" {
+	case "status-poor":
 		icon = "&#x2717;"
 	}
 	return template.HTML(fmt.Sprintf(`<span style="color:%s">%s %s</span>`, color, icon, label))

@@ -7,12 +7,12 @@ import (
 )
 
 const (
-	spBubbleChartW = 520
-	spBubbleChartH = 380
-	spBubblePadL   = 56
-	spBubblePadR   = 24
-	spBubblePadT   = 28
-	spBubblePadB   = 52
+	spBubbleChartW     = 520
+	spBubbleChartH     = 380
+	spBubblePadL       = 56
+	spBubblePadR       = 24
+	spBubblePadT       = 28
+	spBubblePadB       = 52
 	spBubbleViewMargin = 16 // extra viewBox room for outside labels
 )
 
@@ -26,12 +26,12 @@ var spAccountColors = []string{
 }
 
 type spBubblePoint struct {
-	Label           string
-	Coverage        float64
-	Utilization     float64
-	Savings         float64
-	SavingsCompact  string
-	Color           string
+	Label          string
+	Coverage       float64
+	Utilization    float64
+	Savings        float64
+	SavingsCompact string
+	Color          string
 }
 
 type spBubbleLabelLayout struct {
@@ -66,8 +66,8 @@ func spBubbleChartSVG(points []spBubblePoint) string {
 	}
 
 	const (
-		covMin = 60.0
-		covMax = 100.0
+		covMin  = 60.0
+		covMax  = 100.0
 		utilMin = 80.0
 		utilMax = 100.0
 		refCov  = 95.0
@@ -108,9 +108,9 @@ func spBubbleChartSVG(points []spBubblePoint) string {
 	viewW := spBubbleChartW + 2*spBubbleViewMargin
 	viewH := spBubbleChartH + 2*spBubbleViewMargin
 	b.WriteString(`<svg class="sp-bubble-chart" overflow="visible" viewBox="`)
-	b.WriteString(fmt.Sprintf("%d %d %d %d", -spBubbleViewMargin, -spBubbleViewMargin, viewW, viewH))
+	fmt.Fprintf(&b, "%d %d %d %d", -spBubbleViewMargin, -spBubbleViewMargin, viewW, viewH)
 	b.WriteString(`" role="img" aria-label="Coverage vs utilization by account">`)
-	b.WriteString(fmt.Sprintf(`<g transform="translate(0,0)">`))
+	fmt.Fprintf(&b, `<g transform="translate(0,0)">`)
 
 	plotLeft := float64(spBubblePadL)
 	plotTop := float64(spBubblePadT)
@@ -122,29 +122,28 @@ func spBubbleChartSVG(points []spBubblePoint) string {
 	// Quadrant shading (under-covered, high utilization)
 	refX := toX(refCov)
 	refY := toY(refUtil)
-	b.WriteString(fmt.Sprintf(
-		`<rect x="%d" y="%d" width="%d" height="%d" fill="rgba(237,108,2,0.08)" rx="2"/>`,
-		refX, spBubblePadT, spBubbleChartW-spBubblePadR-refX, refY-spBubblePadT))
+	fmt.Fprintf(&b, `<rect x="%d" y="%d" width="%d" height="%d" fill="rgba(237,108,2,0.08)" rx="2"/>`,
+		refX, spBubblePadT, spBubbleChartW-spBubblePadR-refX, refY-spBubblePadT)
 
 	// Grid lines
 	for _, pct := range []float64{60, 70, 80, 90, 100} {
 		x := toX(pct)
-		b.WriteString(fmt.Sprintf(`<line class="sp-chart-grid" x1="%d" y1="%d" x2="%d" y2="%d"/>`, x, spBubblePadT, x, spBubblePadT+int(plotH)))
-		b.WriteString(fmt.Sprintf(`<text class="sp-chart-axis" x="%d" y="%d" text-anchor="middle">%.0f%%</text>`, x, spBubbleChartH-12, pct))
+		fmt.Fprintf(&b, `<line class="sp-chart-grid" x1="%d" y1="%d" x2="%d" y2="%d"/>`, x, spBubblePadT, x, spBubblePadT+int(plotH))
+		fmt.Fprintf(&b, `<text class="sp-chart-axis" x="%d" y="%d" text-anchor="middle">%.0f%%</text>`, x, spBubbleChartH-12, pct)
 	}
 	for _, pct := range []float64{80, 85, 90, 95, 100} {
 		y := toY(pct)
-		b.WriteString(fmt.Sprintf(`<line class="sp-chart-grid" x1="%d" y1="%d" x2="%d" y2="%d"/>`, spBubblePadL, y, spBubblePadL+int(plotW), y))
-		b.WriteString(fmt.Sprintf(`<text class="sp-chart-axis" x="%d" y="%d" text-anchor="end" dominant-baseline="middle">%.0f%%</text>`, spBubblePadL-8, y, pct))
+		fmt.Fprintf(&b, `<line class="sp-chart-grid" x1="%d" y1="%d" x2="%d" y2="%d"/>`, spBubblePadL, y, spBubblePadL+int(plotW), y)
+		fmt.Fprintf(&b, `<text class="sp-chart-axis" x="%d" y="%d" text-anchor="end" dominant-baseline="middle">%.0f%%</text>`, spBubblePadL-8, y, pct)
 	}
 
 	// Reference lines
-	b.WriteString(fmt.Sprintf(`<line class="sp-chart-ref" x1="%d" y1="%d" x2="%d" y2="%d"/>`, refX, spBubblePadT, refX, spBubblePadT+int(plotH)))
-	b.WriteString(fmt.Sprintf(`<line class="sp-chart-ref" x1="%d" y1="%d" x2="%d" y2="%d"/>`, spBubblePadL, refY, spBubblePadL+int(plotW), refY))
+	fmt.Fprintf(&b, `<line class="sp-chart-ref" x1="%d" y1="%d" x2="%d" y2="%d"/>`, refX, spBubblePadT, refX, spBubblePadT+int(plotH))
+	fmt.Fprintf(&b, `<line class="sp-chart-ref" x1="%d" y1="%d" x2="%d" y2="%d"/>`, spBubblePadL, refY, spBubblePadL+int(plotW), refY)
 
 	// Axis titles
-	b.WriteString(fmt.Sprintf(`<text class="sp-chart-axis-title" x="%d" y="%d" text-anchor="middle">COVERAGE</text>`, spBubblePadL+int(plotW/2), spBubbleChartH-2))
-	b.WriteString(fmt.Sprintf(`<text class="sp-chart-axis-title" x="14" y="%d" text-anchor="middle" transform="rotate(-90 14 %d)">UTILIZATION</text>`, spBubblePadT+int(plotH/2), spBubblePadT+int(plotH/2)))
+	fmt.Fprintf(&b, `<text class="sp-chart-axis-title" x="%d" y="%d" text-anchor="middle">COVERAGE</text>`, spBubblePadL+int(plotW/2), spBubbleChartH-2)
+	fmt.Fprintf(&b, `<text class="sp-chart-axis-title" x="14" y="%d" text-anchor="middle" transform="rotate(-90 14 %d)">UTILIZATION</text>`, spBubblePadT+int(plotH/2), spBubblePadT+int(plotH/2))
 
 	// Bubbles (largest first so smaller ones render on top)
 	sorted := append([]spBubblePoint(nil), points...)

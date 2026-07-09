@@ -58,7 +58,9 @@ func (h *SnowflakeQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close()
+	}()
 
 	var req snowflakeQueryRequest
 	dec := json.NewDecoder(r.Body)
@@ -303,7 +305,7 @@ func stripSQLComments(s string) string {
 		}
 		if i+1 < len(s) && s[i] == '/' && s[i+1] == '*' {
 			i += 2
-			for i+1 < len(s) && !(s[i] == '*' && s[i+1] == '/') {
+			for i+1 < len(s) && (s[i] != '*' || s[i+1] != '/') {
 				i++
 			}
 			if i+1 < len(s) {

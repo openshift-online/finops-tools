@@ -6,3 +6,12 @@
 # Local Snowflake OAuth credentials and tokens (use finops config oauth-client set)
 **/snowflake-oauth.yaml
 **/snowflake-tokens.yaml
+
+# Env and Secrets
+.env
+secret.yaml
+
+# Keys and Certs
+*.pem
+*.p8
+*.key

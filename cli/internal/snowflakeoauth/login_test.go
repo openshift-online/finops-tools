@@ -14,7 +14,9 @@ func TestListenRedirectDefaultURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 	addr, ok := ln.Addr().(*net.TCPAddr)
 	if !ok {
 		t.Fatalf("addr type %T", ln.Addr())

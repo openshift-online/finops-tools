@@ -118,18 +118,20 @@ func Build(ctx context.Context, sf SnowflakeQueryer, martView string) (Report, e
 	if err != nil {
 		return Report{}, fmt.Errorf("hcp hierarchy mart query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var result []HierarchyRow
 	for rows.Next() {
 		var (
-			hierarchyComplete *bool
-			customerOCMID, customerClusterID, customerClusterName     *string
-			customerAccountID, customerState, customerRegion          *string
+			hierarchyComplete                                           *bool
+			customerOCMID, customerClusterID, customerClusterName       *string
+			customerAccountID, customerState, customerRegion            *string
 			organizationName, classification, classificationReason      *string
-			hierarchySource                                           *string
-			mcName, mcFleetID, mcAccountID, mcRegion, mcStatus        *string
-			scName, scFleetID, scAccountID, scRegion, scStatus        *string
+			hierarchySource                                             *string
+			mcName, mcFleetID, mcAccountID, mcRegion, mcStatus          *string
+			scName, scFleetID, scAccountID, scRegion, scStatus          *string
 			fleetSector, billingModel, serviceLevel, subscriptionStatus *string
 		)
 		if err := rows.Scan(

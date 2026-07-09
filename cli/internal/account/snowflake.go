@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	coresnowflake "github.com/openshift-online/finops-tools/core/snowflake"
 	"github.com/openshift-online/finops-tools/cli/internal/snowflakecred"
 	"github.com/openshift-online/finops-tools/cli/internal/snowflakeoauth"
+	coresnowflake "github.com/openshift-online/finops-tools/core/snowflake"
 )
 
 // SnowflakeAccountSettings holds non-secret Snowflake connection options.
@@ -99,7 +99,9 @@ func AddSnowflake(ctx context.Context, opts AddSnowflakeOptions) (AddResult, err
 	if err != nil {
 		return AddResult{}, err
 	}
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	if err := coresnowflake.Ping(ctx, db); err != nil {
 		return AddResult{}, fmt.Errorf(

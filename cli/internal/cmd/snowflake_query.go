@@ -81,7 +81,9 @@ func runSnowflakeQuery(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 
 	result, err := coresnowflake.Query(cmd.Context(), db, snowflakeQuerySQL)
 	if err != nil {
