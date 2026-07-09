@@ -81,3 +81,12 @@ func TestForEachEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestForEachNegativeCount(t *testing.T) {
+	if err := ForEach(context.Background(), 10, -1, func(context.Context, int) error {
+		t.Fatal("fn should not run")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

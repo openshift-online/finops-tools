@@ -22,7 +22,7 @@ func WorkersOrDefault(n int) int {
 // When workers is 1, fn runs sequentially without spawning goroutines.
 // The first error cancels remaining work via context.
 func ForEach(ctx context.Context, workers, count int, fn func(ctx context.Context, i int) error) error {
-	if count == 0 {
+	if count <= 0 {
 		return nil
 	}
 	workers = WorkersOrDefault(workers)

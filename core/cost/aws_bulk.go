@@ -155,9 +155,9 @@ func fetchAWSNetAmortizedBulkByService(
 	}
 
 	byService := make(map[string]float64)
-	currency := "USD"
+	var currency string
 	for _, br := range batchResults {
-		if currency == "USD" && br.currency != "" {
+		if currency == "" {
 			currency = br.currency
 		} else if br.currency != "" && br.currency != currency {
 			return CostResult{}, fmt.Errorf("cannot merge service batches with different currencies (%s vs %s)", currency, br.currency)

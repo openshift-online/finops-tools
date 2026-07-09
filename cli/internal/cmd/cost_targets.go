@@ -306,6 +306,9 @@ func resolveCostTargetsAllLinked(
 
 	memberIDs := make([]string, 0, len(members))
 	for _, acct := range members {
+		if acct.ID == payerID {
+			continue
+		}
 		memberIDs = append(memberIDs, acct.ID)
 	}
 

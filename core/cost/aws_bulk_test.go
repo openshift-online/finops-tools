@@ -133,6 +133,66 @@ func (f *concurrentCE) GetCostAndUsage(
 	}, nil
 }
 
+type mixedCurrencyServiceCE struct {
+	calls int32
+}
+
+func (f *mixedCurrencyServiceCE) GetCostAndUsage(
+	ctx context.Context,
+	params *costexplorer.GetCostAndUsageInput,
+	_ ...func(*costexplorer.Options),
+) (*costexplorer.GetCostAndUsageOutput, error) {
+	atomic.AddInt32(&f.calls, 1)
+	unit := "USD"
+	if params.Filter != nil && params.Filter.Dimensions != nil && len(params.Filter.Dimensions.Values) > 0 {
+		if params.Filter.Dimensions.Values[0] != "000000000001" {
+			unit = "EUR"
+		}
+	}
+	return &costexplorer.GetCostAndUsageOutput{
+		ResultsByTime: []types.ResultByTime{{
+			Groups: []types.Group{{
+				Keys: []string{"AmazonEC2"},
+				Metrics: map[string]types.MetricValue{
+					MetricNetAmortized: {Amount: aws.String("1"), Unit: aws.String(unit)},
+				},
+			}},
+		}},
+	}, nil
+}
+
+func TestFetchBulkServiceBatchesRejectMixedCurrency(t *testing.T) {
+	const accountCount = 150
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	ce := &mixedCurrencyServiceCE{}
+	targets := make([]AccountTarget, accountCount)
+	for i := 0; i < accountCount; i++ {
+		id := fmt.Sprintf("%012d", i+1)
+		targets[i] = AccountTarget{
+			AccountID:        id,
+			PayerAccountID:   "123456789012",
+			ScopeAccountOnly: true,
+			AWSConfig:        aws.Config{},
+		}
+	}
+
+	_, err := fetchAWSNetAmortizedBulk(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Range:    LastNDaysRange(30, now),
+		SplitBy:  SplitByService,
+		Workers:  2,
+	}, targets, fetchAWSOptions{
+		Now:             now,
+		NewCostExplorer: func(aws.Config) CostExplorerAPI { return ce },
+	})
+	if err == nil {
+		t.Fatal("expected mixed-currency service batch merge to fail")
+	}
+	if ce.calls != 2 {
+		t.Fatalf("expected 2 batched Cost Explorer calls, got %d", ce.calls)
+	}
+}
+
 func TestFetchBulkParallelBatches(t *testing.T) {
 	const accountCount = 150
 	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)

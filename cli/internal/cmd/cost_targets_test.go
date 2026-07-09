@@ -190,6 +190,7 @@ func TestResolveCostTargetsAllLinked(t *testing.T) {
 	}
 	listOrganizationMemberAccounts = func(context.Context, aws.Config, string) ([]coreaccount.OrganizationAccount, error) {
 		return []coreaccount.OrganizationAccount{
+			{ID: "123456789012", Name: "Payer"},
 			{ID: "111111111111", Name: "Prod"},
 			{ID: "222222222222", Name: "Stage"},
 		}, nil
