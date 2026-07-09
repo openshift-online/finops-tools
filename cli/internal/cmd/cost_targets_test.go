@@ -34,9 +34,13 @@ func TestValidateCostTargetSelector(t *testing.T) {
 			sel:  costTargetSelector{OUIDs: []string{"ou-abcd-1234"}, PayerAlias: "rh-control"},
 		},
 		{
+			name: "all-linked mode",
+			sel:  costTargetSelector{AllLinked: true, PayerAlias: "rh-control"},
+		},
+		{
 			name:    "neither",
 			sel:     costTargetSelector{},
-			wantErr: "provide --account/--account-alias, --ou, or --tag-key",
+			wantErr: "provide --account/--account-alias, --ou, --tag-key, or --all-linked",
 		},
 		{
 			name:    "both modes",
@@ -51,7 +55,27 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		{
 			name:    "payer alone",
 			sel:     costTargetSelector{PayerAlias: "rh-control"},
-			wantErr: "--payer requires --account or --ou",
+			wantErr: "--payer requires --account, --ou, --tag-key, or --all-linked",
+		},
+		{
+			name:    "all-linked without payer",
+			sel:     costTargetSelector{AllLinked: true},
+			wantErr: "--all-linked requires --payer",
+		},
+		{
+			name:    "all-linked with explicit",
+			sel:     costTargetSelector{AllLinked: true, PayerAlias: "rh-control", Aliases: []string{"quay"}},
+			wantErr: "not both",
+		},
+		{
+			name:    "all-linked with ou",
+			sel:     costTargetSelector{AllLinked: true, PayerAlias: "rh-control", OUIDs: []string{"ou-abcd-1234"}},
+			wantErr: "not both",
+		},
+		{
+			name:    "all-linked with tag",
+			sel:     costTargetSelector{AllLinked: true, PayerAlias: "rh-control", TagKey: "env"},
+			wantErr: "not both",
 		},
 	}
 
@@ -109,13 +133,13 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 			name:     "costs requires targets",
 			template: reportpkg.TemplateCosts,
 			sel:      costTargetSelector{},
-			wantErr:  "provide --account/--account-alias, --ou, or --tag-key",
+			wantErr:  "provide --account/--account-alias, --ou, --tag-key, or --all-linked",
 		},
 		{
 			name:     "savings-plans requires targets",
 			template: reportpkg.TemplateSavingsPlans,
 			sel:      costTargetSelector{},
-			wantErr:  "provide --account/--account-alias, --ou, or --tag-key",
+			wantErr:  "provide --account/--account-alias, --ou, --tag-key, or --all-linked",
 		},
 	}
 
@@ -135,6 +159,63 @@ func TestValidateReportCostTargetSelector(t *testing.T) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestResolveCostTargetsAllLinked(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := ensureCostCredentials
+	origLoad := loadAWSConfigForCredentialsAccount
+	origList := listOrganizationMemberAccounts
+	t.Cleanup(func() {
+		ensureCostCredentials = origEnsure
+		loadAWSConfigForCredentialsAccount = origLoad
+		listOrganizationMemberAccounts = origList
+	})
+
+	ensureCostCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
+		return nil
+	}
+	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	listOrganizationMemberAccounts = func(context.Context, aws.Config, string) ([]coreaccount.OrganizationAccount, error) {
+		return []coreaccount.OrganizationAccount{
+			{ID: "111111111111", Name: "Prod"},
+			{ID: "222222222222", Name: "Stage"},
+		}, nil
+	}
+
+	cmd := &cobra.Command{}
+	targets, err := resolveCostTargets(cmd, cfg, costTargetSelector{
+		AllLinked:  true,
+		PayerAlias: "rh-control",
+	}, path, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("got %d targets, want 2", len(targets))
+	}
+	for _, target := range targets {
+		if target.PayerAccountID != "123456789012" {
+			t.Fatalf("unexpected target: %+v", target)
+		}
+		if target.AccountID == "123456789012" {
+			t.Fatalf("payer account should be excluded: %+v", target)
+		}
+	}
+	if targets[0].DisplayName != "Prod" {
+		t.Fatalf("DisplayName = %q", targets[0].DisplayName)
 	}
 }
 

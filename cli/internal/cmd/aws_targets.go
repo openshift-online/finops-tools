@@ -6,6 +6,7 @@ import "github.com/spf13/cobra"
 type awsTargetFlagRefs struct {
 	Account         *string
 	AccountAliases  *string
+	AllLinked       *bool
 	OU              *string
 	OUDirect        *bool
 	Payer           *string
@@ -18,9 +19,12 @@ type awsTargetFlagRefs struct {
 func bindAWSTargetFlags(cmd *cobra.Command, refs awsTargetFlagRefs) {
 	cmd.Flags().StringVar(refs.Account, "account", "", "Payer AWS account ID(s), comma-separated 12-digit IDs")
 	cmd.Flags().StringVar(refs.AccountAliases, "account-alias", "", "Configured AWS account alias(es), comma-separated")
+	if refs.AllLinked != nil {
+		cmd.Flags().BoolVar(refs.AllLinked, "all-linked", false, "Select all active member accounts in the payer's AWS Organization (requires --payer)")
+	}
 	cmd.Flags().StringVar(refs.OU, "ou", "", "AWS OU ID(s), comma-separated (requires --payer; recursive by default)")
 	cmd.Flags().BoolVar(refs.OUDirect, "ou-direct", false, "Include only accounts directly in --ou, not descendant OUs")
-	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias for --account member IDs, --ou, or --tag-key (e.g. rhc)")
+	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias for --account member IDs, --all-linked, --ou, or --tag-key (e.g. rhc)")
 	cmd.Flags().StringVar(refs.TagKey, "tag-key", "", "Select accounts by AWS Organizations tag key")
 	cmd.Flags().StringVar(refs.TagValue, "tag-value", "", "Optional tag value (omit to match any value for --tag-key)")
 	if refs.SkipOrgCache != nil {

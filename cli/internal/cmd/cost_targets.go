@@ -19,6 +19,7 @@ import (
 type costTargetSelector struct {
 	AccountIDs      []string
 	Aliases         []string
+	AllLinked       bool
 	OUIDs           []string
 	PayerAlias      string
 	OUDirectOnly    bool
@@ -35,6 +36,7 @@ const (
 	costTargetModeExplicit
 	costTargetModeTag
 	costTargetModeOU
+	costTargetModeAllLinked
 )
 
 type costStepper interface {
@@ -57,12 +59,15 @@ var filterOrganizationAccountsByTag = func(
 	})
 }
 
+var listOrganizationMemberAccounts = coreaccount.ListOrganizationMemberAccounts
+
 func parseCostTargetSelector(
 	accountFlag, aliasFlag, ouFlag, payerFlag, tagKey, tagValue string,
-	ouDirect, orgCacheSkip, orgCacheRefresh bool,
+	ouDirect, orgCacheSkip, orgCacheRefresh, allLinked bool,
 ) (costTargetSelector, error) {
 	sel := costTargetSelector{
 		PayerAlias:      strings.TrimSpace(payerFlag),
+		AllLinked:       allLinked,
 		OUDirectOnly:    ouDirect,
 		TagKey:          strings.TrimSpace(tagKey),
 		TagValue:        strings.TrimSpace(tagValue),
@@ -103,6 +108,7 @@ func awsReportSelectorSpecified(sel costTargetSelector) bool {
 	return len(sel.AccountIDs) > 0 ||
 		len(sel.OUIDs) > 0 ||
 		sel.TagKey != "" ||
+		sel.AllLinked ||
 		sel.PayerAlias != "" ||
 		sel.OUDirectOnly
 }
@@ -127,6 +133,17 @@ func validateCostTargetSelector(sel costTargetSelector) (costTargetSelectionMode
 	tag := sel.TagKey != ""
 	explicit := len(sel.AccountIDs) > 0 || len(sel.Aliases) > 0
 	ou := len(sel.OUIDs) > 0
+	allLinked := sel.AllLinked
+
+	if allLinked {
+		if explicit || ou || tag {
+			return costTargetModeNone, fmt.Errorf("provide either --all-linked or --account/--account-alias/--ou/--tag-key, not both")
+		}
+		if sel.PayerAlias == "" {
+			return costTargetModeNone, fmt.Errorf("--all-linked requires --payer")
+		}
+		return costTargetModeAllLinked, nil
+	}
 
 	if tag {
 		if explicit || ou {
@@ -139,10 +156,10 @@ func validateCostTargetSelector(sel costTargetSelector) (costTargetSelectionMode
 	}
 
 	if sel.PayerAlias != "" && !explicit && !ou {
-		return costTargetModeNone, fmt.Errorf("--payer requires --account or --ou")
+		return costTargetModeNone, fmt.Errorf("--payer requires --account, --ou, --tag-key, or --all-linked")
 	}
 	if !explicit && !ou {
-		return costTargetModeNone, fmt.Errorf("provide --account/--account-alias, --ou, or --tag-key")
+		return costTargetModeNone, fmt.Errorf("provide --account/--account-alias, --ou, --tag-key, or --all-linked")
 	}
 	if ou && sel.PayerAlias == "" {
 		return costTargetModeNone, fmt.Errorf("--ou requires --payer")
@@ -178,6 +195,8 @@ func resolveCostTargets(
 		return resolveCostTargetsByTag(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod, status)
 	case costTargetModeOU:
 		return resolveCostTargetsWithOU(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod)
+	case costTargetModeAllLinked:
+		return resolveCostTargetsAllLinked(ctx, cmd, cfg, sel, configPath, credentialsFile, authMethod, status)
 	case costTargetModeExplicit:
 		return resolveCostTargetsExplicit(cfg, sel)
 	default:
@@ -250,6 +269,58 @@ func resolveCostTargetsWithOU(
 	targets := mergeCostTargets(ouTargets, explicitTargets)
 	if len(targets) == 0 {
 		return nil, errors.New("no accounts selected")
+	}
+	return targets, nil
+}
+
+func resolveCostTargetsAllLinked(
+	ctx context.Context,
+	cmd *cobra.Command,
+	cfg configstore.File,
+	sel costTargetSelector,
+	configPath, credentialsFile, authMethod string,
+	status costStepper,
+) ([]cost.AccountTarget, error) {
+	payerAlias := sel.PayerAlias
+	payerID, ok := cfg.PayerAccountIDForAlias(payerAlias)
+	if !ok {
+		return nil, fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
+	}
+
+	costStep(status, "Ensuring AWS credentials for payer…")
+	payerTarget := cost.AccountTarget{AccountID: payerID}
+	if err := ensureCostCredentials(ctx, cmd, cfg, []cost.AccountTarget{payerTarget}, configPath, credentialsFile, authMethod); err != nil {
+		return nil, err
+	}
+
+	awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payerID, credentialsFile)
+	if err != nil {
+		return nil, err
+	}
+
+	costStep(status, "Resolving organization member accounts…")
+	members, err := listOrganizationMemberAccounts(ctx, awsCfg, payerID)
+	if err != nil {
+		return nil, fmt.Errorf("list organization member accounts: %w", err)
+	}
+
+	memberIDs := make([]string, 0, len(members))
+	for _, acct := range members {
+		memberIDs = append(memberIDs, acct.ID)
+	}
+
+	targets, err := configstore.ResolveOUAccountTargets(cfg, memberIDs, payerAlias)
+	if err != nil {
+		return nil, err
+	}
+	namesByID := make(map[string]string, len(members))
+	for _, acct := range members {
+		namesByID[acct.ID] = acct.Name
+	}
+	for i := range targets {
+		if name, ok := namesByID[targets[i].AccountID]; ok {
+			targets[i].DisplayName = name
+		}
 	}
 	return targets, nil
 }

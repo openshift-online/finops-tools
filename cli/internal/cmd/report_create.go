@@ -16,6 +16,7 @@ import (
 var (
 	reportGenerateAccount         string
 	reportGenerateAccountAliases  string
+	reportGenerateAllLinked       bool
 	reportGenerateFormat          string
 	reportGenerateOU              string
 	reportGenerateOUDirect        bool
@@ -40,6 +41,7 @@ Example:
   finops report create costs --account-alias rh-control -o costs.html
   finops report create costs --account 333333333333 --payer rhc -o member.html
   finops report create costs --ou ou-abcd-1234 --payer rh-control -o ou-costs.html
+  finops report create costs --payer rh-control --all-linked -o all-members.html
   finops report create costs --payer rh-control --tag-key env --tag-value prod -o prod.html
   finops report create hcp-hierarchy --snowflake-alias rhsandbox -o hcp-hierarchy.html`,
 	Args: cobra.ExactArgs(1),
@@ -51,7 +53,7 @@ Example:
 		sel, err := parseCostTargetSelector(
 			reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 			reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
-			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache, reportGenerateAllLinked,
 		)
 		if err != nil {
 			return err
@@ -75,6 +77,7 @@ func init() {
 	bindAWSTargetFlags(reportCreateCmd, awsTargetFlagRefs{
 		Account:         &reportGenerateAccount,
 		AccountAliases:  &reportGenerateAccountAliases,
+		AllLinked:       &reportGenerateAllLinked,
 		OU:              &reportGenerateOU,
 		OUDirect:        &reportGenerateOUDirect,
 		Payer:           &reportGeneratePayer,
@@ -121,7 +124,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	sel, err := parseCostTargetSelector(
 		reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 		reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
-		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache, reportGenerateAllLinked,
 	)
 	if err != nil {
 		return err

@@ -16,6 +16,7 @@ import (
 var (
 	costGetAccount         string
 	costGetAccountAliases  string
+	costGetAllLinked       bool
 	costGetFormat          string
 	costGetOutput          string
 	costGetOU              string
@@ -43,9 +44,11 @@ Period (default: last 30 calendar days, or defaults.cost.* in config):
 For linked accounts, credentials are obtained from the registered payer account.
 Use --payer with --account to query a member account that is not registered (the payer alias must be registered).
 Use --payer with --tag-key to query all org accounts matching an Organizations account tag.
+Use --payer with --all-linked to query all active member accounts in the payer's AWS Organization.
 
 Examples:
   finops account get-cost --account-alias rh-control
+  finops account get-cost --payer rh-control --all-linked
   finops account get-cost --payer rh-control --tag-key organization
   finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
 
@@ -64,7 +67,7 @@ Only AWS is supported today; GCP will be added later.`,
 		sel, err := parseCostTargetSelector(
 			costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
 			costGetTagKey, costGetTagValue, costGetOUDirect,
-			costGetSkipOrgCache, costGetRefreshOrgCache,
+			costGetSkipOrgCache, costGetRefreshOrgCache, costGetAllLinked,
 		)
 		if err != nil {
 			return err
@@ -94,6 +97,7 @@ func init() {
 	bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{
 		Account:         &costGetAccount,
 		AccountAliases:  &costGetAccountAliases,
+		AllLinked:       &costGetAllLinked,
 		OU:              &costGetOU,
 		OUDirect:        &costGetOUDirect,
 		Payer:           &costGetPayer,
@@ -148,7 +152,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
 		costGetTagKey, costGetTagValue, costGetOUDirect,
-		costGetSkipOrgCache, costGetRefreshOrgCache,
+		costGetSkipOrgCache, costGetRefreshOrgCache, costGetAllLinked,
 	)
 	if err != nil {
 		return err

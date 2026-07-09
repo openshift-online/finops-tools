@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -202,7 +203,7 @@ func filterOrganizationAccountsByTagWithClient(ctx context.Context, client Organ
 
 func scanOrganizationAccountTagsWithClient(ctx context.Context, client OrganizationsAPI, progress TagFilterProgress) ([]OrganizationAccountTags, error) {
 	tagFilterStep(progress, "Listing organization accounts…")
-	accounts, err := listOrganizationAccountsWithClient(ctx, client)
+	accounts, err := listOrganizationAccountsWithClient(ctx, client, "")
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +252,7 @@ func accountTagsMatchFilter(tags []Tag, tagKey, tagValue string) bool {
 	return false
 }
 
-func listOrganizationAccountsWithClient(ctx context.Context, client OrganizationsAPI) ([]OrganizationAccount, error) {
+func listOrganizationAccountsWithClient(ctx context.Context, client OrganizationsAPI, statusFilter string) ([]OrganizationAccount, error) {
 	var token *string
 	out := make([]OrganizationAccount, 0)
 	for {
@@ -260,6 +261,9 @@ func listOrganizationAccountsWithClient(ctx context.Context, client Organization
 			return nil, err
 		}
 		for _, acct := range resp.Accounts {
+			if statusFilter != "" && string(acct.Status) != statusFilter {
+				continue
+			}
 			name, err := accountNameFromOrganizationAccount(&acct, aws.ToString(acct.Id))
 			if err != nil {
 				continue
@@ -279,7 +283,31 @@ func listOrganizationAccountsWithClient(ctx context.Context, client Organization
 
 // ListOrganizationAccounts returns all organization accounts.
 func ListOrganizationAccounts(ctx context.Context, cfg aws.Config) ([]OrganizationAccount, error) {
-	return listOrganizationAccountsWithClient(ctx, newOrganizationsClient(cfg))
+	return listOrganizationAccountsWithClient(ctx, newOrganizationsClient(cfg), "")
+}
+
+// ListOrganizationMemberAccounts returns ACTIVE organization accounts excluding excludeAccountID (typically the payer).
+func ListOrganizationMemberAccounts(ctx context.Context, cfg aws.Config, excludeAccountID string) ([]OrganizationAccount, error) {
+	return listOrganizationMemberAccountsWithClient(ctx, newOrganizationsClient(cfg), excludeAccountID)
+}
+
+func listOrganizationMemberAccountsWithClient(ctx context.Context, client OrganizationsAPI, excludeAccountID string) ([]OrganizationAccount, error) {
+	excludeAccountID = strings.TrimSpace(excludeAccountID)
+	accounts, err := listOrganizationAccountsWithClient(ctx, client, string(types.AccountStatusActive))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OrganizationAccount, 0, len(accounts))
+	for _, acct := range accounts {
+		if excludeAccountID != "" && acct.ID == excludeAccountID {
+			continue
+		}
+		out = append(out, acct)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no active member accounts found in organization")
+	}
+	return out, nil
 }
 
 // ListOrganizationalUnits returns child OUs under parentID.

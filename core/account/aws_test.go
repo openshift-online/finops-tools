@@ -359,6 +359,145 @@ func (f *fakeOrganizationsTagMutator) ListAccountsForParent(
 	return nil, errors.New("not implemented")
 }
 
+type fakeOrganizationsWithStatus struct {
+	accounts map[string]struct {
+		name   string
+		status types.AccountStatus
+	}
+}
+
+func (f fakeOrganizationsWithStatus) DescribeAccount(
+	_ context.Context,
+	params *organizations.DescribeAccountInput,
+	_ ...func(*organizations.Options),
+) (*organizations.DescribeAccountOutput, error) {
+	id := aws.ToString(params.AccountId)
+	entry, ok := f.accounts[id]
+	if !ok {
+		return nil, errors.New("AccountNotFoundException")
+	}
+	return &organizations.DescribeAccountOutput{
+		Account: &types.Account{Id: params.AccountId, Name: aws.String(entry.name)},
+	}, nil
+}
+
+func (f fakeOrganizationsWithStatus) ListAccounts(
+	_ context.Context,
+	_ *organizations.ListAccountsInput,
+	_ ...func(*organizations.Options),
+) (*organizations.ListAccountsOutput, error) {
+	var accounts []types.Account
+	for id, entry := range f.accounts {
+		accounts = append(accounts, types.Account{
+			Id:     aws.String(id),
+			Name:   aws.String(entry.name),
+			Status: entry.status,
+		})
+	}
+	return &organizations.ListAccountsOutput{Accounts: accounts}, nil
+}
+
+func (f fakeOrganizationsWithStatus) ListTagsForResource(
+	_ context.Context,
+	_ *organizations.ListTagsForResourceInput,
+	_ ...func(*organizations.Options),
+) (*organizations.ListTagsForResourceOutput, error) {
+	return &organizations.ListTagsForResourceOutput{}, nil
+}
+
+func (f fakeOrganizationsWithStatus) ListTagsForAccount(
+	_ context.Context,
+	_ string,
+	_ *string,
+) ([]Tag, *string, error) {
+	return nil, nil, nil
+}
+
+func (f fakeOrganizationsWithStatus) SetAccountTag(
+	_ context.Context,
+	_, _, _ string,
+) error {
+	return errors.New("not implemented")
+}
+
+func (f fakeOrganizationsWithStatus) DescribeOrganization(
+	_ context.Context,
+	_ *organizations.DescribeOrganizationInput,
+	_ ...func(*organizations.Options),
+) (*organizations.DescribeOrganizationOutput, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f fakeOrganizationsWithStatus) ListRoots(
+	_ context.Context,
+	_ *organizations.ListRootsInput,
+	_ ...func(*organizations.Options),
+) (*organizations.ListRootsOutput, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f fakeOrganizationsWithStatus) ListOrganizationalUnitsForParent(
+	_ context.Context,
+	_ *organizations.ListOrganizationalUnitsForParentInput,
+	_ ...func(*organizations.Options),
+) (*organizations.ListOrganizationalUnitsForParentOutput, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f fakeOrganizationsWithStatus) ListAccountsForParent(
+	_ context.Context,
+	_ *organizations.ListAccountsForParentInput,
+	_ ...func(*organizations.Options),
+) (*organizations.ListAccountsForParentOutput, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestListOrganizationMemberAccountsWithClient(t *testing.T) {
+	client := fakeOrganizationsWithStatus{
+		accounts: map[string]struct {
+			name   string
+			status types.AccountStatus
+		}{
+			"123456789012": {name: "Payer", status: types.AccountStatusActive},
+			"111111111111": {name: "Member One", status: types.AccountStatusActive},
+			"222222222222": {name: "Member Two", status: types.AccountStatusActive},
+			"333333333333": {name: "Suspended", status: types.AccountStatusSuspended},
+		},
+	}
+
+	accounts, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 2 {
+		t.Fatalf("accounts = %+v", accounts)
+	}
+	ids := map[string]struct{}{}
+	for _, acct := range accounts {
+		ids[acct.ID] = struct{}{}
+	}
+	for _, want := range []string{"111111111111", "222222222222"} {
+		if _, ok := ids[want]; !ok {
+			t.Fatalf("missing account %s in %+v", want, accounts)
+		}
+	}
+}
+
+func TestListOrganizationMemberAccountsWithClientNoMembers(t *testing.T) {
+	client := fakeOrganizationsWithStatus{
+		accounts: map[string]struct {
+			name   string
+			status types.AccountStatus
+		}{
+			"123456789012": {name: "Payer", status: types.AccountStatusActive},
+		},
+	}
+	_, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012")
+	if err == nil {
+		t.Fatal("expected error when no member accounts remain")
+	}
+}
+
 func TestAccountName(t *testing.T) {
 	client := fakeOrganizations{accounts: map[string]string{
 		"111111111111": "Quay Production",

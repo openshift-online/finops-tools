@@ -16,6 +16,7 @@ import (
 var (
 	snapshotListAccount        string
 	snapshotListAccountAliases string
+	snapshotListAllLinked      bool
 	snapshotListFormat         string
 	snapshotListOutput         string
 	snapshotListMinSizeGiB     float64
@@ -40,7 +41,7 @@ var snapshotListCmd = &cobra.Command{
 	Short: "List EBS and RDS snapshots with estimated storage costs",
 	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
-Account selection matches finops account get-cost: --account, --account-alias, --ou, or --tag-key with --payer.
+Account selection matches finops account get-cost: --account, --account-alias, --ou, --tag-key, or --all-linked with --payer.
 Linked member accounts are scanned using role assumption from the payer.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
@@ -58,6 +59,7 @@ ce:GetCostAndUsage with LINKED_ACCOUNT scope for billed cost lines.
 Examples:
   finops snapshot list --account-alias rh-control
   finops snapshot list --account-alias rh-control --older-than-days 365 --format json
+  finops snapshot list --payer rh-control --all-linked
   finops snapshot list --payer rh-control --tag-key organization
   finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs`,
 	Args: cobra.NoArgs,
@@ -65,7 +67,7 @@ Examples:
 		sel, err := parseCostTargetSelector(
 			snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 			snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
-			snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
+			snapshotListSkipOrgCache, snapshotListRefreshOrgCache, snapshotListAllLinked,
 		)
 		if err != nil {
 			return err
@@ -101,6 +103,7 @@ func init() {
 	bindAWSTargetFlags(snapshotListCmd, awsTargetFlagRefs{
 		Account:         &snapshotListAccount,
 		AccountAliases:  &snapshotListAccountAliases,
+		AllLinked:       &snapshotListAllLinked,
 		OU:              &snapshotListOU,
 		OUDirect:        &snapshotListOUDirect,
 		Payer:           &snapshotListPayer,
@@ -157,7 +160,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 		snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
-		snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
+		snapshotListSkipOrgCache, snapshotListRefreshOrgCache, snapshotListAllLinked,
 	)
 	if err != nil {
 		return err
