@@ -21,6 +21,24 @@ type AccountWarning struct {
 	Message      string `json:"message"`
 }
 
+func isExpiredCredentialError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, sub := range []string{
+		"request has expired",
+		"expiredtoken",
+		"security token included in the request is expired",
+		"token has expired",
+	} {
+		if strings.Contains(msg, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 func isSkippableRegionError(err error) bool {
 	if err == nil {
 		return false

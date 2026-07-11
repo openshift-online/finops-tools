@@ -18,11 +18,11 @@ func TestPrepareSnapshotTargetsSkipsLinkedAssumeRoleFailure(t *testing.T) {
 		linkedNo = "222222222222"
 	)
 
-	origLoad := loadPayerProfileSessions
 	origAssume := assumeSnapshotLinked
+	origPayer := resolveSnapshotPayerSession
 	t.Cleanup(func() {
-		loadPayerProfileSessions = origLoad
 		assumeSnapshotLinked = origAssume
+		resolveSnapshotPayerSession = origPayer
 	})
 
 	payerSession := awsconfig.ProfileSession{
@@ -31,8 +31,8 @@ func TestPrepareSnapshotTargetsSkipsLinkedAssumeRoleFailure(t *testing.T) {
 		SessionToken:    "ST",
 		Region:          "us-east-1",
 	}
-	loadPayerProfileSessions = func(context.Context, configstore.File, []cost.AccountTarget, string) (map[string]awsconfig.ProfileSession, error) {
-		return map[string]awsconfig.ProfileSession{payerID: payerSession}, nil
+	resolveSnapshotPayerSession = func(context.Context, awsconfig.EnsureLinkedOptions) (awsconfig.ProfileSession, error) {
+		return payerSession, nil
 	}
 	assumeSnapshotLinked = func(_ context.Context, opts awsconfig.EnsureLinkedOptions) (awsconfig.ProfileSession, awsconfig.Identity, error) {
 		if opts.LinkedAccountID == linkedNo {
@@ -61,6 +61,9 @@ func TestPrepareSnapshotTargetsSkipsLinkedAssumeRoleFailure(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].AccountID != linkedOK {
 		t.Fatalf("targets = %#v, want one scannable account", got)
+	}
+	if got[0].ConfigLoader == nil {
+		t.Fatal("expected ConfigLoader on linked target")
 	}
 	if len(skipped) != 1 || skipped[0].AccountID != linkedNo {
 		t.Fatalf("skipped = %#v, want one skipped account", skipped)

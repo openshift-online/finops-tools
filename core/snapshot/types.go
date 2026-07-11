@@ -2,6 +2,7 @@
 package snapshot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -85,6 +86,8 @@ type AccountTarget struct {
 	DisplayName  string
 	DisplayAlias string
 	AWSConfig    aws.Config
+	// ConfigLoader obtains fresh credentials before each account scan (linked accounts).
+	ConfigLoader func(context.Context) (aws.Config, error) `json:"-"`
 }
 
 // AccountProgress reports completion of per-account snapshot scans.

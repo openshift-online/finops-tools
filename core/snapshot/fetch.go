@@ -50,7 +50,12 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 			return fmt.Errorf("account target %d: account ID is required", i+1)
 		}
 
-		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, target, accountID, regions, cutoff, typeSet)
+		scanTarget, err := target.withFreshConfig(ctx)
+		if err != nil {
+			return fmt.Errorf("%s: %w", accountID, err)
+		}
+
+		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, scanTarget, accountID, regions, cutoff, typeSet)
 		if err != nil {
 			return err
 		}
@@ -106,6 +111,18 @@ func (q Query) advanceAccountProgress() {
 	if q.AccountProgress != nil {
 		q.AccountProgress.Advance()
 	}
+}
+
+func (t AccountTarget) withFreshConfig(ctx context.Context) (AccountTarget, error) {
+	if t.ConfigLoader == nil {
+		return t, nil
+	}
+	cfg, err := t.ConfigLoader(ctx)
+	if err != nil {
+		return AccountTarget{}, err
+	}
+	t.AWSConfig = cfg
+	return t, nil
 }
 
 func kindSet(types []Kind) map[Kind]struct{} {
@@ -191,6 +208,26 @@ func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
 }
 
 func scanRegion(
+	ctx context.Context,
+	q Query,
+	target AccountTarget,
+	accountID, region string,
+	cutoff time.Time,
+	typeSet map[Kind]struct{},
+) ([]Record, *RDSRegionContext, float64, error) {
+	records, regionRDSContext, ebsRunRate, err := scanRegionOnce(ctx, q, target, accountID, region, cutoff, typeSet)
+	if err != nil && isExpiredCredentialError(err) && target.ConfigLoader != nil {
+		cfg, refreshErr := target.ConfigLoader(ctx)
+		if refreshErr != nil {
+			return nil, nil, 0, err
+		}
+		target.AWSConfig = cfg
+		return scanRegionOnce(ctx, q, target, accountID, region, cutoff, typeSet)
+	}
+	return records, regionRDSContext, ebsRunRate, err
+}
+
+func scanRegionOnce(
 	ctx context.Context,
 	q Query,
 	target AccountTarget,

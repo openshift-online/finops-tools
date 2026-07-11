@@ -126,6 +126,74 @@ func TestRegionErrorMessage(t *testing.T) {
 	}
 }
 
+func TestIsExpiredCredentialError(t *testing.T) {
+	if !isExpiredCredentialError(errors.New("Request has expired.")) {
+		t.Fatal("expected expired request")
+	}
+	if isExpiredCredentialError(errors.New("access denied")) {
+		t.Fatal("expected access denied not to match")
+	}
+}
+
+func TestFetchRefreshesExpiredCredentials(t *testing.T) {
+	calls := 0
+	loader := func(context.Context) (aws.Config, error) {
+		calls++
+		return aws.Config{}, nil
+	}
+	ebs := &expiringEBSLister{
+		record: Record{
+			AccountID:  "111111111111",
+			Region:     "us-east-1",
+			Kind:       KindEBSSnapshot,
+			ResourceID: "snap-old",
+		},
+	}
+
+	result, err := Fetch(context.Background(), Query{
+		Targets: []AccountTarget{{
+			AccountID:    "111111111111",
+			ConfigLoader: loader,
+		}},
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindEBSSnapshot},
+		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
+		ebsLister:    ebs,
+		rdsLister:    fakeRDSLister{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) != 1 {
+		t.Fatalf("records = %d, want 1", len(result.Records))
+	}
+	if calls < 2 {
+		t.Fatalf("ConfigLoader calls = %d, want at least 2 (scan + refresh)", calls)
+	}
+}
+
+type expiringEBSLister struct {
+	calls  int
+	record Record
+}
+
+func (e *expiringEBSLister) ListEBSSnapshots(
+	_ context.Context,
+	_ aws.Config,
+	region, accountID string,
+	_ time.Time,
+	_ float64,
+) ([]Record, float64, error) {
+	e.calls++
+	if e.calls == 1 {
+		return nil, 0, errors.New("Request has expired.")
+	}
+	if region == e.record.Region && accountID == e.record.AccountID {
+		return []Record{e.record}, 0, nil
+	}
+	return nil, 0, nil
+}
+
 func TestIsSkippableRegionError(t *testing.T) {
 	var timeout net.Error = fakeTimeoutError{}
 	if !isSkippableRegionError(timeout) {
