@@ -31,11 +31,6 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	cutoff := now.Add(-q.OlderThan)
 	typeSet := kindSet(q.Types)
 
-	regions, err := q.resolveScanRegions(ctx)
-	if err != nil {
-		return Result{}, err
-	}
-
 	var (
 		mu          sync.Mutex
 		records     []Record
@@ -43,7 +38,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		rdsContexts []RDSRegionContext
 		ebsRunRate  float64
 	)
-	err = parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
+	err := parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
 		target := q.Targets[i]
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
@@ -55,7 +50,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 			return fmt.Errorf("%s: %w", accountID, err)
 		}
 
-		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, scanTarget, accountID, regions, cutoff, typeSet)
+		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, scanTarget, accountID, cutoff, typeSet)
 		if err != nil {
 			return err
 		}
@@ -94,19 +89,6 @@ func (q Query) withDefaults() Query {
 	return q
 }
 
-func (q Query) resolveScanRegions(ctx context.Context) ([]string, error) {
-	if len(q.Targets) == 0 {
-		return nil, nil
-	}
-	// When --regions is unset, enabled regions are usually identical across org members;
-	// discover once instead of calling DescribeRegions per account.
-	regions, err := q.regionLister.ListEnabledRegions(ctx, q.Targets[0].AWSConfig, q.Regions)
-	if err != nil {
-		return nil, fmt.Errorf("%s: list regions: %w", strings.TrimSpace(q.Targets[0].AccountID), err)
-	}
-	return regions, nil
-}
-
 func (q Query) advanceAccountProgress() {
 	if q.AccountProgress != nil {
 		q.AccountProgress.Advance()
@@ -138,10 +120,16 @@ func scanAccountRegions(
 	q Query,
 	target AccountTarget,
 	accountID string,
-	regions []string,
 	cutoff time.Time,
 	typeSet map[Kind]struct{},
 ) ([]Record, []RDSRegionContext, float64, []RegionWarning, error) {
+	// Discover enabled regions per account so opt-in differences are not missed
+	// when sharing a single list from an arbitrary target.
+	regions, err := q.regionLister.ListEnabledRegions(ctx, target.AWSConfig, q.Regions)
+	if err != nil {
+		return nil, nil, 0, nil, fmt.Errorf("%s: list regions: %w", accountID, err)
+	}
+
 	sem := make(chan struct{}, defaultRegionConcurrency)
 	var (
 		wg          sync.WaitGroup

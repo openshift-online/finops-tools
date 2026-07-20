@@ -564,7 +564,7 @@ func (c *countingRegionLister) ListEnabledRegions(_ context.Context, _ aws.Confi
 	return c.regions, nil
 }
 
-func TestFetchListsRegionsOnceForMultipleAccounts(t *testing.T) {
+func TestFetchListsRegionsPerAccount(t *testing.T) {
 	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	lister := &countingRegionLister{regions: []string{"us-east-1"}}
 	ebs := Record{
@@ -580,17 +580,96 @@ func TestFetchListsRegionsOnceForMultipleAccounts(t *testing.T) {
 			{AccountID: "111111111111"},
 			{AccountID: "222222222222"},
 		},
-		OlderThan: 180 * 24 * time.Hour,
-		Types:     []Kind{KindEBSSnapshot},
-		Now:       now,
-		Workers:   1,
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindEBSSnapshot},
+		Now:          now,
+		Workers:      1,
 		regionLister: lister,
-		ebsLister: fakeEBSLister{records: []Record{ebs}},
+		ebsLister:    fakeEBSLister{records: []Record{ebs}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lister.calls != 1 {
-		t.Fatalf("ListEnabledRegions calls = %d, want 1", lister.calls)
+	if lister.calls != 2 {
+		t.Fatalf("ListEnabledRegions calls = %d, want 2", lister.calls)
 	}
 }
+
+// keyedRegionLister returns regions keyed by aws.Config.Region so tests can
+// simulate per-account opt-in differences without racing on call order.
+type keyedRegionLister struct {
+	byKey map[string][]string
+}
+
+func (k keyedRegionLister) ListEnabledRegions(_ context.Context, cfg aws.Config, _ []string) ([]string, error) {
+	return k.byKey[cfg.Region], nil
+}
+
+func TestFetchScansRegionsEnabledPerAccount(t *testing.T) {
+	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	// Account 111 only has us-east-1; 222 also opted into eu-west-1.
+	lister := keyedRegionLister{byKey: map[string][]string{
+		"acct-111": {"us-east-1"},
+		"acct-222": {"us-east-1", "eu-west-1"},
+	}}
+	records := []Record{
+		{
+			AccountID:  "111111111111",
+			Region:     "us-east-1",
+			Kind:       KindEBSSnapshot,
+			ResourceID: "snap-111-use1",
+			SizeGiB:    10,
+		},
+		{
+			AccountID:  "222222222222",
+			Region:     "us-east-1",
+			Kind:       KindEBSSnapshot,
+			ResourceID: "snap-222-use1",
+			SizeGiB:    20,
+		},
+		{
+			AccountID:  "222222222222",
+			Region:     "eu-west-1",
+			Kind:       KindEBSSnapshot,
+			ResourceID: "snap-222-euw1",
+			SizeGiB:    30,
+		},
+		// Would be invisible if we only discovered regions from account 111.
+		{
+			AccountID:  "111111111111",
+			Region:     "eu-west-1",
+			Kind:       KindEBSSnapshot,
+			ResourceID: "snap-111-euw1-disabled",
+			SizeGiB:    40,
+		},
+	}
+
+	result, err := Fetch(context.Background(), Query{
+		Targets: []AccountTarget{
+			{AccountID: "111111111111", AWSConfig: aws.Config{Region: "acct-111"}},
+			{AccountID: "222222222222", AWSConfig: aws.Config{Region: "acct-222"}},
+		},
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindEBSSnapshot},
+		Now:          now,
+		Workers:      2,
+		regionLister: lister,
+		ebsLister:    fakeEBSLister{records: records},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, rec := range result.Records {
+		got[rec.ResourceID] = true
+	}
+	for _, id := range []string{"snap-111-use1", "snap-222-use1", "snap-222-euw1"} {
+		if !got[id] {
+			t.Fatalf("missing record %s; got %#v", id, result.Records)
+		}
+	}
+	if got["snap-111-euw1-disabled"] {
+		t.Fatalf("scanned eu-west-1 for account 111 which did not enable it")
+	}
+}
+
