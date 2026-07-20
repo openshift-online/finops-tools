@@ -172,7 +172,9 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	targets, err := resolveCostTargets(
+	// costTargets are the selected accounts (IDs + payer credential mapping).
+	// scanTargets are the subset we can assume into for EC2/RDS API scans.
+	costTargets, err := resolveCostTargets(
 		cmd, cfg, sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
@@ -189,7 +191,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		defer closeOut()
 	}
 
-	if len(targets) == 0 {
+	if len(costTargets) == 0 {
 		return output.WriteSnapshotListResult(out, format, snapshot.Result{
 			Summary: snapshot.Summary{
 				OlderThanDays:  snapshotListOlderThanDays,
@@ -200,15 +202,15 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 
 	status.Step("Ensuring AWS credentials…")
 	awsCtx := awsCommandContext(cmd)
-	if err := ensureSnapshotCredentials(cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+	if err := ensureSnapshotCredentials(cmd, cfg, costTargets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 		return err
 	}
-	if len(targets) <= 1 {
+	if len(costTargets) <= 1 {
 		status.Step("Preparing account configuration…")
 	}
-	prepareBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Preparing account configuration…", len(targets))
-	snapshotTargets, skippedAccounts, err := prepareSnapshotTargets(
-		cmd, cfg, targets,
+	prepareBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Preparing account configuration…", len(costTargets))
+	scanTargets, skippedAccounts, err := prepareSnapshotTargets(
+		cmd, cfg, costTargets,
 		awsFlags.CredentialsFile, awsFlags.ConfigPath, snapshotListRole,
 		snapshotListWorkers,
 		prepareBar,
@@ -216,7 +218,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if len(snapshotTargets) == 0 {
+	if len(scanTargets) == 0 {
 		return output.WriteSnapshotListResult(out, format, snapshot.Result{
 			Summary: snapshot.Summary{
 				OlderThanDays:   snapshotListOlderThanDays,
@@ -226,16 +228,16 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		})
 	}
 
-	if len(snapshotTargets) <= 1 {
+	if len(scanTargets) <= 1 {
 		status.Step("Scanning account for snapshots…")
 	}
-	scanBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Scanning accounts for snapshots…", len(snapshotTargets))
+	scanBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Scanning accounts for snapshots…", len(scanTargets))
 	if scanBar != nil {
 		defer scanBar.Finish()
 	}
 
 	result, err := snapshotListFetch(awsCtx, snapshot.Query{
-		Targets:         snapshotTargets,
+		Targets:         scanTargets,
 		OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
 		Types:           types,
 		Regions:         regions,
@@ -248,8 +250,10 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 	result.Summary.SkippedAccounts = skippedAccounts
 
+	// Cost Explorer runs on payer credentials and only needs account IDs from
+	// costTargets (not scanTargets), so skipped assume-role accounts stay in scope.
 	status.Step("Fetching billed snapshot costs from Cost Explorer…")
-	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, targets, awsFlags.CredentialsFile, time.Now().UTC(), snapshotListWorkers)
+	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, costTargets, awsFlags.CredentialsFile, time.Now().UTC(), snapshotListWorkers)
 	if err != nil {
 		status.Step(fmt.Sprintf("Warning: billed snapshot costs unavailable: %v", err))
 	} else {
