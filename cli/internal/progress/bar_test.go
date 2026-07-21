@@ -31,6 +31,33 @@ func TestBarAdvanceNonInteractive(t *testing.T) {
 	}
 }
 
+func TestBarFinishInteractiveEndsWithNewline(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewBar(&buf, false, "Scanning accounts for snapshots…", 3)
+	if bar == nil {
+		t.Fatal("expected bar")
+	}
+	bar.interactive = true
+
+	bar.Advance()
+	bar.Advance()
+	bar.Advance()
+	// Mimic a follow-up status line before Finish — the bug case when Finish is deferred too late.
+	beforeFinish := buf.String()
+	if strings.HasSuffix(beforeFinish, "\n") {
+		t.Fatalf("interactive Advance should not end with newline before Finish: %q", beforeFinish)
+	}
+
+	bar.Finish()
+	out := buf.String()
+	if !strings.HasSuffix(out, "\n") {
+		t.Fatalf("Finish must end with newline, got %q", out)
+	}
+	if !strings.Contains(out, "100%") {
+		t.Fatalf("expected 100%%, got %q", out)
+	}
+}
+
 func TestBarNilSafe(t *testing.T) {
 	var bar *Bar
 	bar.Advance()

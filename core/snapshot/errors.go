@@ -31,6 +31,11 @@ func isExpiredCredentialError(err error) bool {
 		"expiredtoken",
 		"security token included in the request is expired",
 		"token has expired",
+		// AuthFailure often means the temporary session is no longer valid
+		// (not an IAM deny, which is UnauthorizedOperation).
+		"authfailure",
+		"not able to validate the provided access credentials",
+		"invalidclienttokenid",
 	} {
 		if strings.Contains(msg, sub) {
 			return true

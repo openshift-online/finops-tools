@@ -130,6 +130,9 @@ func TestIsExpiredCredentialError(t *testing.T) {
 	if !isExpiredCredentialError(errors.New("Request has expired.")) {
 		t.Fatal("expected expired request")
 	}
+	if !isExpiredCredentialError(errors.New("api error AuthFailure: AWS was not able to validate the provided access credentials")) {
+		t.Fatal("expected AuthFailure to match")
+	}
 	if isExpiredCredentialError(errors.New("access denied")) {
 		t.Fatal("expected access denied not to match")
 	}
@@ -170,6 +173,130 @@ func TestFetchRefreshesExpiredCredentials(t *testing.T) {
 	if calls < 2 {
 		t.Fatalf("ConfigLoader calls = %d, want at least 2 (scan + refresh)", calls)
 	}
+}
+
+func TestFetchRefreshesCredentialsOnDescribeRegionsAuthFailure(t *testing.T) {
+	loaderCalls := 0
+	loader := func(context.Context) (aws.Config, error) {
+		loaderCalls++
+		return aws.Config{}, nil
+	}
+	lister := &authFailThenOKRegionLister{
+		regions: []string{"us-east-1"},
+	}
+	ebs := Record{
+		AccountID:  "111111111111",
+		Region:     "us-east-1",
+		Kind:       KindEBSSnapshot,
+		ResourceID: "snap-old",
+	}
+
+	result, err := Fetch(context.Background(), Query{
+		Targets: []AccountTarget{{
+			AccountID:    "111111111111",
+			ConfigLoader: loader,
+		}},
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindEBSSnapshot},
+		regionLister: lister,
+		ebsLister:    fakeEBSLister{records: []Record{ebs}},
+		rdsLister:    fakeRDSLister{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) != 1 {
+		t.Fatalf("records = %d, want 1", len(result.Records))
+	}
+	if lister.calls != 2 {
+		t.Fatalf("ListEnabledRegions calls = %d, want 2", lister.calls)
+	}
+	if loaderCalls < 2 {
+		t.Fatalf("ConfigLoader calls = %d, want at least 2", loaderCalls)
+	}
+}
+
+func TestFetchSkipsAccountWhenDescribeRegionsFails(t *testing.T) {
+	authErr := errors.New("api error AuthFailure: AWS was not able to validate the provided access credentials")
+	okEBS := Record{
+		AccountID:               "111111111111",
+		Region:                  "us-east-1",
+		Kind:                    KindEBSSnapshot,
+		ResourceID:              "snap-ok",
+		EstimatedMonthlyCostUSD: 5,
+	}
+
+	result, err := Fetch(context.Background(), Query{
+		Targets: []AccountTarget{
+			{
+				AccountID:    "999999999999",
+				DisplayAlias: "bad-acct",
+				AWSConfig:    aws.Config{Region: "bad"},
+				// Refresh still returns bad creds; account should be skipped, not abort Fetch.
+				ConfigLoader: func(context.Context) (aws.Config, error) {
+					return aws.Config{Region: "bad"}, nil
+				},
+			},
+			{AccountID: "111111111111", AWSConfig: aws.Config{Region: "ok"}},
+		},
+		OlderThan: 180 * 24 * time.Hour,
+		Types:     []Kind{KindEBSSnapshot},
+		Workers:   1,
+		regionLister: &keyedFailRegionLister{
+			failKey: "bad",
+			failErr: authErr,
+			okByKey: map[string][]string{
+				"ok": {"us-east-1"},
+			},
+		},
+		ebsLister: fakeEBSLister{records: []Record{okEBS}},
+		rdsLister: fakeRDSLister{},
+	})
+	if err != nil {
+		t.Fatalf("Fetch() error = %v, want nil so other accounts continue", err)
+	}
+	if len(result.Records) != 1 || result.Records[0].ResourceID != "snap-ok" {
+		t.Fatalf("records = %#v", result.Records)
+	}
+	if len(result.Summary.SkippedAccounts) != 1 {
+		t.Fatalf("skipped = %#v", result.Summary.SkippedAccounts)
+	}
+	if result.Summary.SkippedAccounts[0].AccountID != "999999999999" {
+		t.Fatalf("skipped account = %#v", result.Summary.SkippedAccounts[0])
+	}
+	if result.Summary.SkippedAccounts[0].DisplayAlias != "bad-acct" {
+		t.Fatalf("alias = %q", result.Summary.SkippedAccounts[0].DisplayAlias)
+	}
+}
+
+type authFailThenOKRegionLister struct {
+	calls   int
+	regions []string
+}
+
+func (a *authFailThenOKRegionLister) ListEnabledRegions(_ context.Context, _ aws.Config, _ []string) ([]string, error) {
+	a.calls++
+	if a.calls == 1 {
+		return nil, errors.New("api error AuthFailure: AWS was not able to validate the provided access credentials")
+	}
+	return a.regions, nil
+}
+
+// keyedFailRegionLister fails when cfg.Region matches failKey (used to target one account).
+type keyedFailRegionLister struct {
+	failKey string
+	failErr error
+	okByKey map[string][]string
+}
+
+func (k *keyedFailRegionLister) ListEnabledRegions(_ context.Context, cfg aws.Config, _ []string) ([]string, error) {
+	if cfg.Region == k.failKey {
+		return nil, k.failErr
+	}
+	if regions, ok := k.okByKey[cfg.Region]; ok {
+		return regions, nil
+	}
+	return k.okByKey[""], nil
 }
 
 type expiringEBSLister struct {

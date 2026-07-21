@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
@@ -44,12 +45,13 @@ var snapshotListCmd = &cobra.Command{
 
 Account selection matches finops account get-cost: --account, --account-alias, --ou, --tag-key, or --all-linked with --payer.
 Linked member accounts are scanned using role assumption from the payer.
-Accounts that cannot be assumed into are skipped and listed under "Skipped accounts" in the output.
+Accounts that cannot be assumed into, or that fail credentialed API calls during the scan,
+are skipped and listed under "Skipped accounts" in the output.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
-When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots.
+When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots
+and account-wide billed EBS/RDS snapshot storage.
 Per-snapshot $/MO allocates billed cost proportionally; — on EBS means no incremental blocks.
-Account-wide billed snapshot storage is included in JSON output only.
 
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions, ec2:DescribeSnapshots
@@ -232,10 +234,6 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		status.Step("Scanning account for snapshots…")
 	}
 	scanBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Scanning accounts for snapshots…", len(scanTargets))
-	if scanBar != nil {
-		defer scanBar.Finish()
-	}
-
 	result, err := snapshotListFetch(awsCtx, snapshot.Query{
 		Targets:         scanTargets,
 		OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
@@ -245,10 +243,14 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		AccountProgress: scanBar,
 		Workers:         snapshotListWorkers,
 	})
+	// Finish before the next status line so interactive redraws end with a newline.
+	if scanBar != nil {
+		scanBar.Finish()
+	}
 	if err != nil {
 		return err
 	}
-	result.Summary.SkippedAccounts = skippedAccounts
+	result.Summary.SkippedAccounts = mergeSnapshotSkippedAccounts(skippedAccounts, result.Summary.SkippedAccounts)
 
 	// Cost Explorer runs on payer credentials and only needs account IDs from
 	// costTargets (not scanTargets), so skipped assume-role accounts stay in scope.
@@ -261,4 +263,20 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 
 	return output.WriteSnapshotListResult(out, format, result)
+}
+
+func mergeSnapshotSkippedAccounts(prepare, scan []snapshot.AccountWarning) []snapshot.AccountWarning {
+	if len(prepare) == 0 && len(scan) == 0 {
+		return nil
+	}
+	out := make([]snapshot.AccountWarning, 0, len(prepare)+len(scan))
+	out = append(out, prepare...)
+	out = append(out, scan...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AccountID != out[j].AccountID {
+			return out[i].AccountID < out[j].AccountID
+		}
+		return out[i].Message < out[j].Message
+	})
+	return out
 }

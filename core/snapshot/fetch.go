@@ -32,11 +32,12 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	typeSet := kindSet(q.Types)
 
 	var (
-		mu          sync.Mutex
-		records     []Record
-		warnings    []RegionWarning
-		rdsContexts []RDSRegionContext
-		ebsRunRate  float64
+		mu              sync.Mutex
+		records         []Record
+		warnings        []RegionWarning
+		skippedAccounts []AccountWarning
+		rdsContexts     []RDSRegionContext
+		ebsRunRate      float64
 	)
 	err := parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
 		target := q.Targets[i]
@@ -47,10 +48,21 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 
 		scanTarget, err := target.withFreshConfig(ctx)
 		if err != nil {
-			return fmt.Errorf("%s: %w", accountID, err)
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			mu.Lock()
+			skippedAccounts = append(skippedAccounts, AccountWarning{
+				AccountID:    accountID,
+				DisplayAlias: target.DisplayAlias,
+				Message:      regionErrorMessage(err),
+			})
+			mu.Unlock()
+			q.advanceAccountProgress()
+			return nil
 		}
 
-		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, err := scanAccountRegions(ctx, q, scanTarget, accountID, cutoff, typeSet)
+		accountRecords, accountRDSContexts, accountEBSRunRate, regionWarnings, accountSkip, err := scanAccountRegions(ctx, q, scanTarget, accountID, cutoff, typeSet)
 		if err != nil {
 			return err
 		}
@@ -59,6 +71,9 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		warnings = append(warnings, regionWarnings...)
 		rdsContexts = append(rdsContexts, accountRDSContexts...)
 		ebsRunRate += accountEBSRunRate
+		if accountSkip != nil {
+			skippedAccounts = append(skippedAccounts, *accountSkip)
+		}
 		mu.Unlock()
 		q.advanceAccountProgress()
 		return nil
@@ -70,6 +85,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	sortRecords(records)
 	summary := buildSummary(records, int(q.OlderThan/(24*time.Hour)), rdsContexts, ebsRunRate)
 	summary.SkippedRegions = sortRegionWarnings(warnings)
+	summary.SkippedAccounts = sortAccountWarnings(skippedAccounts)
 	return Result{Records: records, Summary: summary}, nil
 }
 
@@ -122,12 +138,22 @@ func scanAccountRegions(
 	accountID string,
 	cutoff time.Time,
 	typeSet map[Kind]struct{},
-) ([]Record, []RDSRegionContext, float64, []RegionWarning, error) {
+) ([]Record, []RDSRegionContext, float64, []RegionWarning, *AccountWarning, error) {
 	// Discover enabled regions per account so opt-in differences are not missed
 	// when sharing a single list from an arbitrary target.
-	regions, err := q.regionLister.ListEnabledRegions(ctx, target.AWSConfig, q.Regions)
+	regions, err := q.listEnabledRegions(ctx, &target)
 	if err != nil {
-		return nil, nil, 0, nil, fmt.Errorf("%s: list regions: %w", accountID, err)
+		if errors.Is(err, context.Canceled) {
+			return nil, nil, 0, nil, nil, err
+		}
+		// Keep multi-account scans going when one member has bad/expired creds
+		// or cannot call DescribeRegions.
+		skip := &AccountWarning{
+			AccountID:    accountID,
+			DisplayAlias: target.DisplayAlias,
+			Message:      regionErrorMessage(err),
+		}
+		return nil, nil, 0, nil, skip, nil
 	}
 
 	sem := make(chan struct{}, defaultRegionConcurrency)
@@ -173,9 +199,25 @@ func scanAccountRegions(
 	wg.Wait()
 
 	if scanErr != nil {
-		return records, rdsContexts, ebsRunRate, warnings, scanErr
+		return records, rdsContexts, ebsRunRate, warnings, nil, scanErr
 	}
-	return records, rdsContexts, ebsRunRate, collapseRegionWarnings(accountID, regions, warnings), nil
+	return records, rdsContexts, ebsRunRate, collapseRegionWarnings(accountID, regions, warnings), nil, nil
+}
+
+func (q Query) listEnabledRegions(ctx context.Context, target *AccountTarget) ([]string, error) {
+	regions, err := q.regionLister.ListEnabledRegions(ctx, target.AWSConfig, q.Regions)
+	if err != nil && isExpiredCredentialError(err) && target.ConfigLoader != nil {
+		cfg, refreshErr := target.ConfigLoader(ctx)
+		if refreshErr != nil {
+			return nil, err
+		}
+		target.AWSConfig = cfg
+		regions, err = q.regionLister.ListEnabledRegions(ctx, target.AWSConfig, q.Regions)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return regions, nil
 }
 
 func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
@@ -189,6 +231,20 @@ func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
 		}
 		if out[i].Region != out[j].Region {
 			return out[i].Region < out[j].Region
+		}
+		return out[i].Message < out[j].Message
+	})
+	return out
+}
+
+func sortAccountWarnings(warnings []AccountWarning) []AccountWarning {
+	if len(warnings) == 0 {
+		return nil
+	}
+	out := append([]AccountWarning(nil), warnings...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AccountID != out[j].AccountID {
+			return out[i].AccountID < out[j].AccountID
 		}
 		return out[i].Message < out[j].Message
 	})
@@ -350,7 +406,7 @@ func buildSummary(records []Record, olderThanDays int, rdsContexts []RDSRegionCo
 		OlderThanDays:                       olderThanDays,
 		ByKind:                              kindSummaries,
 		ByAccount:                           accountSummaries,
-		CostDisclaimer:                      "Attributed costs apply to listed snapshots only. Per-snapshot $/MO is a proportional share of billed storage when Cost Explorer data is available; — on EBS means no incremental blocks. Account-wide billed snapshot storage is in JSON (summary.billed_costs).",
+		CostDisclaimer:                      "Attributed costs apply to listed snapshots only. Per-snapshot $/MO is a proportional share of billed storage when Cost Explorer data is available; — on EBS means no incremental blocks.",
 	}
 }
 

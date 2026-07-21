@@ -294,6 +294,19 @@ func buildSnapshotSummaryLines(summary snapshot.Summary, ctx snapshotCostContext
 		}
 	}
 
+	if ctx.billedEBS > 0 {
+		lines = append(lines, snapshotSummaryLine{
+			label: fmt.Sprintf("Billed EBS snapshot storage (account-wide, %s)", period),
+			value: format.FormatMoney(ctx.billedEBS, "USD"),
+		})
+	}
+	if ctx.billedRDS > 0 {
+		lines = append(lines, snapshotSummaryLine{
+			label: fmt.Sprintf("Billed RDS backup storage (account-wide, %s)", period),
+			value: format.FormatMoney(ctx.billedRDS, "USD"),
+		})
+	}
+
 	return lines
 }
 
