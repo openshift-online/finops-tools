@@ -56,12 +56,16 @@ func bindAWSAccountSelectorFlags(cmd *cobra.Command, refs awsAccountSelectorFlag
 // usagePrefix is prepended to the flag description (e.g. "costs template only; ").
 func bindWorkersFlag(cmd *cobra.Command, workers *int, usagePrefix string) {
 	cmd.Flags().IntVar(workers, "workers", parallel.DefaultWorkers,
-		usagePrefix+"Maximum concurrent workers for multi-account AWS queries (default 10; use 1 for sequential)")
+		fmt.Sprintf("%sMaximum concurrent workers for multi-account AWS queries (default %d, max %d; use 1 for sequential)",
+			usagePrefix, parallel.DefaultWorkers, parallel.MaxWorkers))
 }
 
 func validateWorkers(workers int) error {
 	if workers < 1 {
 		return fmt.Errorf("--workers must be at least 1")
+	}
+	if workers > parallel.MaxWorkers {
+		return fmt.Errorf("--workers must be at most %d", parallel.MaxWorkers)
 	}
 	return nil
 }

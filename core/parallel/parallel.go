@@ -7,15 +7,23 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// DefaultWorkers is the default concurrency when Workers is unset (0).
-const DefaultWorkers = 10
+const (
+	// DefaultWorkers is the default concurrency when Workers is unset (0).
+	DefaultWorkers = 25
+	// MaxWorkers is the upper bound for concurrent workers.
+	MaxWorkers = 1000
+)
 
 // WorkersOrDefault returns n when positive, otherwise DefaultWorkers.
+// Values above MaxWorkers are clamped to MaxWorkers.
 func WorkersOrDefault(n int) int {
-	if n > 0 {
-		return n
+	if n <= 0 {
+		return DefaultWorkers
 	}
-	return DefaultWorkers
+	if n > MaxWorkers {
+		return MaxWorkers
+	}
+	return n
 }
 
 // ForEach runs fn for each index in [0, count) with at most workers concurrent calls.

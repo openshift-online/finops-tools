@@ -18,6 +18,12 @@ func TestWorkersOrDefault(t *testing.T) {
 	if got := WorkersOrDefault(3); got != 3 {
 		t.Fatalf("WorkersOrDefault(3) = %d, want 3", got)
 	}
+	if got := WorkersOrDefault(MaxWorkers); got != MaxWorkers {
+		t.Fatalf("WorkersOrDefault(%d) = %d, want %d", MaxWorkers, got, MaxWorkers)
+	}
+	if got := WorkersOrDefault(MaxWorkers + 1); got != MaxWorkers {
+		t.Fatalf("WorkersOrDefault(%d) = %d, want %d", MaxWorkers+1, got, MaxWorkers)
+	}
 }
 
 func TestForEachSequential(t *testing.T) {
