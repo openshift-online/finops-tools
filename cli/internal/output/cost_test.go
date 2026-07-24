@@ -148,6 +148,120 @@ func TestWriteCostResultPrettyPrintMergedPayers(t *testing.T) {
 	}
 }
 
+func TestWriteCostCSVHeader(t *testing.T) {
+	t.Run("no split-by", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := WriteCostCSVHeader(&buf, cost.SplitByNone); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if got != "provider,account_name,account_id,metric,currency,amount,start_date,end_date" {
+			t.Errorf("unexpected header: %q", got)
+		}
+	})
+
+	t.Run("split-by service", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := WriteCostCSVHeader(&buf, cost.SplitByService); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if !strings.Contains(got, "service") {
+			t.Errorf("missing service column: %q", got)
+		}
+	})
+
+	t.Run("with extra columns", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := WriteCostCSVHeader(&buf, cost.SplitByNone, "ou_id", "ou_name"); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if !strings.HasPrefix(got, "ou_id,ou_name,") {
+			t.Errorf("ou columns not first: %q", got)
+		}
+	})
+}
+
+func TestWriteCostResultCSVRows(t *testing.T) {
+	t.Run("simple row no extra vals", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := WriteCostResultCSV(&buf, fixtureResult()); err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if len(lines) != 1 {
+			t.Fatalf("expected 1 data row, got %d:\n%s", len(lines), buf.String())
+		}
+		if !strings.Contains(lines[0], "RH Control Production") {
+			t.Errorf("row missing account name: %q", lines[0])
+		}
+	})
+
+	t.Run("row with ou prefix", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := WriteCostResultCSV(&buf, fixtureResult(), "ou-xxxx-1111", "team-a"); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSpace(buf.String())
+		if !strings.HasPrefix(got, "ou-xxxx-1111,team-a,") {
+			t.Errorf("ou values not first: %q", got)
+		}
+	})
+
+	t.Run("breakdown rows with ou prefix", func(t *testing.T) {
+		r := fixtureResult()
+		r.SplitBy = cost.SplitByService
+		r.Breakdown = []cost.CostBreakdownItem{
+			{Service: "Amazon EC2", Amount: 100},
+			{Service: "Amazon S3", Amount: 10},
+		}
+		var buf bytes.Buffer
+		if err := WriteCostResultCSV(&buf, r, "ou-xxxx-1111", "team-a"); err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 breakdown rows, got %d:\n%s", len(lines), buf.String())
+		}
+		for _, line := range lines {
+			if !strings.HasPrefix(line, "ou-xxxx-1111,team-a,") {
+				t.Errorf("ou values not first in row: %q", line)
+			}
+		}
+	})
+
+	t.Run("header then rows combine correctly", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := WriteCostCSVHeader(&buf, cost.SplitByNone, "ou_id", "ou_name"); err != nil {
+			t.Fatal(err)
+		}
+		r1 := fixtureResult()
+		r1.AccountName = "acct-a"
+		if err := WriteCostResultCSV(&buf, r1, "ou-xxxx-1111", "team-a"); err != nil {
+			t.Fatal(err)
+		}
+		r2 := fixtureResult()
+		r2.AccountName = "acct-b"
+		if err := WriteCostResultCSV(&buf, r2, "ou-xxxx-2222", "team-b"); err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if len(lines) != 3 {
+			t.Fatalf("expected header + 2 rows, got %d:\n%s", len(lines), buf.String())
+		}
+		if !strings.HasPrefix(lines[0], "ou_id,ou_name,") {
+			t.Errorf("header wrong: %q", lines[0])
+		}
+		if !strings.Contains(lines[1], "ou-xxxx-1111") || !strings.Contains(lines[1], "acct-a") {
+			t.Errorf("row 1 wrong: %q", lines[1])
+		}
+		if !strings.Contains(lines[2], "ou-xxxx-2222") || !strings.Contains(lines[2], "acct-b") {
+			t.Errorf("row 2 wrong: %q", lines[2])
+		}
+	})
+}
+
 func TestParseFormat(t *testing.T) {
 	f, err := ParseFormat("JSON")
 	if err != nil || f != FormatJSON {

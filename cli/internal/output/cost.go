@@ -43,10 +43,62 @@ func WriteCostResult(w io.Writer, format Format, r cost.CostResult) error {
 	case FormatJSON:
 		return writeJSON(w, r)
 	case FormatCSV:
-		return writeCSV(w, r)
+		return writeCSVOpts(w, r, true)
 	default:
 		return fmt.Errorf("unknown format %q", format)
 	}
+}
+
+// WriteCostCSVHeader writes the CSV header row.
+// extraCols are prepended before the standard columns (e.g. "ou_id", "ou_name").
+func WriteCostCSVHeader(w io.Writer, splitBy cost.SplitBy, extraCols ...string) error {
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+	var stdCols []string
+	if splitBy != cost.SplitByNone {
+		stdCols = []string{
+			"provider", "account_name", "account_id", "metric",
+			"currency", "start_date", "end_date", breakdownCSVColumn(splitBy), "amount",
+		}
+	} else {
+		stdCols = []string{
+			"provider", "account_name", "account_id", "metric",
+			"currency", "amount", "start_date", "end_date",
+		}
+	}
+	header := make([]string, 0, len(extraCols)+len(stdCols))
+	header = append(header, extraCols...)
+	header = append(header, stdCols...)
+	if err := cw.Write(header); err != nil {
+		return err
+	}
+	return cw.Error()
+}
+
+// WriteCostResultCSV writes CSV data rows for a result (no header).
+// extraVals are prepended to each row (e.g. ou_id and ou_name values).
+func WriteCostResultCSV(w io.Writer, r cost.CostResult, extraVals ...string) error {
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+	if len(r.Breakdown) > 0 {
+		for _, item := range r.Breakdown {
+			row := make([]string, 0, len(extraVals)+9)
+			row = append(row, extraVals...)
+			row = append(row, csvBreakdownRow(r, item)...)
+			if err := cw.Write(row); err != nil {
+				return err
+			}
+		}
+		return cw.Error()
+	}
+	row := make([]string, 0, len(extraVals)+8)
+	row = append(row, extraVals...)
+	row = append(row, string(r.Provider), r.AccountName, r.AccountID, r.Metric,
+		r.Currency, fmt.Sprintf("%.10f", r.Amount), r.StartDate, r.EndDate)
+	if err := cw.Write(row); err != nil {
+		return err
+	}
+	return cw.Error()
 }
 
 func writeJSON(w io.Writer, r cost.CostResult) error {
@@ -55,18 +107,20 @@ func writeJSON(w io.Writer, r cost.CostResult) error {
 	return enc.Encode(r)
 }
 
-func writeCSV(w io.Writer, r cost.CostResult) error {
+func writeCSVOpts(w io.Writer, r cost.CostResult, writeHeader bool) error {
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 
 	if len(r.Breakdown) > 0 {
-		dimCol := breakdownCSVColumn(r.SplitBy)
-		header := []string{
-			"provider", "account_name", "account_id", "metric",
-			"currency", "start_date", "end_date", dimCol, "amount",
-		}
-		if err := cw.Write(header); err != nil {
-			return err
+		if writeHeader {
+			dimCol := breakdownCSVColumn(r.SplitBy)
+			header := []string{
+				"provider", "account_name", "account_id", "metric",
+				"currency", "start_date", "end_date", dimCol, "amount",
+			}
+			if err := cw.Write(header); err != nil {
+				return err
+			}
 		}
 		for _, item := range r.Breakdown {
 			if err := cw.Write(csvBreakdownRow(r, item)); err != nil {
@@ -76,12 +130,14 @@ func writeCSV(w io.Writer, r cost.CostResult) error {
 		return cw.Error()
 	}
 
-	header := []string{
-		"provider", "account_name", "account_id", "metric",
-		"currency", "amount", "start_date", "end_date",
-	}
-	if err := cw.Write(header); err != nil {
-		return err
+	if writeHeader {
+		header := []string{
+			"provider", "account_name", "account_id", "metric",
+			"currency", "amount", "start_date", "end_date",
+		}
+		if err := cw.Write(header); err != nil {
+			return err
+		}
 	}
 	row := []string{
 		string(r.Provider),
