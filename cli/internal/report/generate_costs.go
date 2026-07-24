@@ -35,6 +35,7 @@ func (costsGenerator) Generate(ctx context.Context, in GenerateInput) error {
 		Accounts: in.Targets,
 		Range:    in.Range,
 		Progress: in.Progress,
+		Workers:  in.Workers,
 		AWSFetch: &cost.AWSFetchOptions{
 			ResolveAccountNames: coreaccount.ResolveAccountNames,
 		},

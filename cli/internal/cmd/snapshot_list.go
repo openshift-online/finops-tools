@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
@@ -16,6 +17,7 @@ import (
 var (
 	snapshotListAccount        string
 	snapshotListAccountAliases string
+	snapshotListAllLinked      bool
 	snapshotListFormat         string
 	snapshotListOutput         string
 	snapshotListMinSizeGiB     float64
@@ -32,6 +34,7 @@ var (
 	snapshotListTagValue       string
 	snapshotListTypes          string
 	snapshotListProvider       string
+	snapshotListWorkers        int
 	snapshotListFetch          = snapshot.Fetch
 )
 
@@ -40,13 +43,15 @@ var snapshotListCmd = &cobra.Command{
 	Short: "List EBS and RDS snapshots with estimated storage costs",
 	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
-Account selection matches finops account get-cost: --account, --account-alias, --ou, or --tag-key with --payer.
+Account selection matches finops account get-cost: --account, --account-alias, --ou, --tag-key, or --all-linked with --payer.
 Linked member accounts are scanned using role assumption from the payer.
+Accounts that cannot be assumed into, or that fail credentialed API calls during the scan,
+are skipped and listed under "Skipped accounts" in the output.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
-When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots.
+When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots
+and account-wide billed EBS/RDS snapshot storage.
 Per-snapshot $/MO allocates billed cost proportionally; — on EBS means no incremental blocks.
-Account-wide billed snapshot storage is included in JSON output only.
 
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions, ec2:DescribeSnapshots
@@ -58,6 +63,7 @@ ce:GetCostAndUsage with LINKED_ACCOUNT scope for billed cost lines.
 Examples:
   finops snapshot list --account-alias rh-control
   finops snapshot list --account-alias rh-control --older-than-days 365 --format json
+  finops snapshot list --payer rh-control --all-linked
   finops snapshot list --payer rh-control --tag-key organization
   finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs`,
 	Args: cobra.NoArgs,
@@ -65,7 +71,7 @@ Examples:
 		sel, err := parseCostTargetSelector(
 			snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 			snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
-			snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
+			snapshotListSkipOrgCache, snapshotListRefreshOrgCache, snapshotListAllLinked,
 		)
 		if err != nil {
 			return err
@@ -91,6 +97,9 @@ Examples:
 		if _, err := snapshot.ParseRegions(snapshotListRegions); err != nil {
 			return err
 		}
+		if err := validateWorkers(snapshotListWorkers); err != nil {
+			return err
+		}
 		return validateOrgCacheFlags(snapshotListSkipOrgCache, snapshotListRefreshOrgCache)
 	},
 	RunE: runSnapshotList,
@@ -101,6 +110,7 @@ func init() {
 	bindAWSTargetFlags(snapshotListCmd, awsTargetFlagRefs{
 		Account:         &snapshotListAccount,
 		AccountAliases:  &snapshotListAccountAliases,
+		AllLinked:       &snapshotListAllLinked,
 		OU:              &snapshotListOU,
 		OUDirect:        &snapshotListOUDirect,
 		Payer:           &snapshotListPayer,
@@ -120,6 +130,7 @@ func init() {
 		"Cloud provider: aws or gcp")
 	snapshotListCmd.Flags().StringVar(&snapshotListRole, "role", "", "Linked-account IAM role name (default: config defaults.aws.linked_role)")
 	snapshotListCmd.Flags().BoolVar(&snapshotListQuiet, "quiet", false, "Suppress progress messages on stderr")
+	bindWorkersFlag(snapshotListCmd, &snapshotListWorkers, "")
 }
 
 func runSnapshotList(cmd *cobra.Command, _ []string) error {
@@ -157,13 +168,15 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 		snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
-		snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
+		snapshotListSkipOrgCache, snapshotListRefreshOrgCache, snapshotListAllLinked,
 	)
 	if err != nil {
 		return err
 	}
 
-	targets, err := resolveCostTargets(
+	// costTargets are the selected accounts (IDs + payer credential mapping).
+	// scanTargets are the subset we can assume into for EC2/RDS API scans.
+	costTargets, err := resolveCostTargets(
 		cmd, cfg, sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
@@ -180,7 +193,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		defer closeOut()
 	}
 
-	if len(targets) == 0 {
+	if len(costTargets) == 0 {
 		return output.WriteSnapshotListResult(out, format, snapshot.Result{
 			Summary: snapshot.Summary{
 				OlderThanDays:  snapshotListOlderThanDays,
@@ -191,39 +204,58 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 
 	status.Step("Ensuring AWS credentials…")
 	awsCtx := awsCommandContext(cmd)
-	if err := ensureSnapshotCredentials(cmd, cfg, targets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
+	if err := ensureSnapshotCredentials(cmd, cfg, costTargets, awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod); err != nil {
 		return err
 	}
-	if len(targets) <= 1 {
+	if len(costTargets) <= 1 {
 		status.Step("Preparing account configuration…")
 	}
-	snapshotTargets, err := prepareSnapshotTargets(
-		cmd, cfg, targets,
+	prepareBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Preparing account configuration…", len(costTargets))
+	scanTargets, skippedAccounts, err := prepareSnapshotTargets(
+		cmd, cfg, costTargets,
 		awsFlags.CredentialsFile, awsFlags.ConfigPath, snapshotListRole,
-		status,
+		snapshotListWorkers,
+		prepareBar,
 	)
 	if err != nil {
 		return err
 	}
-
-	if len(snapshotTargets) > 1 {
-		status.Step(fmt.Sprintf("Scanning %d account(s) for snapshots…", len(snapshotTargets)))
+	if len(scanTargets) == 0 {
+		return output.WriteSnapshotListResult(out, format, snapshot.Result{
+			Summary: snapshot.Summary{
+				OlderThanDays:   snapshotListOlderThanDays,
+				SkippedAccounts: skippedAccounts,
+				CostDisclaimer:  "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
+			},
+		})
 	}
 
+	if len(scanTargets) <= 1 {
+		status.Step("Scanning account for snapshots…")
+	}
+	scanBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Scanning accounts for snapshots…", len(scanTargets))
 	result, err := snapshotListFetch(awsCtx, snapshot.Query{
-		Targets:    snapshotTargets,
-		OlderThan:  time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
-		Types:      types,
-		Regions:    regions,
-		MinSizeGiB: snapshotListMinSizeGiB,
-		Progress:   status.Step,
+		Targets:         scanTargets,
+		OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
+		Types:           types,
+		Regions:         regions,
+		MinSizeGiB:      snapshotListMinSizeGiB,
+		AccountProgress: scanBar,
+		Workers:         snapshotListWorkers,
 	})
+	// Finish before the next status line so interactive redraws end with a newline.
+	if scanBar != nil {
+		scanBar.Finish()
+	}
 	if err != nil {
 		return err
 	}
+	result.Summary.SkippedAccounts = mergeSnapshotSkippedAccounts(skippedAccounts, result.Summary.SkippedAccounts)
 
+	// Cost Explorer runs on payer credentials and only needs account IDs from
+	// costTargets (not scanTargets), so skipped assume-role accounts stay in scope.
 	status.Step("Fetching billed snapshot costs from Cost Explorer…")
-	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, targets, awsFlags.CredentialsFile, time.Now().UTC())
+	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, costTargets, awsFlags.CredentialsFile, time.Now().UTC(), snapshotListWorkers)
 	if err != nil {
 		status.Step(fmt.Sprintf("Warning: billed snapshot costs unavailable: %v", err))
 	} else {
@@ -231,4 +263,20 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 
 	return output.WriteSnapshotListResult(out, format, result)
+}
+
+func mergeSnapshotSkippedAccounts(prepare, scan []snapshot.AccountWarning) []snapshot.AccountWarning {
+	if len(prepare) == 0 && len(scan) == 0 {
+		return nil
+	}
+	out := make([]snapshot.AccountWarning, 0, len(prepare)+len(scan))
+	out = append(out, prepare...)
+	out = append(out, scan...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AccountID != out[j].AccountID {
+			return out[i].AccountID < out[j].AccountID
+		}
+		return out[i].Message < out[j].Message
+	})
+	return out
 }

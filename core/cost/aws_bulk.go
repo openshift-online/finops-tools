@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
+	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
 const (
@@ -72,22 +73,36 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 		return fetchAWSNetAmortizedBulkByService(ctx, ce, q, targets, plan, dr)
 	case SplitByAccount, SplitByNone:
 		ids := sortedAccountIDs(plan.accountIDs)
+		batches := batchStrings(ids, linkedAccountFilterBatchSize)
+		type accountBatchResult struct {
+			breakdown []CostBreakdownItem
+			currency  string
+		}
+		batchResults := make([]accountBatchResult, len(batches))
+		err := parallel.ForEach(ctx, q.Workers, len(batches), func(ctx context.Context, i int) error {
+			filter := linkedAccountsFilter(batches[i])
+			_, cur, batchBreakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", SplitByAccount, filter)
+			if err != nil {
+				return err
+			}
+			batchResults[i] = accountBatchResult{breakdown: batchBreakdown, currency: cur}
+			return nil
+		})
+		if err != nil {
+			return CostResult{}, err
+		}
+
 		var (
 			breakdown []CostBreakdownItem
 			currency  string
 		)
-		for _, batch := range batchStrings(ids, linkedAccountFilterBatchSize) {
-			filter := linkedAccountsFilter(batch)
-			_, cur, batchBreakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", SplitByAccount, filter)
-			if err != nil {
-				return CostResult{}, err
-			}
+		for _, br := range batchResults {
 			if currency == "" {
-				currency = cur
-			} else if cur != "" && cur != currency {
-				return CostResult{}, fmt.Errorf("cannot merge account batches with different currencies (%s vs %s)", currency, cur)
+				currency = br.currency
+			} else if br.currency != "" && br.currency != currency {
+				return CostResult{}, fmt.Errorf("cannot merge account batches with different currencies (%s vs %s)", currency, br.currency)
 			}
-			breakdown = append(breakdown, batchBreakdown...)
+			breakdown = append(breakdown, br.breakdown...)
 		}
 		breakdown = filterBreakdownAccounts(breakdown, plan.accountIDs)
 		breakdown = applyTargetDisplayNames(breakdown, displayNames)
@@ -116,22 +131,39 @@ func fetchAWSNetAmortizedBulkByService(
 	dr DateRange,
 ) (CostResult, error) {
 	ids := sortedAccountIDs(plan.accountIDs)
-	byService := make(map[string]float64)
-	currency := "USD"
-
-	for _, batch := range batchStrings(ids, linkedAccountFilterBatchSize) {
-		filter := linkedAccountsFilter(batch)
+	batches := batchStrings(ids, linkedAccountFilterBatchSize)
+	type serviceBatchResult struct {
+		byService map[string]float64
+		currency  string
+	}
+	batchResults := make([]serviceBatchResult, len(batches))
+	err := parallel.ForEach(ctx, q.Workers, len(batches), func(ctx context.Context, i int) error {
+		filter := linkedAccountsFilter(batches[i])
 		_, cur, breakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", SplitByService, filter)
 		if err != nil {
-			return CostResult{}, err
+			return err
 		}
-		if currency == "USD" && cur != "" {
-			currency = cur
-		} else if cur != "" && cur != currency {
-			return CostResult{}, fmt.Errorf("cannot merge service batches with different currencies (%s vs %s)", currency, cur)
-		}
+		byService := make(map[string]float64)
 		for _, item := range breakdown {
 			byService[item.Service] += item.Amount
+		}
+		batchResults[i] = serviceBatchResult{byService: byService, currency: cur}
+		return nil
+	})
+	if err != nil {
+		return CostResult{}, err
+	}
+
+	byService := make(map[string]float64)
+	var currency string
+	for _, br := range batchResults {
+		if currency == "" {
+			currency = br.currency
+		} else if br.currency != "" && br.currency != currency {
+			return CostResult{}, fmt.Errorf("cannot merge service batches with different currencies (%s vs %s)", currency, br.currency)
+		}
+		for service, amt := range br.byService {
+			byService[service] += amt
 		}
 	}
 
@@ -174,21 +206,34 @@ func fetchAWSDailyNetAmortizedBulk(ctx context.Context, q CostQuery, targets []A
 	ce := opts.NewCostExplorer(cfg)
 
 	ids := sortedAccountIDs(plan.accountIDs)
-	series := make([][]DailyCostItem, 0, (len(ids)+linkedAccountFilterBatchSize-1)/linkedAccountFilterBatchSize)
-	var currency string
-
-	for _, batch := range batchStrings(ids, linkedAccountFilterBatchSize) {
-		filter := linkedAccountsFilter(batch)
+	batches := batchStrings(ids, linkedAccountFilterBatchSize)
+	type dailyBatchResult struct {
+		daily    []DailyCostItem
+		currency string
+	}
+	batchResults := make([]dailyBatchResult, len(batches))
+	err := parallel.ForEach(ctx, q.Workers, len(batches), func(ctx context.Context, i int) error {
+		filter := linkedAccountsFilter(batches[i])
 		daily, cur, err := sumNetAmortizedDaily(ctx, ce, dr, filter)
 		if err != nil {
-			return nil, "", err
+			return err
 		}
+		batchResults[i] = dailyBatchResult{daily: daily, currency: cur}
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	series := make([][]DailyCostItem, len(batchResults))
+	var currency string
+	for i, br := range batchResults {
 		if currency == "" {
-			currency = cur
-		} else if cur != "" && cur != currency {
-			return nil, "", fmt.Errorf("cannot merge daily batches with different currencies (%s vs %s)", currency, cur)
+			currency = br.currency
+		} else if br.currency != "" && br.currency != currency {
+			return nil, "", fmt.Errorf("cannot merge daily batches with different currencies (%s vs %s)", currency, br.currency)
 		}
-		series = append(series, daily)
+		series[i] = br.daily
 	}
 
 	return MergeDaily(series), currency, nil

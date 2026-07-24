@@ -24,7 +24,7 @@ func TestFetchSnapshotBilledCostsDeduplicatesAccountsPerGroup(t *testing.T) {
 	}
 
 	var fetchedAccountIDs []string
-	fetchBilledSnapshotCostsForGroup = func(_ context.Context, _ snapshot.CostExplorerAPI, accountIDs []string, _ time.Time) ([]snapshot.AccountBilledSnapshotCosts, error) {
+	fetchBilledSnapshotCostsForGroup = func(_ context.Context, _ snapshot.CostExplorerAPI, accountIDs []string, _ time.Time, _ int) ([]snapshot.AccountBilledSnapshotCosts, error) {
 		fetchedAccountIDs = append(fetchedAccountIDs, accountIDs...)
 		out := make([]snapshot.AccountBilledSnapshotCosts, 0, len(accountIDs))
 		for _, accountID := range accountIDs {
@@ -40,7 +40,7 @@ func TestFetchSnapshotBilledCostsDeduplicatesAccountsPerGroup(t *testing.T) {
 		{AccountID: "222222222222"},
 	}
 
-	got, err := fetchSnapshotBilledCostsImpl(context.Background(), configstore.File{}, targets, "", time.Now().UTC())
+	got, err := fetchSnapshotBilledCostsImpl(context.Background(), configstore.File{}, targets, "", time.Now().UTC(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

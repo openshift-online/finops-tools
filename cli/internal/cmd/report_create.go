@@ -16,6 +16,7 @@ import (
 var (
 	reportGenerateAccount         string
 	reportGenerateAccountAliases  string
+	reportGenerateAllLinked       bool
 	reportGenerateFormat          string
 	reportGenerateOU              string
 	reportGenerateOUDirect        bool
@@ -27,6 +28,7 @@ var (
 	reportGenerateSkipOrgCache    bool
 	reportGenerateRefreshOrgCache bool
 	reportCreateSnowflakeAlias    string
+	reportGenerateWorkers         int
 )
 
 var reportCreateCmd = &cobra.Command{
@@ -40,6 +42,7 @@ Example:
   finops report create costs --account-alias rh-control -o costs.html
   finops report create costs --account 333333333333 --payer rhc -o member.html
   finops report create costs --ou ou-abcd-1234 --payer rh-control -o ou-costs.html
+  finops report create costs --payer rh-control --all-linked -o all-members.html
   finops report create costs --payer rh-control --tag-key env --tag-value prod -o prod.html
   finops report create hcp-hierarchy --snowflake-alias rhsandbox -o hcp-hierarchy.html`,
 	Args: cobra.ExactArgs(1),
@@ -51,7 +54,7 @@ Example:
 		sel, err := parseCostTargetSelector(
 			reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 			reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
-			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache, reportGenerateAllLinked,
 		)
 		if err != nil {
 			return err
@@ -65,6 +68,9 @@ Example:
 		if _, err := reportpkg.ParseFormat(reportGenerateFormat); err != nil {
 			return err
 		}
+		if err := validateWorkers(reportGenerateWorkers); err != nil {
+			return err
+		}
 		return validateOrgCacheFlags(reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache)
 	},
 	RunE: runReportCreate,
@@ -75,6 +81,7 @@ func init() {
 	bindAWSTargetFlags(reportCreateCmd, awsTargetFlagRefs{
 		Account:         &reportGenerateAccount,
 		AccountAliases:  &reportGenerateAccountAliases,
+		AllLinked:       &reportGenerateAllLinked,
 		OU:              &reportGenerateOU,
 		OUDirect:        &reportGenerateOUDirect,
 		Payer:           &reportGeneratePayer,
@@ -87,6 +94,7 @@ func init() {
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
+	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
 	addPeriodFlags(reportCreateCmd)
 }
 
@@ -121,7 +129,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	sel, err := parseCostTargetSelector(
 		reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 		reportGenerateTagKey, reportGenerateTagValue, reportGenerateOUDirect,
-		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache, reportGenerateAllLinked,
 	)
 	if err != nil {
 		return err
@@ -157,6 +165,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		Now:            time.Now().UTC(),
 		ConfigPath:     cfgPath,
 		SnowflakeAlias: snowflakeAlias,
+		Workers:        reportGenerateWorkers,
 	}
 	if err := gen.Validate(in); err != nil {
 		return err
@@ -172,7 +181,8 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, status)
+		prepareBar := progress.NewBar(cmd.ErrOrStderr(), reportGenerateQuiet, "Preparing account configuration…", len(targets))
+		targets, err = prepareCostTargets(reportCtx, cfg, targets, awsFlags.CredentialsFile, prepareBar)
 		if err != nil {
 			return err
 		}

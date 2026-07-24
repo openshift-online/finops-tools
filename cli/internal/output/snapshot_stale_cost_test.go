@@ -26,14 +26,20 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenListedIsMostOfAccount(t *te
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
 
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want count + attributed only", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want count + attributed + account-wide billed", len(lines))
 	}
 	if lines[1].label != "Attributed cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
 	}
 	if lines[1].value != "USD 4,798.21" {
 		t.Fatalf("value = %q", lines[1].value)
+	}
+	if lines[2].label != "Billed EBS snapshot storage (account-wide, May 2026)" {
+		t.Fatalf("billed label = %q", lines[2].label)
+	}
+	if lines[2].value != "USD 4,798.21" {
+		t.Fatalf("billed value = %q", lines[2].value)
 	}
 }
 
@@ -51,14 +57,20 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenPartial(t *testing.T) {
 		},
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
 	}
 	if lines[1].label != "Attributed cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
 	}
 	if lines[1].value != "USD 1,000.00" {
 		t.Fatalf("value = %q", lines[1].value)
+	}
+	if lines[2].label != "Billed EBS snapshot storage (account-wide, May 2026)" {
+		t.Fatalf("billed label = %q", lines[2].label)
+	}
+	if lines[2].value != "USD 5,000.00" {
+		t.Fatalf("billed value = %q", lines[2].value)
 	}
 }
 
@@ -82,14 +94,20 @@ func TestBuildSnapshotSummaryLinesShowsNeutralLabelWhenMixed(t *testing.T) {
 		},
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
 	}
 	if lines[1].label != "Cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
 	}
 	if lines[1].value != "USD 5,200.00" {
 		t.Fatalf("value = %q", lines[1].value)
+	}
+	if lines[2].label != "Billed EBS snapshot storage (account-wide, May 2026)" {
+		t.Fatalf("billed label = %q", lines[2].label)
+	}
+	if lines[2].value != "USD 5,000.00" {
+		t.Fatalf("billed value = %q", lines[2].value)
 	}
 }
 

@@ -1,11 +1,17 @@
 // aws_targets.go registers shared AWS account target flags for get-cost, snapshot list, and report create.
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+
+	"github.com/openshift-online/finops-tools/core/parallel"
+	"github.com/spf13/cobra"
+)
 
 type awsTargetFlagRefs struct {
 	Account         *string
 	AccountAliases  *string
+	AllLinked       *bool
 	OU              *string
 	OUDirect        *bool
 	Payer           *string
@@ -18,9 +24,12 @@ type awsTargetFlagRefs struct {
 func bindAWSTargetFlags(cmd *cobra.Command, refs awsTargetFlagRefs) {
 	cmd.Flags().StringVar(refs.Account, "account", "", "Payer AWS account ID(s), comma-separated 12-digit IDs")
 	cmd.Flags().StringVar(refs.AccountAliases, "account-alias", "", "Configured AWS account alias(es), comma-separated")
+	if refs.AllLinked != nil {
+		cmd.Flags().BoolVar(refs.AllLinked, "all-linked", false, "Select all active member accounts in the payer's AWS Organization (requires --payer)")
+	}
 	cmd.Flags().StringVar(refs.OU, "ou", "", "AWS OU ID(s), comma-separated (requires --payer; recursive by default)")
 	cmd.Flags().BoolVar(refs.OUDirect, "ou-direct", false, "Include only accounts directly in --ou, not descendant OUs")
-	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias for --account member IDs, --ou, or --tag-key (e.g. rhc)")
+	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias for --account member IDs, --all-linked, --ou, or --tag-key (e.g. rhc)")
 	cmd.Flags().StringVar(refs.TagKey, "tag-key", "", "Select accounts by AWS Organizations tag key")
 	cmd.Flags().StringVar(refs.TagValue, "tag-value", "", "Optional tag value (omit to match any value for --tag-key)")
 	if refs.SkipOrgCache != nil {
@@ -41,4 +50,22 @@ func bindAWSAccountSelectorFlags(cmd *cobra.Command, refs awsAccountSelectorFlag
 	cmd.Flags().StringVar(refs.Payer, "payer", "", payerHelp)
 	cmd.Flags().StringVar(refs.Alias, "account-alias", "", "Registered account alias")
 	cmd.Flags().StringVar(refs.AccountID, "account-id", "", "12-digit AWS account ID")
+}
+
+// bindWorkersFlag registers --workers for bounded parallel AWS queries when multiple accounts are selected.
+// usagePrefix is prepended to the flag description (e.g. "costs template only; ").
+func bindWorkersFlag(cmd *cobra.Command, workers *int, usagePrefix string) {
+	cmd.Flags().IntVar(workers, "workers", parallel.DefaultWorkers,
+		fmt.Sprintf("%sMaximum concurrent workers for multi-account AWS queries (default %d, max %d; use 1 for sequential)",
+			usagePrefix, parallel.DefaultWorkers, parallel.MaxWorkers))
+}
+
+func validateWorkers(workers int) error {
+	if workers < 1 {
+		return fmt.Errorf("--workers must be at least 1")
+	}
+	if workers > parallel.MaxWorkers {
+		return fmt.Errorf("--workers must be at most %d", parallel.MaxWorkers)
+	}
+	return nil
 }

@@ -2,6 +2,7 @@
 package snapshot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -85,17 +86,26 @@ type AccountTarget struct {
 	DisplayName  string
 	DisplayAlias string
 	AWSConfig    aws.Config
+	// ConfigLoader obtains fresh credentials before each account scan (linked accounts).
+	ConfigLoader func(context.Context) (aws.Config, error) `json:"-"`
+}
+
+// AccountProgress reports completion of per-account snapshot scans.
+type AccountProgress interface {
+	Advance()
 }
 
 // Query describes a snapshot discovery request.
 type Query struct {
-	Targets      []AccountTarget
-	OlderThan    time.Duration
-	Types        []Kind
-	Regions      []string
-	MinSizeGiB   float64
-	Progress     func(string)
-	Now          time.Time
+	Targets         []AccountTarget
+	OlderThan       time.Duration
+	Types           []Kind
+	Regions         []string
+	MinSizeGiB      float64
+	AccountProgress AccountProgress
+	Now             time.Time
+	// Workers bounds concurrent account scans (0 = default).
+	Workers      int
 	regionLister regionLister
 	ebsLister    ebsLister
 	rdsLister    rdsLister
@@ -145,6 +155,7 @@ type Summary struct {
 	ByKind                  []KindSummary    `json:"by_kind"`
 	ByAccount               []AccountSummary `json:"by_account"`
 	SkippedRegions          []RegionWarning  `json:"skipped_regions,omitempty"`
+	SkippedAccounts         []AccountWarning `json:"skipped_accounts,omitempty"`
 	CostDisclaimer          string           `json:"cost_disclaimer"`
 }
 

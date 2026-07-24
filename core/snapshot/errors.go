@@ -14,6 +14,36 @@ type RegionWarning struct {
 	Message   string `json:"message"`
 }
 
+// AccountWarning records an account that could not be prepared for scanning.
+type AccountWarning struct {
+	AccountID    string `json:"account_id"`
+	DisplayAlias string `json:"display_alias,omitempty"`
+	Message      string `json:"message"`
+}
+
+func isExpiredCredentialError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, sub := range []string{
+		"request has expired",
+		"expiredtoken",
+		"security token included in the request is expired",
+		"token has expired",
+		// AuthFailure often means the temporary session is no longer valid
+		// (not an IAM deny, which is UnauthorizedOperation).
+		"authfailure",
+		"not able to validate the provided access credentials",
+		"invalidclienttokenid",
+	} {
+		if strings.Contains(msg, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 func isSkippableRegionError(err error) bool {
 	if err == nil {
 		return false
@@ -61,4 +91,22 @@ func regionErrorMessage(err error) string {
 		}
 	}
 	return msg
+}
+
+// collapseRegionWarnings merges identical per-region failures into one row when every region failed.
+func collapseRegionWarnings(accountID string, regions []string, warnings []RegionWarning) []RegionWarning {
+	if len(regions) <= 1 || len(warnings) != len(regions) {
+		return warnings
+	}
+	msg := warnings[0].Message
+	for _, warning := range warnings[1:] {
+		if warning.Message != msg {
+			return warnings
+		}
+	}
+	return []RegionWarning{{
+		AccountID: accountID,
+		Region:    "all",
+		Message:   msg,
+	}}
 }

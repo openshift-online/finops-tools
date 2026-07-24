@@ -16,6 +16,7 @@ import (
 var (
 	costGetAccount         string
 	costGetAccountAliases  string
+	costGetAllLinked       bool
 	costGetFormat          string
 	costGetOutput          string
 	costGetOU              string
@@ -28,6 +29,7 @@ var (
 	costGetQuiet           bool
 	costGetSkipOrgCache    bool
 	costGetRefreshOrgCache bool
+	costGetWorkers         int
 )
 
 var accountGetCostCmd = &cobra.Command{
@@ -43,9 +45,11 @@ Period (default: last 30 calendar days, or defaults.cost.* in config):
 For linked accounts, credentials are obtained from the registered payer account.
 Use --payer with --account to query a member account that is not registered (the payer alias must be registered).
 Use --payer with --tag-key to query all org accounts matching an Organizations account tag.
+Use --payer with --all-linked to query all active member accounts in the payer's AWS Organization.
 
 Examples:
   finops account get-cost --account-alias rh-control
+  finops account get-cost --payer rh-control --all-linked
   finops account get-cost --payer rh-control --tag-key organization
   finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
 
@@ -64,7 +68,7 @@ Only AWS is supported today; GCP will be added later.`,
 		sel, err := parseCostTargetSelector(
 			costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
 			costGetTagKey, costGetTagValue, costGetOUDirect,
-			costGetSkipOrgCache, costGetRefreshOrgCache,
+			costGetSkipOrgCache, costGetRefreshOrgCache, costGetAllLinked,
 		)
 		if err != nil {
 			return err
@@ -84,6 +88,9 @@ Only AWS is supported today; GCP will be added later.`,
 		if _, err := cost.ParseSplitBy(costGetSplitBy); err != nil {
 			return err
 		}
+		if err := validateWorkers(costGetWorkers); err != nil {
+			return err
+		}
 		return validateOrgCacheFlags(costGetSkipOrgCache, costGetRefreshOrgCache)
 	},
 	RunE: runAccountGetCost,
@@ -94,6 +101,7 @@ func init() {
 	bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{
 		Account:         &costGetAccount,
 		AccountAliases:  &costGetAccountAliases,
+		AllLinked:       &costGetAllLinked,
 		OU:              &costGetOU,
 		OUDirect:        &costGetOUDirect,
 		Payer:           &costGetPayer,
@@ -110,6 +118,7 @@ func init() {
 	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
 		"Split results by dimension (supported: service, account)")
 	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
+	bindWorkersFlag(accountGetCostCmd, &costGetWorkers, "")
 	addPeriodFlags(accountGetCostCmd)
 }
 
@@ -148,7 +157,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
 		costGetTagKey, costGetTagValue, costGetOUDirect,
-		costGetSkipOrgCache, costGetRefreshOrgCache,
+		costGetSkipOrgCache, costGetRefreshOrgCache, costGetAllLinked,
 	)
 	if err != nil {
 		return err
@@ -187,7 +196,8 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		if len(targets) <= 1 {
 			status.Step("Preparing account configuration…")
 		}
-		targets, err = prepareCostTargets(awsCtx, cfg, targets, awsFlags.CredentialsFile, status)
+		prepareBar := progress.NewBar(cmd.ErrOrStderr(), costGetQuiet, "Preparing account configuration…", len(targets))
+		targets, err = prepareCostTargets(awsCtx, cfg, targets, awsFlags.CredentialsFile, prepareBar)
 		if err != nil {
 			return err
 		}
@@ -208,6 +218,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		Range:    dateRange,
 		SplitBy:  splitBy,
 		Progress: status,
+		Workers:  costGetWorkers,
 	}
 	if provider == cost.ProviderAWS && splitBy == cost.SplitByAccount {
 		costQuery.AWSFetch = &cost.AWSFetchOptions{

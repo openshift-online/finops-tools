@@ -25,6 +25,7 @@ type GenerateInput struct {
 	Now        time.Time
 	ConfigPath     string
 	SnowflakeAlias string
+	Workers        int
 }
 
 // SnowflakeMartOpener opens a Snowflake connection for mart-backed reports.

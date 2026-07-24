@@ -9,6 +9,7 @@ import (
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
+	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -96,15 +97,15 @@ func TestRunSnapshotListUsesFetchHook(t *testing.T) {
 	ensureSnapshotCredentials = func(_ *cobra.Command, _ configstore.File, _ []cost.AccountTarget, _, _, _ string) error {
 		return nil
 	}
-	fetchSnapshotBilledCosts = func(_ context.Context, _ configstore.File, _ []cost.AccountTarget, _ string, _ time.Time) ([]snapshot.AccountBilledSnapshotCosts, error) {
+	fetchSnapshotBilledCosts = func(_ context.Context, _ configstore.File, _ []cost.AccountTarget, _ string, _ time.Time, _ int) ([]snapshot.AccountBilledSnapshotCosts, error) {
 		return nil, nil
 	}
-	prepareSnapshotTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ costStepper) ([]snapshot.AccountTarget, error) {
+	prepareSnapshotTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ int, _ *progress.Bar) ([]snapshot.AccountTarget, []snapshot.AccountWarning, error) {
 		out := make([]snapshot.AccountTarget, 0, len(targets))
 		for _, target := range targets {
 			out = append(out, snapshot.AccountTarget{AccountID: target.AccountID})
 		}
-		return out, nil
+		return out, nil, nil
 	}
 
 	awsFlags.ConfigPath = path

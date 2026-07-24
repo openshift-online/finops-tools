@@ -17,12 +17,16 @@ var (
 	fetchBilledSnapshotCostsForGroup = snapshot.FetchBilledSnapshotCosts
 )
 
+// fetchSnapshotBilledCostsImpl queries Cost Explorer using payer credentials from
+// costTargets. It intentionally takes cost.AccountTarget (not scan/snapshot targets):
+// CE is payer-scoped and does not need per-member assumed-role configs.
 func fetchSnapshotBilledCostsImpl(
 	ctx context.Context,
 	store configstore.File,
-	targets []cost.AccountTarget,
+	costTargets []cost.AccountTarget,
 	credentialsFile string,
 	now time.Time,
+	workers int,
 ) ([]snapshot.AccountBilledSnapshotCosts, error) {
 	type group struct {
 		accountIDs []string
@@ -33,7 +37,7 @@ func fetchSnapshotBilledCostsImpl(
 	accountOrder := make([]string, 0)
 	seenAccount := make(map[string]struct{})
 
-	for _, target := range targets {
+	for _, target := range costTargets {
 		accountID := strings.TrimSpace(target.AccountID)
 		if accountID == "" {
 			continue
@@ -66,6 +70,7 @@ func fetchSnapshotBilledCostsImpl(
 			snapshot.NewCostExplorerClient(awsCfg),
 			g.accountIDs,
 			now,
+			workers,
 		)
 		if err != nil {
 			return nil, err

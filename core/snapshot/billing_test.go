@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -52,14 +53,14 @@ func TestFetchBilledSnapshotCosts(t *testing.T) {
 	ce := &fakeCostExplorer{
 		pages: [][]types.Group{
 			{{
-				Keys: []string{"EBS:SnapshotUsage"},
+				Keys: []string{"111111111111", "EBS:SnapshotUsage"},
 				Metrics: map[string]types.MetricValue{
-					"UnblendedCost":  {Amount: aws.String("26.66"), Unit: aws.String("USD")},
-					"UsageQuantity":  {Amount: aws.String("701.51"), Unit: aws.String("GB-Month")},
+					"UnblendedCost": {Amount: aws.String("26.66"), Unit: aws.String("USD")},
+					"UsageQuantity": {Amount: aws.String("701.51"), Unit: aws.String("GB-Month")},
 				},
 			}},
 			{{
-				Keys: []string{"RDS:ChargedBackupUsage"},
+				Keys: []string{"111111111111", "RDS:ChargedBackupUsage"},
 				Metrics: map[string]types.MetricValue{
 					"UnblendedCost": {Amount: aws.String("3189.99"), Unit: aws.String("USD")},
 					"UsageQuantity": {Amount: aws.String("44182"), Unit: aws.String("GB-Month")},
@@ -68,7 +69,7 @@ func TestFetchBilledSnapshotCosts(t *testing.T) {
 		},
 	}
 	now := time.Date(2026, 6, 17, 0, 0, 0, 0, time.UTC)
-	got, err := FetchBilledSnapshotCosts(context.Background(), ce, []string{"111111111111"}, now)
+	got, err := FetchBilledSnapshotCosts(context.Background(), ce, []string{"111111111111"}, now, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestFetchBilledSnapshotCostsDeduplicatesAccountIDs(t *testing.T) {
 	ce := &fakeCostExplorer{
 		pages: [][]types.Group{{
 			{
-				Keys: []string{"EBS:SnapshotUsage"},
+				Keys: []string{"111111111111", "EBS:SnapshotUsage"},
 				Metrics: map[string]types.MetricValue{
 					"UnblendedCost": {Amount: aws.String("10.00"), Unit: aws.String("USD")},
 				},
@@ -103,6 +104,7 @@ func TestFetchBilledSnapshotCostsDeduplicatesAccountIDs(t *testing.T) {
 		ce,
 		[]string{"111111111111", " 111111111111 ", "111111111111"},
 		now,
+		1,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -115,5 +117,34 @@ func TestFetchBilledSnapshotCostsDeduplicatesAccountIDs(t *testing.T) {
 	}
 	if ce.callCount != 1 {
 		t.Fatalf("cost explorer calls = %d, want 1", ce.callCount)
+	}
+}
+
+func TestFetchBilledSnapshotCostsBatchesAccounts(t *testing.T) {
+	ce := &fakeCostExplorer{
+		pages: [][]types.Group{{
+			{
+				Keys: []string{"111111111111", "EBS:SnapshotUsage"},
+				Metrics: map[string]types.MetricValue{
+					"UnblendedCost": {Amount: aws.String("1.00"), Unit: aws.String("USD")},
+				},
+			},
+		}},
+	}
+	now := time.Date(2026, 6, 17, 0, 0, 0, 0, time.UTC)
+
+	ids := make([]string, 0, 150)
+	for i := 0; i < 150; i++ {
+		ids = append(ids, fmt.Sprintf("%012d", 111111111111+i))
+	}
+	got, err := FetchBilledSnapshotCosts(context.Background(), ce, ids, now, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 150 {
+		t.Fatalf("rows = %d, want 150", len(got))
+	}
+	if ce.callCount != 2 {
+		t.Fatalf("cost explorer calls = %d, want 2", ce.callCount)
 	}
 }
