@@ -154,7 +154,7 @@ type CostBreakdownItem struct {
 	AccountName string  `json:"account_name,omitempty"`
 	OUID        string  `json:"ou_id,omitempty"`
 	OUName      string  `json:"ou_name,omitempty"`
-	OUDepth     int     `json:"ou_depth,omitempty"`
+	OUDepth     int     `json:"ou_depth"`
 	Amount      float64 `json:"amount"`
 }
 
