@@ -23,7 +23,7 @@ var (
 	costGetOUDirect        bool
 	costGetPayer           string
 	costGetProvider        string
-	costGetSplitBy         string
+	costGetGroupBy         string
 	costGetTagKey          string
 	costGetTagValue        string
 	costGetQuiet           bool
@@ -51,7 +51,7 @@ Examples:
   finops account get-cost --account-alias rh-control
   finops account get-cost --payer rh-control --all-linked
   finops account get-cost --payer rh-control --tag-key organization
-  finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
+  finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --group-by service
 
 Use --ou with --payer to query all accounts in an AWS Organizational Unit (recursive by default).
 Add --ou-direct to include only accounts directly in the OU, not descendant OUs.
@@ -85,7 +85,7 @@ Only AWS is supported today; GCP will be added later.`,
 		if _, err := cost.ParseProvider(costGetProvider); err != nil {
 			return err
 		}
-		if _, err := cost.ParseSplitBy(costGetSplitBy); err != nil {
+		if _, err := cost.ParseGroupBy(costGetGroupBy); err != nil {
 			return err
 		}
 		if err := validateWorkers(costGetWorkers); err != nil {
@@ -115,8 +115,8 @@ func init() {
 	addOutputFlag(accountGetCostCmd, &costGetOutput)
 	accountGetCostCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
 		"Cloud provider: aws or gcp")
-	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
-		"Split results by dimension (supported: service, account)")
+	accountGetCostCmd.Flags().StringVar(&costGetGroupBy, "group-by", "",
+		"Group results by dimension (supported: service, account)")
 	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(accountGetCostCmd, &costGetWorkers, "")
 	addPeriodFlags(accountGetCostCmd)
@@ -131,7 +131,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	splitBy, err := cost.ParseSplitBy(costGetSplitBy)
+	groupBy, err := cost.ParseGroupBy(costGetGroupBy)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, splitBy))
+		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, groupBy))
 	}
 
 	if provider == cost.ProviderAWS {
@@ -216,11 +216,11 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		Provider: provider,
 		Accounts: targets,
 		Range:    dateRange,
-		SplitBy:  splitBy,
+		GroupBy:  groupBy,
 		Progress: status,
 		Workers:  costGetWorkers,
 	}
-	if provider == cost.ProviderAWS && splitBy == cost.SplitByAccount {
+	if provider == cost.ProviderAWS && groupBy == cost.GroupByAccount {
 		costQuery.AWSFetch = &cost.AWSFetchOptions{
 			ResolveAccountNames: coreaccount.ResolveAccountNames,
 		}

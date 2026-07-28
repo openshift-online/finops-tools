@@ -66,20 +66,20 @@ func NewCostsReportView(r corereport.CostsReport) CostsReportView {
 		Metric:         r.Metric,
 		Total:          r.Total,
 		TotalFormatted: format.FormatMoney(r.Total, r.Currency),
-		ByAccount:      breakdownRows(r.ByAccount, cost.SplitByAccount, r.Total, r.Currency),
-		ByService:      breakdownRows(r.ByService, cost.SplitByService, r.Total, r.Currency),
+		ByAccount:      breakdownRows(r.ByAccount, cost.GroupByAccount, r.Total, r.Currency),
+		ByService:      breakdownRows(r.ByService, cost.GroupByService, r.Total, r.Currency),
 		Daily:          r.Daily,
 	}
 	view.DailyChartSVG = template.HTML(dailyChartSVG(view.Daily, view.Currency))
 	return view
 }
 
-func breakdownRows(items []cost.CostBreakdownItem, split cost.SplitBy, total float64, currency string) []BreakdownRowView {
+func breakdownRows(items []cost.CostBreakdownItem, groupBy cost.GroupBy, total float64, currency string) []BreakdownRowView {
 	rows := make([]BreakdownRowView, 0, len(items))
 	for _, item := range items {
 		pct := corereport.PercentOfTotal(item.Amount, total)
 		rows = append(rows, BreakdownRowView{
-			Label:            item.DisplayLabel(split),
+			Label:            item.DisplayLabel(groupBy),
 			Amount:           item.Amount,
 			AmountFormatted:  format.FormatMoney(item.Amount, currency),
 			Percent:          pct,

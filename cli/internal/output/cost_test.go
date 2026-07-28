@@ -75,7 +75,7 @@ func TestWriteCostResultCSV(t *testing.T) {
 
 func TestWriteCostResultPrettyPrintWithBreakdown(t *testing.T) {
 	r := fixtureResult()
-	r.SplitBy = cost.SplitByService
+	r.GroupBy = cost.GroupByService
 	r.Breakdown = []cost.CostBreakdownItem{
 		{Service: "Amazon EC2", Amount: 100},
 		{Service: "Amazon S3", Amount: 10},
