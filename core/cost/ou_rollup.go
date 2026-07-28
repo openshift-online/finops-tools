@@ -102,6 +102,15 @@ func RollupBreakdownByOUTree(
 		children[pid] = append(children[pid], n.ID)
 	}
 
+	// parents may reference an OU missing from hierarchy (caller inconsistency).
+	// Fold those amounts into unknown so cost is never silently dropped.
+	for ouID, amount := range direct {
+		if _, ok := byID[ouID]; !ok {
+			unknownAmount += amount
+			delete(direct, ouID)
+		}
+	}
+
 	subtree := make(map[string]float64, len(hierarchy))
 	var compute func(id string) float64
 	compute = func(id string) float64 {

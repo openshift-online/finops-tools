@@ -75,6 +75,42 @@ func TestRollupBreakdownByOUTree(t *testing.T) {
 	}
 }
 
+func TestRollupBreakdownByOUTreeOrphanParent(t *testing.T) {
+	breakdown := []CostBreakdownItem{
+		{Account: "111111111111", Amount: 10},
+		{Account: "222222222222", Amount: 3}, // parent OU missing from hierarchy
+	}
+	parents := map[string]OUBucket{
+		"111111111111": {ID: "ou-root-prod0000", Name: "Production"},
+		"222222222222": {ID: "ou-missing-xxxxx", Name: "Gone"},
+	}
+	hierarchy := []OUHierarchyNode{
+		{ID: "r-root", Name: "Root", Depth: 0},
+		{ID: "ou-root-prod0000", Name: "Production", ParentID: "r-root", Depth: 1},
+	}
+
+	got := RollupBreakdownByOUTree(breakdown, parents, hierarchy)
+	byID := map[string]CostBreakdownItem{}
+	for _, row := range got {
+		byID[row.OUID] = row
+	}
+	if byID["r-root"].Amount != 10 {
+		t.Fatalf("root = %+v", byID["r-root"])
+	}
+	if byID[unknownOUBucketID].Amount != 3 {
+		t.Fatalf("unknown = %+v", byID[unknownOUBucketID])
+	}
+	var total float64
+	for _, row := range got {
+		if row.OUDepth == 0 || row.OUID == unknownOUBucketID {
+			total += row.Amount
+		}
+	}
+	if total != 13 {
+		t.Fatalf("report total = %v, want 13; got %+v", total, got)
+	}
+}
+
 func TestParseSplitByOU(t *testing.T) {
 	s, err := ParseSplitBy("ou")
 	if err != nil || s != SplitByOU {
