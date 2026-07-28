@@ -584,7 +584,7 @@ func mapAccountsToChildOUsWithClient(ctx context.Context, client OrganizationsAP
 		return nil, err
 	}
 	for _, child := range childOUs {
-		childBucket := AccountOUBucket{ID: child.ID, Name: child.Name}
+		childBucket := AccountOUBucket(child)
 		accounts, err := listAccountsUnderParentWithClient(ctx, client, child.ID, ListAccountsInOUOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("list accounts under OU %s: %w", child.ID, err)
