@@ -42,6 +42,7 @@ type CostsReportView struct {
 	TotalFormatted  string
 	ByAccount       []BreakdownRowView
 	ByService       []BreakdownRowView
+	ByOU            []BreakdownRowView
 	Daily           []cost.DailyCostItem
 	DailyChartSVG   template.HTML
 }
@@ -68,6 +69,7 @@ func NewCostsReportView(r corereport.CostsReport) CostsReportView {
 		TotalFormatted: format.FormatMoney(r.Total, r.Currency),
 		ByAccount:      breakdownRows(r.ByAccount, cost.SplitByAccount, r.Total, r.Currency),
 		ByService:      breakdownRows(r.ByService, cost.SplitByService, r.Total, r.Currency),
+		ByOU:           breakdownRows(r.ByOU, cost.SplitByOU, r.Total, r.Currency),
 		Daily:          r.Daily,
 	}
 	view.DailyChartSVG = template.HTML(dailyChartSVG(view.Daily, view.Currency))
@@ -78,8 +80,12 @@ func breakdownRows(items []cost.CostBreakdownItem, split cost.SplitBy, total flo
 	rows := make([]BreakdownRowView, 0, len(items))
 	for _, item := range items {
 		pct := corereport.PercentOfTotal(item.Amount, total)
+		label := item.DisplayLabel(split)
+		if split == cost.SplitByOU && item.OUDepth > 0 {
+			label = strings.Repeat("  ", item.OUDepth) + label
+		}
 		rows = append(rows, BreakdownRowView{
-			Label:            item.DisplayLabel(split),
+			Label:            label,
 			Amount:           item.Amount,
 			AmountFormatted:  format.FormatMoney(item.Amount, currency),
 			Percent:          pct,

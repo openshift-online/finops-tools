@@ -17,15 +17,16 @@ type Stepper interface {
 
 // GenerateInput is shared context for building and rendering a report template.
 type GenerateInput struct {
-	Format     string
-	Out        io.Writer
-	Targets    []cost.AccountTarget
-	Range      cost.DateRange
-	Progress   Stepper
-	Now        time.Time
-	ConfigPath     string
-	SnowflakeAlias string
-	Workers        int
+	Format           string
+	Out              io.Writer
+	Targets          []cost.AccountTarget
+	Range            cost.DateRange
+	Progress         Stepper
+	Now              time.Time
+	ConfigPath       string
+	SnowflakeAlias   string
+	Workers          int
+	SelectionRootID  string
 }
 
 // SnowflakeMartOpener opens a Snowflake connection for mart-backed reports.
@@ -68,7 +69,7 @@ var generators = map[string]Generator{
 type AccountTargetMode int
 
 const (
-	// AccountTargetsRequired needs --account/--account-alias, --ou, or --tag-key.
+	// AccountTargetsRequired needs --account-id/--account-alias, --ou, --tag, or --payer.
 	AccountTargetsRequired AccountTargetMode = iota
 	// AccountTargetsSnowflake uses --snowflake-alias, not AWS targets.
 	AccountTargetsSnowflake

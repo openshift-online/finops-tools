@@ -11,27 +11,19 @@ import (
 type awsTargetFlagRefs struct {
 	Account         *string
 	AccountAliases  *string
-	AllLinked       *bool
 	OU              *string
-	OUDirect        *bool
 	Payer           *string
-	TagKey          *string
-	TagValue        *string
+	Tag             *string
 	SkipOrgCache    *bool
 	RefreshOrgCache *bool
 }
 
 func bindAWSTargetFlags(cmd *cobra.Command, refs awsTargetFlagRefs) {
-	cmd.Flags().StringVar(refs.Account, "account", "", "Payer AWS account ID(s), comma-separated 12-digit IDs")
+	cmd.Flags().StringVar(refs.Account, "account-id", "", "Provider-native AWS account ID(s), comma-separated 12-digit IDs")
 	cmd.Flags().StringVar(refs.AccountAliases, "account-alias", "", "Configured AWS account alias(es), comma-separated")
-	if refs.AllLinked != nil {
-		cmd.Flags().BoolVar(refs.AllLinked, "all-linked", false, "Select all active member accounts in the payer's AWS Organization (requires --payer)")
-	}
-	cmd.Flags().StringVar(refs.OU, "ou", "", "AWS OU ID(s), comma-separated (requires --payer; recursive by default)")
-	cmd.Flags().BoolVar(refs.OUDirect, "ou-direct", false, "Include only accounts directly in --ou, not descendant OUs")
-	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias for --account member IDs, --all-linked, --ou, or --tag-key (e.g. rhc)")
-	cmd.Flags().StringVar(refs.TagKey, "tag-key", "", "Select accounts by AWS Organizations tag key")
-	cmd.Flags().StringVar(refs.TagValue, "tag-value", "", "Optional tag value (omit to match any value for --tag-key)")
+	cmd.Flags().StringVar(refs.OU, "ou", "", "AWS OU or org-root ID(s), comma-separated (requires --payer). Scope per ID: bare=subtree, /=direct accounts, /*=one child-OU level (quote in shells), /**=subtree")
+	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias: alone selects all org members; also required with --ou/--tag or unregistered --account-id values")
+	cmd.Flags().StringVar(refs.Tag, "tag", "", "Select accounts by Organizations tag: KEY or KEY=VALUE (requires --payer)")
 	if refs.SkipOrgCache != nil {
 		cmd.Flags().BoolVar(refs.SkipOrgCache, "skip-org-cache", false, "Bypass cached organization account/tag data (always fetch live from AWS)")
 	}

@@ -16,7 +16,7 @@ Use only obviously fake IDs (repeated digits or AWS-doc-style sequences):
 | Payer / management | `123456789012` |
 | Second payer | `987654321098` |
 | Linked / member | `111111111111`, `222222222222` |
-| Unregistered member (cost/report `--account` + `--payer`) | `333333333333` |
+| Unregistered member (cost/report `--account-id` + `--payer`) | `333333333333` |
 | Unknown / error paths | `999999999999` |
 
 Do not invent new “random-looking” 12-digit numbers (e.g. `710019948333`) — they may be real accounts.

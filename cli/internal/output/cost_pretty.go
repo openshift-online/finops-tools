@@ -78,6 +78,14 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 	}
 
 	maxAmount := r.Amount
+	if r.SplitBy == cost.SplitByOU {
+		maxAmount = 0
+		for _, item := range r.Breakdown {
+			if item.Amount > maxAmount {
+				maxAmount = item.Amount
+			}
+		}
+	}
 	if maxAmount <= 0 && len(r.Breakdown) > 0 {
 		maxAmount = r.Breakdown[0].Amount
 	}
@@ -113,8 +121,12 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 		if s.enabled && i == 0 {
 			amountStr = s.bold(amountStr)
 		}
+		label := item.DisplayLabel(r.SplitBy)
+		if r.SplitBy == cost.SplitByOU && item.OUDepth > 0 {
+			label = strings.Repeat("  ", item.OUDepth) + label
+		}
 		table.Append([]string{
-			truncateLabel(item.DisplayLabel(r.SplitBy)),
+			truncateLabel(label),
 			amountStr,
 			fmt.Sprintf("%.1f%%", share),
 			renderBar(s, item.Amount/maxAmount, i),
@@ -179,6 +191,8 @@ func breakdownTitles(splitBy cost.SplitBy) (title, keyHeader string) {
 	switch splitBy {
 	case cost.SplitByAccount:
 		return "Cost by linked account", "ACCOUNT ID"
+	case cost.SplitByOU:
+		return "Cost by organizational unit (tree; amounts include nested OUs)", "OU"
 	default:
 		return "Cost by service", "SERVICE"
 	}

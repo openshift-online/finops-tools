@@ -971,6 +971,98 @@ func TestListAccountsInOUSkipsSuspended(t *testing.T) {
 	}
 }
 
+func TestListAccountsInOUMaxDepthChildren(t *testing.T) {
+	client := testOUHierarchy()
+	// Depth 1 under ou-root-prod: direct accounts + ou-prod-team-a accounts (no deeper OUs anyway).
+	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod", ListAccountsInOUOptions{
+		MaxDepth: OUDepthPtr(1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 3 {
+		t.Fatalf("accounts = %+v", accounts)
+	}
+
+	// Depth 0 via MaxDepth matches DirectOnly.
+	direct, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod", ListAccountsInOUOptions{
+		MaxDepth: OUDepthPtr(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(direct) != 2 {
+		t.Fatalf("direct = %+v", direct)
+	}
+}
+
+func TestBuildOUAccountMapping(t *testing.T) {
+	client := testOUHierarchy()
+	ids := []string{"111111111111", "222222222222", "333333333333", "444444444444"}
+	parents, hierarchy, err := buildOUAccountMappingWithClient(context.Background(), client, "r-root", ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parents["111111111111"].ID != "ou-root-prod" {
+		t.Fatalf("111 parent = %+v", parents["111111111111"])
+	}
+	if parents["333333333333"].ID != "ou-prod-team-a" || parents["333333333333"].Name != "Team A" {
+		t.Fatalf("333 should map to immediate parent Team A, got %+v", parents["333333333333"])
+	}
+	if parents["444444444444"].ID != "ou-root-sandbox" {
+		t.Fatalf("444 parent = %+v", parents["444444444444"])
+	}
+	if len(hierarchy) < 4 {
+		t.Fatalf("hierarchy = %+v", hierarchy)
+	}
+	if hierarchy[0].ID != "r-root" || hierarchy[0].Depth != 0 {
+		t.Fatalf("root node = %+v", hierarchy[0])
+	}
+	foundTeam := false
+	for _, n := range hierarchy {
+		if n.ID == "ou-prod-team-a" && n.Depth == 2 && n.ParentID == "ou-root-prod" {
+			foundTeam = true
+		}
+	}
+	if !foundTeam {
+		t.Fatalf("missing Team A in hierarchy: %+v", hierarchy)
+	}
+}
+
+func TestMapAccountsToChildOUs(t *testing.T) {
+	client := testOUHierarchy()
+	ids := []string{"111111111111", "222222222222", "333333333333", "444444444444"}
+	got, err := mapAccountsToChildOUsWithClient(context.Background(), client, "r-root", ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["111111111111"].ID != "ou-root-prod" || got["111111111111"].Name != "Production" {
+		t.Fatalf("111 = %+v", got["111111111111"])
+	}
+	if got["333333333333"].ID != "ou-root-prod" {
+		t.Fatalf("333 should roll up to Production child OU, got %+v", got["333333333333"])
+	}
+	if got["444444444444"].ID != "ou-root-sandbox" || got["444444444444"].Name != "Sandbox" {
+		t.Fatalf("444 = %+v", got["444444444444"])
+	}
+}
+
+func TestMapAccountsToChildOUsDirectOnOU(t *testing.T) {
+	client := testOUHierarchy()
+	got, err := mapAccountsToChildOUsWithClient(context.Background(), client, "ou-root-prod", []string{
+		"111111111111", "333333333333",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["111111111111"].ID != "ou-root-prod" {
+		t.Fatalf("direct member should map to selection root, got %+v", got["111111111111"])
+	}
+	if got["333333333333"].ID != "ou-prod-team-a" || got["333333333333"].Name != "Team A" {
+		t.Fatalf("333 = %+v", got["333333333333"])
+	}
+}
+
 func TestFilterOrganizationAccountsByTagKeyOnly(t *testing.T) {
 	client := fakeOrganizationsFilterByTag{
 		accounts: map[string]string{

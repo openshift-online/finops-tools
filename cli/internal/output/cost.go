@@ -103,6 +103,8 @@ func breakdownCSVColumn(splitBy cost.SplitBy) string {
 	switch splitBy {
 	case cost.SplitByAccount:
 		return "linked_account_id"
+	case cost.SplitByOU:
+		return "ou"
 	default:
 		return "service"
 	}

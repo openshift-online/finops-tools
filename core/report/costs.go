@@ -21,6 +21,7 @@ type CostsReport struct {
 	Total       float64
 	ByAccount   []cost.CostBreakdownItem
 	ByService   []cost.CostBreakdownItem
+	ByOU        []cost.CostBreakdownItem
 	Daily       []cost.DailyCostItem
 	Accounts    []cost.AccountTarget
 }
@@ -118,6 +119,15 @@ func BuildCostsReport(ctx context.Context, q cost.CostQuery, progress Progress) 
 		return CostsReport{}, fmt.Errorf("daily currency %s does not match total currency %s", dailyCurrency, totalRes.Currency)
 	}
 
+	var byOU []cost.CostBreakdownItem
+	if q.AWSFetch != nil && len(q.AWSFetch.AccountOUBuckets) > 0 {
+		if len(q.AWSFetch.OUHierarchy) > 0 {
+			byOU = cost.RollupBreakdownByOUTree(byAccountRes.Breakdown, q.AWSFetch.AccountOUBuckets, q.AWSFetch.OUHierarchy)
+		} else {
+			byOU = cost.RollupBreakdownByOU(byAccountRes.Breakdown, q.AWSFetch.AccountOUBuckets)
+		}
+	}
+
 	return CostsReport{
 		GeneratedAt: time.Now().UTC(),
 		StartDate:   totalRes.StartDate,
@@ -127,6 +137,7 @@ func BuildCostsReport(ctx context.Context, q cost.CostQuery, progress Progress) 
 		Total:       totalRes.Amount,
 		ByAccount:   byAccountRes.Breakdown,
 		ByService:   byServiceRes.Breakdown,
+		ByOU:        byOU,
 		Daily:       daily,
 		Accounts:    cost.FilterOverlappingTargets(q.Accounts),
 	}, nil
