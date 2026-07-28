@@ -31,7 +31,7 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		},
 		{
 			name: "ou mode",
-			sel:  costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-1234"}}, PayerAlias: "rh-control"},
+			sel:  costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAlias: "rh-control"},
 		},
 		{
 			name: "org mode payer alone",
@@ -44,7 +44,7 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		},
 		{
 			name:    "account and ou footgun",
-			sel:     costTargetSelector{AccountIDs: []string{"111111111111"}, OUs: []configstore.OUSelector{{ID: "ou-abcd-1234"}}, PayerAlias: "osd-staging-2"},
+			sel:     costTargetSelector{AccountIDs: []string{"111111111111"}, OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAlias: "osd-staging-2"},
 			wantErr: errMixedAccountSelection,
 		},
 		{
@@ -59,12 +59,12 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		},
 		{
 			name:    "ou without payer",
-			sel:     costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-1234"}}},
+			sel:     costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}},
 			wantErr: "--ou requires --payer",
 		},
 		{
 			name:    "ou and tag",
-			sel:     costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-1234"}}, TagKey: "env", PayerAlias: "rh-control"},
+			sel:     costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, TagKey: "env", PayerAlias: "rh-control"},
 			wantErr: errMixedAccountSelection,
 		},
 		{
@@ -261,19 +261,19 @@ func TestResolveCostTargetsOUWithScope(t *testing.T) {
 	cmd := &cobra.Command{}
 	sel := costTargetSelector{
 		PayerAlias: "rh-control",
-		OUs:        []configstore.OUSelector{{ID: "ou-abcd-1234", MaxDepth: &depth0}},
+		OUs:        []configstore.OUSelector{{ID: "ou-abcd-12345678", MaxDepth: &depth0}},
 	}
 	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotParent != "ou-abcd-1234" || gotDepth == nil || *gotDepth != 0 {
+	if gotParent != "ou-abcd-12345678" || gotDepth == nil || *gotDepth != 0 {
 		t.Fatalf("parent=%q depth=%v", gotParent, gotDepth)
 	}
 	if len(targets) != 1 || targets[0].AccountID != "111111111111" {
 		t.Fatalf("targets: %+v", targets)
 	}
-	if sel.SelectionRootID != "ou-abcd-1234" {
+	if sel.SelectionRootID != "ou-abcd-12345678" {
 		t.Fatalf("SelectionRootID = %q", sel.SelectionRootID)
 	}
 }
@@ -395,7 +395,7 @@ func TestParseTagFlag(t *testing.T) {
 }
 
 func TestParseCostTargetSelectorOUScope(t *testing.T) {
-	sel, err := parseCostTargetSelector("", "", "ou-abcd-1234/,ou-efgh-5678/*", "rh-control", "", false, false)
+	sel, err := parseCostTargetSelector("", "", "ou-abcd-12345678/,ou-efgh-56789012/*", "rh-control", "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestCostGetPreRunERejectsAccountAndOU(t *testing.T) {
 	costGetAccount = "111111111111"
 	costGetAccountAliases = ""
 	costGetPayer = "osd-staging-2"
-	costGetOU = "ou-abcd-1234"
+	costGetOU = "ou-abcd-12345678"
 	costGetTag = ""
 	costGetFormat = string(output.FormatPrettyPrint)
 	costGetProvider = string(cost.ProviderAWS)

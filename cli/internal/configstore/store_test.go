@@ -176,7 +176,7 @@ func TestParseAccountAliases(t *testing.T) {
 }
 
 func TestParseOUIDs(t *testing.T) {
-	ids, err := ParseOUIDs("ou-abcd-1234, ou-efgh-5678")
+	ids, err := ParseOUIDs("ou-abcd-12345678, ou-efgh-56789012")
 	if err != nil || len(ids) != 2 {
 		t.Fatalf("got %v %v", ids, err)
 	}
@@ -184,36 +184,40 @@ func TestParseOUIDs(t *testing.T) {
 	if err != nil || len(ids) != 1 || ids[0] != "r-root" {
 		t.Fatalf("root ID: got %v %v", ids, err)
 	}
-	_, err = ParseOUIDs("ou-abcd-1234/")
+	_, err = ParseOUIDs("ou-abcd-12345678/")
 	if err == nil {
 		t.Fatal("expected error for scoped ID via ParseOUIDs")
 	}
 }
 
 func TestParseOUSelectors(t *testing.T) {
-	sels, err := ParseOUSelectors("ou-abcd-1234, ou-efgh-5678/, ou-ijkl-9012/*, r-root/**")
+	sels, err := ParseOUSelectors("ou-abcd-12345678, ou-efgh-56789012/, ou-ijkl-90123456/*, r-root/**")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sels) != 4 {
 		t.Fatalf("len = %d", len(sels))
 	}
-	if sels[0].ID != "ou-abcd-1234" || sels[0].MaxDepth != nil {
+	if sels[0].ID != "ou-abcd-12345678" || sels[0].MaxDepth != nil {
 		t.Fatalf("bare: %+v", sels[0])
 	}
-	if sels[1].ID != "ou-efgh-5678" || sels[1].MaxDepth == nil || *sels[1].MaxDepth != 0 {
+	if sels[1].ID != "ou-efgh-56789012" || sels[1].MaxDepth == nil || *sels[1].MaxDepth != 0 {
 		t.Fatalf("direct: %+v", sels[1])
 	}
-	if sels[2].ID != "ou-ijkl-9012" || sels[2].MaxDepth == nil || *sels[2].MaxDepth != 1 {
+	if sels[2].ID != "ou-ijkl-90123456" || sels[2].MaxDepth == nil || *sels[2].MaxDepth != 1 {
 		t.Fatalf("children: %+v", sels[2])
 	}
 	if sels[3].ID != "r-root" || sels[3].MaxDepth != nil {
 		t.Fatalf("root subtree: %+v", sels[3])
 	}
 
-	_, err = ParseOUSelectors("ou-abcd-1234/foo")
+	_, err = ParseOUSelectors("ou-abcd-12345678/foo")
 	if err == nil {
 		t.Fatal("expected error for unknown suffix")
+	}
+	_, err = ParseOUSelectors("ou-abcd-1234")
+	if err == nil {
+		t.Fatal("expected error for short OU suffix")
 	}
 	_, err = ParseOUSelectors("not-an-ou")
 	if err == nil {

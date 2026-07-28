@@ -55,9 +55,9 @@ Examples:
   finops account get-cost --payer rh-control --account-id 111111111111,222222222222
   finops account get-cost --payer rh-control --tag organization
   finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --split-by service
-  finops account get-cost --ou ou-abcd-1234 --payer rh-control
-  finops account get-cost --ou ou-abcd-1234/ --payer rh-control --days 7
-  finops account get-cost --ou 'ou-abcd-1234/*' --payer rh-control
+  finops account get-cost --ou ou-abcd-12345678 --payer rh-control
+  finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
+  finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
   finops account get-cost --payer rh-control --split-by ou
 
 Authentication uses --auth-method when set, otherwise defaults.aws.auth_method in config (saml by default).

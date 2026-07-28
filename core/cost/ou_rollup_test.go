@@ -10,19 +10,19 @@ func TestRollupBreakdownByOU(t *testing.T) {
 		{Account: "999999999999", Amount: 1},
 	}
 	buckets := map[string]OUBucket{
-		"111111111111": {ID: "ou-root-prod", Name: "Production"},
-		"222222222222": {ID: "ou-root-prod", Name: "Production"},
-		"333333333333": {ID: "ou-root-sandbox", Name: "Sandbox"},
+		"111111111111": {ID: "ou-root-prod0000", Name: "Production"},
+		"222222222222": {ID: "ou-root-prod0000", Name: "Production"},
+		"333333333333": {ID: "ou-root-sandbox0", Name: "Sandbox"},
 	}
 
 	got := RollupBreakdownByOU(breakdown, buckets)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, got %+v", len(got), got)
 	}
-	if got[0].OUID != "ou-root-prod" || got[0].Amount != 30 || got[0].OUName != "Production" {
+	if got[0].OUID != "ou-root-prod0000" || got[0].Amount != 30 || got[0].OUName != "Production" {
 		t.Fatalf("first = %+v", got[0])
 	}
-	if got[1].OUID != "ou-root-sandbox" || got[1].Amount != 5 {
+	if got[1].OUID != "ou-root-sandbox0" || got[1].Amount != 5 {
 		t.Fatalf("second = %+v", got[1])
 	}
 	if got[2].OUID != unknownOUBucketID || got[2].Amount != 1 {
@@ -37,16 +37,16 @@ func TestRollupBreakdownByOUTree(t *testing.T) {
 		{Account: "444444444444", Amount: 2},  // under Sandbox
 	}
 	parents := map[string]OUBucket{
-		"111111111111": {ID: "ou-root-prod", Name: "Production"},
-		"333333333333": {ID: "ou-prod-team-a", Name: "Team A"},
-		"444444444444": {ID: "ou-root-sandbox", Name: "Sandbox"},
+		"111111111111": {ID: "ou-root-prod0000", Name: "Production"},
+		"333333333333": {ID: "ou-prod-teama000", Name: "Team A"},
+		"444444444444": {ID: "ou-root-sandbox0", Name: "Sandbox"},
 	}
 	// Hierarchy lists Sandbox before Production; siblings should still emit by amount desc.
 	hierarchy := []OUHierarchyNode{
 		{ID: "r-root", Name: "Root", Depth: 0},
-		{ID: "ou-root-sandbox", Name: "Sandbox", ParentID: "r-root", Depth: 1},
-		{ID: "ou-root-prod", Name: "Production", ParentID: "r-root", Depth: 1},
-		{ID: "ou-prod-team-a", Name: "Team A", ParentID: "ou-root-prod", Depth: 2},
+		{ID: "ou-root-sandbox0", Name: "Sandbox", ParentID: "r-root", Depth: 1},
+		{ID: "ou-root-prod0000", Name: "Production", ParentID: "r-root", Depth: 1},
+		{ID: "ou-prod-teama000", Name: "Team A", ParentID: "ou-root-prod0000", Depth: 2},
 	}
 
 	got := RollupBreakdownByOUTree(breakdown, parents, hierarchy)
@@ -60,17 +60,17 @@ func TestRollupBreakdownByOUTree(t *testing.T) {
 	if byID["r-root"].Amount != 17 || byID["r-root"].OUDepth != 0 {
 		t.Fatalf("root = %+v", byID["r-root"])
 	}
-	if byID["ou-root-prod"].Amount != 15 || byID["ou-root-prod"].OUDepth != 1 {
-		t.Fatalf("prod = %+v", byID["ou-root-prod"])
+	if byID["ou-root-prod0000"].Amount != 15 || byID["ou-root-prod0000"].OUDepth != 1 {
+		t.Fatalf("prod = %+v", byID["ou-root-prod0000"])
 	}
-	if byID["ou-prod-team-a"].Amount != 5 || byID["ou-prod-team-a"].OUDepth != 2 {
-		t.Fatalf("team-a = %+v", byID["ou-prod-team-a"])
+	if byID["ou-prod-teama000"].Amount != 5 || byID["ou-prod-teama000"].OUDepth != 2 {
+		t.Fatalf("team-a = %+v", byID["ou-prod-teama000"])
 	}
-	if byID["ou-root-sandbox"].Amount != 2 {
-		t.Fatalf("sandbox = %+v", byID["ou-root-sandbox"])
+	if byID["ou-root-sandbox0"].Amount != 2 {
+		t.Fatalf("sandbox = %+v", byID["ou-root-sandbox0"])
 	}
 	// DFS with siblings ordered by amount desc: Root → Production(15) → Team A → Sandbox(2)
-	if got[0].OUID != "r-root" || got[1].OUID != "ou-root-prod" || got[2].OUID != "ou-prod-team-a" || got[3].OUID != "ou-root-sandbox" {
+	if got[0].OUID != "r-root" || got[1].OUID != "ou-root-prod0000" || got[2].OUID != "ou-prod-teama000" || got[3].OUID != "ou-root-sandbox0" {
 		t.Fatalf("order = %+v", got)
 	}
 }

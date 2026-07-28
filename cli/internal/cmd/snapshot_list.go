@@ -62,7 +62,7 @@ Examples:
   finops snapshot list --account-alias rh-control --older-than-days 365 --format json
   finops snapshot list --payer rh-control
   finops snapshot list --payer rh-control --tag organization
-  finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs`,
+  finops snapshot list --ou ou-abcd-12345678 --payer rh-control --types ebs`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
 		sel, err := parseCostTargetSelector(

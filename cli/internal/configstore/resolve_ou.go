@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}$`)
+	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{8,32}$`)
 	rootIDPattern = regexp.MustCompile(`^r-[0-9a-z]{4,32}$`)
 )
 

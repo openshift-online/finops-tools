@@ -793,22 +793,22 @@ func testOUHierarchy() fakeOUHierarchy {
 		roots: []string{"r-root"},
 		childOUs: map[string][]OrganizationalUnit{
 			"r-root": {
-				{ID: "ou-root-prod", Name: "Production"},
-				{ID: "ou-root-sandbox", Name: "Sandbox"},
+				{ID: "ou-root-prod0000", Name: "Production"},
+				{ID: "ou-root-sandbox0", Name: "Sandbox"},
 			},
-			"ou-root-prod": {
-				{ID: "ou-prod-team-a", Name: "Team A"},
+			"ou-root-prod0000": {
+				{ID: "ou-prod-teama000", Name: "Team A"},
 			},
 		},
 		accountsByParent: map[string][]types.Account{
-			"ou-root-prod": {
+			"ou-root-prod0000": {
 				{Id: aws.String("111111111111"), Name: aws.String("Prod One"), Status: types.AccountStatusActive},
 				{Id: aws.String("222222222222"), Name: aws.String("Prod Two"), Status: types.AccountStatusActive},
 			},
-			"ou-prod-team-a": {
+			"ou-prod-teama000": {
 				{Id: aws.String("333333333333"), Name: aws.String("Team A One"), Status: types.AccountStatusActive},
 			},
-			"ou-root-sandbox": {
+			"ou-root-sandbox0": {
 				{Id: aws.String("444444444444"), Name: aws.String("Sandbox One"), Status: types.AccountStatusActive},
 				{Id: aws.String("555555555555"), Name: aws.String("Suspended"), Status: types.AccountStatusSuspended},
 			},
@@ -899,8 +899,11 @@ func (f fakeOrganizationsFilterByTag) ListAccountsForParent(
 }
 
 func TestValidateOUID(t *testing.T) {
-	if err := validateOUID("ou-abcd-1234"); err != nil {
+	if err := validateOUID("ou-abcd-12345678"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := validateOUID("ou-abcd-1234"); err == nil {
+		t.Fatal("expected error for short OU suffix")
 	}
 	if err := validateOUID(""); err == nil {
 		t.Fatal("expected error for empty OU ID")
@@ -920,18 +923,18 @@ func TestListOrganizationalUnitsWithClient(t *testing.T) {
 		t.Fatalf("ous = %+v", ous)
 	}
 
-	childOUs, err := listOrganizationalUnitsWithClient(context.Background(), client, "ou-root-prod")
+	childOUs, err := listOrganizationalUnitsWithClient(context.Background(), client, "ou-root-prod0000")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(childOUs) != 1 || childOUs[0].ID != "ou-prod-team-a" {
+	if len(childOUs) != 1 || childOUs[0].ID != "ou-prod-teama000" {
 		t.Fatalf("childOUs = %+v", childOUs)
 	}
 }
 
 func TestListAccountsInOUDirectOnly(t *testing.T) {
 	client := testOUHierarchy()
-	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod", ListAccountsInOUOptions{DirectOnly: true})
+	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod0000", ListAccountsInOUOptions{DirectOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -942,7 +945,7 @@ func TestListAccountsInOUDirectOnly(t *testing.T) {
 
 func TestListAccountsInOURecursive(t *testing.T) {
 	client := testOUHierarchy()
-	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod", ListAccountsInOUOptions{})
+	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod0000", ListAccountsInOUOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -962,7 +965,7 @@ func TestListAccountsInOURecursive(t *testing.T) {
 
 func TestListAccountsInOUSkipsSuspended(t *testing.T) {
 	client := testOUHierarchy()
-	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-sandbox", ListAccountsInOUOptions{DirectOnly: true})
+	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-sandbox0", ListAccountsInOUOptions{DirectOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -973,8 +976,8 @@ func TestListAccountsInOUSkipsSuspended(t *testing.T) {
 
 func TestListAccountsInOUMaxDepthChildren(t *testing.T) {
 	client := testOUHierarchy()
-	// Depth 1 under ou-root-prod: direct accounts + ou-prod-team-a accounts (no deeper OUs anyway).
-	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod", ListAccountsInOUOptions{
+	// Depth 1 under ou-root-prod0000: direct accounts + ou-prod-teama000 accounts (no deeper OUs anyway).
+	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod0000", ListAccountsInOUOptions{
 		MaxDepth: OUDepthPtr(1),
 	})
 	if err != nil {
@@ -985,7 +988,7 @@ func TestListAccountsInOUMaxDepthChildren(t *testing.T) {
 	}
 
 	// Depth 0 via MaxDepth matches DirectOnly.
-	direct, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod", ListAccountsInOUOptions{
+	direct, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-prod0000", ListAccountsInOUOptions{
 		MaxDepth: OUDepthPtr(0),
 	})
 	if err != nil {
@@ -1003,13 +1006,13 @@ func TestBuildOUAccountMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parents["111111111111"].ID != "ou-root-prod" {
+	if parents["111111111111"].ID != "ou-root-prod0000" {
 		t.Fatalf("111 parent = %+v", parents["111111111111"])
 	}
-	if parents["333333333333"].ID != "ou-prod-team-a" || parents["333333333333"].Name != "Team A" {
+	if parents["333333333333"].ID != "ou-prod-teama000" || parents["333333333333"].Name != "Team A" {
 		t.Fatalf("333 should map to immediate parent Team A, got %+v", parents["333333333333"])
 	}
-	if parents["444444444444"].ID != "ou-root-sandbox" {
+	if parents["444444444444"].ID != "ou-root-sandbox0" {
 		t.Fatalf("444 parent = %+v", parents["444444444444"])
 	}
 	if len(hierarchy) < 4 {
@@ -1020,7 +1023,7 @@ func TestBuildOUAccountMapping(t *testing.T) {
 	}
 	foundTeam := false
 	for _, n := range hierarchy {
-		if n.ID == "ou-prod-team-a" && n.Depth == 2 && n.ParentID == "ou-root-prod" {
+		if n.ID == "ou-prod-teama000" && n.Depth == 2 && n.ParentID == "ou-root-prod0000" {
 			foundTeam = true
 		}
 	}
@@ -1036,29 +1039,29 @@ func TestMapAccountsToChildOUs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["111111111111"].ID != "ou-root-prod" || got["111111111111"].Name != "Production" {
+	if got["111111111111"].ID != "ou-root-prod0000" || got["111111111111"].Name != "Production" {
 		t.Fatalf("111 = %+v", got["111111111111"])
 	}
-	if got["333333333333"].ID != "ou-root-prod" {
+	if got["333333333333"].ID != "ou-root-prod0000" {
 		t.Fatalf("333 should roll up to Production child OU, got %+v", got["333333333333"])
 	}
-	if got["444444444444"].ID != "ou-root-sandbox" || got["444444444444"].Name != "Sandbox" {
+	if got["444444444444"].ID != "ou-root-sandbox0" || got["444444444444"].Name != "Sandbox" {
 		t.Fatalf("444 = %+v", got["444444444444"])
 	}
 }
 
 func TestMapAccountsToChildOUsDirectOnOU(t *testing.T) {
 	client := testOUHierarchy()
-	got, err := mapAccountsToChildOUsWithClient(context.Background(), client, "ou-root-prod", []string{
+	got, err := mapAccountsToChildOUsWithClient(context.Background(), client, "ou-root-prod0000", []string{
 		"111111111111", "333333333333",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["111111111111"].ID != "ou-root-prod" {
+	if got["111111111111"].ID != "ou-root-prod0000" {
 		t.Fatalf("direct member should map to selection root, got %+v", got["111111111111"])
 	}
-	if got["333333333333"].ID != "ou-prod-team-a" || got["333333333333"].Name != "Team A" {
+	if got["333333333333"].ID != "ou-prod-teama000" || got["333333333333"].Name != "Team A" {
 		t.Fatalf("333 = %+v", got["333333333333"])
 	}
 }

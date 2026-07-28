@@ -453,7 +453,7 @@ List AWS Organizational Units (for discovering OU IDs to use with `--ou` on cost
 
 ```bash
 finops aws list-ous --payer rh-control
-finops aws list-ous --payer rh-control --parent ou-abcd-1234
+finops aws list-ous --payer rh-control --parent ou-abcd-12345678
 finops aws list-ous --payer rh-control --format json
 ```
 
@@ -549,9 +549,9 @@ finops account get-cost --account-id 123456789012 --split-by service
 finops account get-cost --account-id 123456789012 --split-by account
 finops account get-cost --payer rh-control --account-id 333333333333   # member account via payer
 finops aws list-ous --payer rh-control           # discover OU IDs
-finops account get-cost --ou ou-abcd-1234 --payer rh-control
-finops account get-cost --ou ou-abcd-1234/ --payer rh-control --days 7
-finops account get-cost --ou 'ou-abcd-1234/*' --payer rh-control
+finops account get-cost --ou ou-abcd-12345678 --payer rh-control
+finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
+finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
 finops account get-cost --ou r-xxxx/ --payer rh-control            # accounts directly under org root
 finops account get-cost --payer rh-control
 finops account get-cost --payer rh-control --split-by ou
@@ -592,7 +592,7 @@ finops snapshot list --account-alias rh-control
 finops snapshot list --account-alias rh-control --older-than-days 365 --format json
 finops snapshot list --payer rh-control
 finops snapshot list --payer rh-control --tag organization
-finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs
+finops snapshot list --ou ou-abcd-12345678 --payer rh-control --types ebs
 finops snapshot list --account-id 333333333333 --payer rhc --older-than-days 90 --format csv
 ```
 
@@ -620,7 +620,7 @@ finops report list
 finops report create costs --account-alias rh-control
 finops report create costs --account-alias rh-control -o costs.html
 finops report create costs --account-id 333333333333 --payer rhc -o member.html
-finops report create costs --ou ou-abcd-1234 --payer rh-control -o ou-costs.html
+finops report create costs --ou ou-abcd-12345678 --payer rh-control -o ou-costs.html
 finops report create costs --payer rh-control -o all-members.html
 finops report create costs --payer rh-control --tag env=prod -o prod.html
 ```

@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}$`)
+	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{8,32}$`)
 	rootIDPattern = regexp.MustCompile(`^r-[0-9a-z]{4,32}$`)
 )
 
@@ -706,7 +706,7 @@ func validateParentID(parentID string) error {
 	if ouIDPattern.MatchString(parentID) || rootIDPattern.MatchString(parentID) {
 		return nil
 	}
-	return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx-yyyyy)", parentID)
+	return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx)", parentID)
 }
 
 // DetectAccountKind classifies callerAccountID against organization management account.
