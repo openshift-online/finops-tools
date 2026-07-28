@@ -14,7 +14,7 @@ func (costAnomaliesGenerator) Validate(in GenerateInput) error {
 		return err
 	}
 	if len(in.Targets) == 0 {
-		return fmt.Errorf("cost-anomalies report requires an account target (--account-alias or --account-id)")
+		return fmt.Errorf("cost-anomalies report requires an account target (--account-id/--account-alias, --ou, --tag, or --payer)")
 	}
 	return nil
 }

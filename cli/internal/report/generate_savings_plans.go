@@ -14,7 +14,7 @@ func (savingsPlansGenerator) Validate(in GenerateInput) error {
 		return err
 	}
 	if len(in.Targets) == 0 {
-		return fmt.Errorf("savings-plans report requires an account target (--account-alias or --account-id)")
+		return fmt.Errorf("savings-plans report requires an account target (--account-id/--account-alias, --ou, --tag, or --payer)")
 	}
 	return nil
 }
