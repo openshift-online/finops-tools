@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	defaultAddr                            = ":8080"
-	defaultMaxRows                         = 1000
-	maxRowsLimit                           = 100000
-	defaultQueryTimeout                    = 60 * time.Second
-	defaultAWSAccountsHistoricalTable      = "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT"
-	defaultAWSAccountsHistoricalMaxRows    = 10000
+	defaultAddr                         = ":8080"
+	defaultMaxRows                      = 1000
+	maxRowsLimit                        = 100000
+	defaultQueryTimeout                 = 60 * time.Second
+	defaultAWSAccountsHistoricalTable   = "HCMFINOPSSOURCE_DB.MARTS.AWS_ACCOUNTS_HISTORICAL_COUNT"
+	defaultAWSAccountsHistoricalMaxRows = 10000
 )
 
 var snowflakeConnectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -58,7 +58,7 @@ func Load() (Config, error) {
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_MAX_ROWS")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > maxRowsLimit {
-			return Config{}, fmt.Errorf("FINOPS_BACKEND_MAX_ROWS must be an integer between 1 and %d", maxRowsLimit)
+			return Config{}, fmt.Errorf("FINOPS_BACKEND_MAX_ROWS: %q is not a valid integer between 1 and %d", v, maxRowsLimit)
 		}
 		cfg.MaxRows = n
 	}
@@ -66,7 +66,7 @@ func Load() (Config, error) {
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_QUERY_TIMEOUT")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
-			return Config{}, fmt.Errorf("FINOPS_BACKEND_QUERY_TIMEOUT must be a positive duration (e.g. 60s)")
+			return Config{}, fmt.Errorf("FINOPS_BACKEND_QUERY_TIMEOUT: %q is not a valid positive duration (e.g. 60s)", v)
 		}
 		cfg.QueryTimeout = d
 	}
@@ -74,7 +74,7 @@ func Load() (Config, error) {
 	if v := strings.TrimSpace(os.Getenv("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > maxRowsLimit {
-			return Config{}, fmt.Errorf("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS must be an integer between 1 and %d", maxRowsLimit)
+			return Config{}, fmt.Errorf("FINOPS_BACKEND_AWS_ACCOUNTS_HISTORICAL_MAX_ROWS: %q is not a valid integer between 1 and %d", v, maxRowsLimit)
 		}
 		cfg.AWSAccountsHistoricalMaxRows = n
 	}
@@ -156,6 +156,14 @@ func loadConnectionParams(name, prefix string) (coresnowflake.ConnectParams, err
 			err,
 		)
 	}
+
+	if token != "" && privateKey != "" {
+		return coresnowflake.ConnectParams{}, fmt.Errorf(
+			"snowflake configuration for connection %q: cannot specify both TOKEN and PRIVATE_KEY/PRIVATE_KEY_FILE",
+			name,
+		)
+	}
+
 	warehouse := strings.TrimSpace(os.Getenv(prefix + "WAREHOUSE"))
 
 	missing := make([]string, 0, 4)
@@ -185,9 +193,9 @@ func loadConnectionParams(name, prefix string) (coresnowflake.ConnectParams, err
 		Token:         token,
 		PrivateKeyPEM: privateKey,
 		Role:          strings.TrimSpace(os.Getenv(prefix + "ROLE")),
-		Warehouse:            warehouse,
-		Database:             strings.TrimSpace(os.Getenv(prefix + "DATABASE")),
-		Schema:               strings.TrimSpace(os.Getenv(prefix + "SCHEMA")),
+		Warehouse:     warehouse,
+		Database:      strings.TrimSpace(os.Getenv(prefix + "DATABASE")),
+		Schema:        strings.TrimSpace(os.Getenv(prefix + "SCHEMA")),
 	}, nil
 }
 
@@ -211,7 +219,7 @@ func loadPrivateKey(prefix string) (string, error) {
 	}
 	data, err := os.ReadFile(raw)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", prefix+"PRIVATE_KEY_FILE", err)
+		return "", fmt.Errorf("read %s (%s): %w", prefix+"PRIVATE_KEY_FILE", raw, err)
 	}
 	return normalizePEM(string(data)), nil
 }

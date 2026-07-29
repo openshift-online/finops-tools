@@ -130,6 +130,19 @@ func TestLoadSnowflakePrivateKey(t *testing.T) {
 		t.Fatal("expected empty oauth token when using private key")
 	}
 }
+func TestLoadSnowflakeConflictingTokenAndPrivateKey(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("SNOWFLAKE_CONNECTIONS", "prod")
+	t.Setenv("SNOWFLAKE_CONN_PROD_ACCOUNT", "acct")
+	t.Setenv("SNOWFLAKE_CONN_PROD_USER", "user")
+	t.Setenv("SNOWFLAKE_CONN_PROD_TOKEN", "token")
+	t.Setenv("SNOWFLAKE_CONN_PROD_PRIVATE_KEY", fakePEM("abc"))
+	t.Setenv("SNOWFLAKE_CONN_PROD_WAREHOUSE", "wh")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error when both TOKEN and PRIVATE_KEY are set")
+	}
+}
 
 func TestLoadSnowflakeMultipleConnections(t *testing.T) {
 	clearSnowflakeEnv(t)
@@ -265,6 +278,19 @@ func TestLoadSnowflakeMultipleConnectionsFromSeparateEnv(t *testing.T) {
 	}
 	if len(cfg.Snowflake.Connections) != 2 {
 		t.Fatalf("Connections = %d, want 2", len(cfg.Snowflake.Connections))
+	}
+}
+
+func TestLoadSnowflakePrivateKeyFileMissing(t *testing.T) {
+	clearSnowflakeEnv(t)
+	t.Setenv("SNOWFLAKE_CONNECTIONS", "prod")
+	t.Setenv("SNOWFLAKE_CONN_PROD_ACCOUNT", "acct")
+	t.Setenv("SNOWFLAKE_CONN_PROD_USER", "user")
+	t.Setenv("SNOWFLAKE_CONN_PROD_PRIVATE_KEY_FILE", t.TempDir()+"/does-not-exist")
+	t.Setenv("SNOWFLAKE_CONN_PROD_WAREHOUSE", "wh")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for missing private key file")
 	}
 }
 
