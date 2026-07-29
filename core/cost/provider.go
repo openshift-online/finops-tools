@@ -199,8 +199,8 @@ func EmptyResult(provider Provider, dr DateRange, splitBy SplitBy) CostResult {
 		Provider:  provider,
 		Metric:    MetricNetAmortized,
 		SplitBy:   splitBy,
-		StartDate: formatDate(dr.Start),
-		EndDate:   formatDate(endInclusive),
+		StartDate: FormatDate(dr.Start),
+		EndDate:   FormatDate(endInclusive),
 	}
 }
 
