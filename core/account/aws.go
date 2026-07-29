@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	"github.com/aws/aws-sdk-go-v2/service/organizations/types"
+	"github.com/openshift-online/finops-tools/core/cost"
 )
 
 var ouIDPattern = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}$`)
@@ -117,7 +118,7 @@ func ResolveAccountNames(ctx context.Context, cfg aws.Config, accountIDs []strin
 }
 
 func resolveAccountNamesWithClient(ctx context.Context, client OrganizationsAPI, accountIDs []string) (map[string]string, error) {
-	ids := uniqueAccountIDs(accountIDs)
+	ids := cost.UniqueAccountIDs(accountIDs)
 	if len(ids) == 0 {
 		return map[string]string{}, nil
 	}
@@ -530,23 +531,6 @@ func accountNameFromOrganizationAccount(acct *types.Account, accountID string) (
 		return "", fmt.Errorf("account %s has no name", accountID)
 	}
 	return name, nil
-}
-
-func uniqueAccountIDs(ids []string) []string {
-	seen := make(map[string]struct{}, len(ids))
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
 }
 
 func organizationManagementAccountID(org *types.Organization) string {
