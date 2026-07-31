@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/account"
 	awsconfig "github.com/openshift-online/finops-tools/cli/internal/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/awsauth"
@@ -29,7 +30,7 @@ var (
 	migrateAccountUpdateConfig       = configstore.UpdateLinkedAccountPayer
 	migrateAccountInvalidateOrgCache = invalidateOrgCacheForPayer
 
-	migrateAccountFlag      string
+	migrateAccountIDFlag    string
 	migrateAccountFromPayer string
 	migrateAccountToPayer   string
 	migrateAccountDestOU    string
@@ -53,9 +54,9 @@ Requires management-account admin on both payers and OrganizationAccountAccessRo
 (or --role) in the member account. SCPs or Control Tower may still block the transfer.
 
 Examples:
-  finops aws migrate-account --account 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
-  finops aws migrate-account --account osd-tenant-1 --from-payer rh-control --to-payer osd-staging-1 --yes
-  finops aws migrate-account --account 111111111111 --from-payer rh-control --to-payer osd-staging-1 --destination-ou ou-abcd-12345678 --yes`,
+  finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
+  finops aws migrate-account --account-id 111111111111,222222222222 --from-payer rh-control --to-payer osd-staging-1 --yes
+  finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --destination-ou ou-abcd-12345678 --yes`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
 		if strings.TrimSpace(migrateAccountFromPayer) == "" {
@@ -67,9 +68,8 @@ Examples:
 		if strings.TrimSpace(migrateAccountFromPayer) == strings.TrimSpace(migrateAccountToPayer) {
 			return fmt.Errorf("--from-payer and --to-payer must differ")
 		}
-		accountFlag := strings.TrimSpace(migrateAccountFlag)
-		if accountFlag == "" {
-			return fmt.Errorf("--account is required (12-digit ID or registered linked alias)")
+		if _, err := configstore.ParseAWSAccountIDs(migrateAccountIDFlag); err != nil {
+			return fmt.Errorf("--account-id: %w", err)
 		}
 		if dest := strings.TrimSpace(migrateAccountDestOU); dest != "" && !migrateDestinationParentPattern.MatchString(dest) {
 			return fmt.Errorf("invalid --destination-ou %q (expected ou-xxxx-yyyyy or r-xxxx)", dest)
@@ -89,7 +89,7 @@ Examples:
 
 func init() {
 	awsCmd.AddCommand(awsMigrateAccountCmd)
-	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountFlag, "account", "", "Linked account ID (12 digits) or registered linked alias (required)")
+	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountIDFlag, "account-id", "", "Linked account ID(s), comma-separated 12-digit IDs (required)")
 	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountFromPayer, "from-payer", "", "Source payer alias (required)")
 	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountToPayer, "to-payer", "", "Destination payer alias (required)")
 	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountDestOU, "destination-ou", "", "Optional destination OU or root ID after accept")
@@ -123,9 +123,9 @@ func runAWSMigrateAccount(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--from-payer %q and --to-payer %q resolve to the same payer account ID %s", fromAlias, toAlias, fromPayerID)
 	}
 
-	accountID, accountAlias, roleName, err := resolveMigrateAccountTarget(cmd, cfg, configPath)
+	accountIDs, err := configstore.ParseAWSAccountIDs(migrateAccountIDFlag)
 	if err != nil {
-		return err
+		return fmt.Errorf("--account-id: %w", err)
 	}
 
 	awsCtx := awsCommandContext(cmd)
@@ -141,6 +141,29 @@ func runAWSMigrateAccount(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	toCfg, err := migrateAccountLoadConfigForCreds(awsCtx, cfg, toPayerID, awsFlags.CredentialsFile)
+	if err != nil {
+		return err
+	}
+
+	for i, accountID := range accountIDs {
+		if len(accountIDs) > 1 {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "=== Account %d/%d: %s ===\n", i+1, len(accountIDs), accountID)
+		}
+		if err := migrateOneAccount(cmd, awsCtx, cfg, configPath, accountID, fromAlias, toAlias, fromPayerID, toPayerID, fromCfg, toCfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateOneAccount(
+	cmd *cobra.Command,
+	awsCtx context.Context,
+	cfg configstore.File,
+	configPath, accountID, fromAlias, toAlias, fromPayerID, toPayerID string,
+	fromCfg, toCfg aws.Config,
+) error {
+	accountAlias, roleName, err := resolveMigrateAccountTarget(cmd, cfg, configPath, accountID)
 	if err != nil {
 		return err
 	}
@@ -254,36 +277,18 @@ func ensureMigratePayerCredentials(cmd *cobra.Command, ctx context.Context, alia
 	return nil
 }
 
-func resolveMigrateAccountTarget(cmd *cobra.Command, cfg configstore.File, configPath string) (accountID, alias, roleName string, err error) {
-	raw := strings.TrimSpace(migrateAccountFlag)
-	if linked, ok := cfg.LinkedAccountForAlias(raw); ok {
-		accountID = linked.AccountID
-		alias = raw
-		if cmd.Flags().Changed("role") {
-			roleName, err = resolveLinkedRoleName(cmd, configPath, migrateAccountRole)
-			return accountID, alias, roleName, err
-		}
-		if name := linked.RoleName(); name != "" {
-			return accountID, alias, name, nil
-		}
-		roleName, err = resolveLinkedRoleName(cmd, configPath, migrateAccountRole)
-		return accountID, alias, roleName, err
-	}
-
-	if err := account.ValidateAWSAccountID(raw); err != nil {
-		return "", "", "", fmt.Errorf("--account %q is not a registered linked alias or 12-digit account ID", raw)
-	}
-	accountID = raw
+// resolveMigrateAccountTarget resolves display alias and assume-role name for a validated account ID.
+func resolveMigrateAccountTarget(cmd *cobra.Command, cfg configstore.File, configPath, accountID string) (alias, roleName string, err error) {
 	alias = cfg.AliasForAccountID(accountID)
 	if linked, ok := cfg.LinkedAccountForAlias(alias); ok && linked.AccountID == accountID {
 		if !cmd.Flags().Changed("role") {
 			if name := linked.RoleName(); name != "" {
-				return accountID, alias, name, nil
+				return alias, name, nil
 			}
 		}
 	}
 	roleName, err = resolveLinkedRoleName(cmd, configPath, migrateAccountRole)
-	return accountID, alias, roleName, err
+	return alias, roleName, err
 }
 
 func preferNonEmpty(values ...string) string {

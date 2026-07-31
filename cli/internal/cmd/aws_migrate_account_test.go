@@ -70,7 +70,7 @@ func TestAWSMigrateAccountDryRun(t *testing.T) {
 		return coreaccount.InviteResult{}, nil
 	}
 
-	migrateAccountFlag = "tenant-a"
+	migrateAccountIDFlag = "111111111111"
 	migrateAccountFromPayer = "rh-control"
 	migrateAccountToPayer = "osd-staging-1"
 	migrateAccountDestOU = ""
@@ -80,7 +80,7 @@ func TestAWSMigrateAccountDryRun(t *testing.T) {
 	migrateAccountYes = false
 	awsFlags.ConfigPath = configPath
 	defer func() {
-		migrateAccountFlag = ""
+		migrateAccountIDFlag = ""
 		migrateAccountFromPayer = ""
 		migrateAccountToPayer = ""
 		migrateAccountDryRun = false
@@ -88,6 +88,7 @@ func TestAWSMigrateAccountDryRun(t *testing.T) {
 	}()
 
 	cmd := &cobra.Command{}
+	cmd.Flags().String("role", "", "")
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	if err := runAWSMigrateAccount(cmd, nil); err != nil {
@@ -103,13 +104,13 @@ func TestAWSMigrateAccountDryRun(t *testing.T) {
 }
 
 func TestAWSMigrateAccountRequiresYes(t *testing.T) {
-	migrateAccountFlag = "111111111111"
+	migrateAccountIDFlag = "111111111111"
 	migrateAccountFromPayer = "rh-control"
 	migrateAccountToPayer = "osd-staging-1"
 	migrateAccountDryRun = false
 	migrateAccountYes = false
 	defer func() {
-		migrateAccountFlag = ""
+		migrateAccountIDFlag = ""
 		migrateAccountFromPayer = ""
 		migrateAccountToPayer = ""
 	}()
@@ -121,13 +122,13 @@ func TestAWSMigrateAccountRequiresYes(t *testing.T) {
 }
 
 func TestAWSMigrateAccountPayersMustDifferAfterTrim(t *testing.T) {
-	migrateAccountFlag = "111111111111"
+	migrateAccountIDFlag = "111111111111"
 	migrateAccountFromPayer = "rh-control"
 	migrateAccountToPayer = "  rh-control  "
 	migrateAccountDryRun = true
 	migrateAccountYes = false
 	defer func() {
-		migrateAccountFlag = ""
+		migrateAccountIDFlag = ""
 		migrateAccountFromPayer = ""
 		migrateAccountToPayer = ""
 		migrateAccountDryRun = false
@@ -156,14 +157,14 @@ func TestAWSMigrateAccountRejectsSamePayerAccountID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	migrateAccountFlag = "111111111111"
+	migrateAccountIDFlag = "111111111111"
 	migrateAccountFromPayer = "rh-control"
 	migrateAccountToPayer = "rhc"
 	migrateAccountDryRun = true
 	migrateAccountYes = false
 	awsFlags.ConfigPath = configPath
 	defer func() {
-		migrateAccountFlag = ""
+		migrateAccountIDFlag = ""
 		migrateAccountFromPayer = ""
 		migrateAccountToPayer = ""
 		migrateAccountDryRun = false
@@ -171,6 +172,7 @@ func TestAWSMigrateAccountRejectsSamePayerAccountID(t *testing.T) {
 	}()
 
 	cmd := &cobra.Command{}
+	cmd.Flags().String("role", "", "")
 	err = runAWSMigrateAccount(cmd, nil)
 	if err == nil {
 		t.Fatal("expected same-payer-ID error")
@@ -181,7 +183,7 @@ func TestAWSMigrateAccountRejectsSamePayerAccountID(t *testing.T) {
 	}
 }
 
-func TestResolveMigrateAccountTargetFromAlias(t *testing.T) {
+func TestResolveMigrateAccountTargetFromID(t *testing.T) {
 	cfg := configstore.Default()
 	var err error
 	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
@@ -196,19 +198,18 @@ func TestResolveMigrateAccountTargetFromAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	migrateAccountFlag = "tenant-a"
 	migrateAccountRole = ""
 	defer func() {
-		migrateAccountFlag = ""
+		migrateAccountRole = ""
 	}()
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("role", "", "")
-	accountID, alias, role, err := resolveMigrateAccountTarget(cmd, cfg, "")
+	alias, role, err := resolveMigrateAccountTarget(cmd, cfg, "", "111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accountID != "111111111111" || alias != "tenant-a" || role != "CustomRole" {
-		t.Fatalf("got account=%s alias=%s role=%s", accountID, alias, role)
+	if alias != "tenant-a" || role != "CustomRole" {
+		t.Fatalf("got alias=%s role=%s", alias, role)
 	}
 }

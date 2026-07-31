@@ -461,15 +461,16 @@ Migrate a linked (member) account from one payer organization to another (AWS Or
 
 ```bash
 # Plan only
-finops aws migrate-account --account 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
+finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
 
-# Execute (requires --yes)
-finops aws migrate-account --account osd-tenant-1 --from-payer rh-control --to-payer osd-staging-1 --yes
-finops aws migrate-account --account 111111111111 --from-payer rh-control --to-payer osd-staging-1 \
+# Execute (requires --yes); --account-id accepts comma-separated IDs
+finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --yes
+finops aws migrate-account --account-id 111111111111,222222222222 --from-payer rh-control --to-payer osd-staging-1 --yes
+finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 \
   --destination-ou ou-abcd-12345678 --yes
 ```
 
-`--account` accepts a 12-digit ID or a registered linked alias. The command invites from the destination payer, assumes into the member via the source payer (`OrganizationAccountAccessRole` or `--role`), accepts the handshake, optionally moves the account into a destination OU, then updates local `payer_alias`. Requires Organizations admin on both payers; SCPs/Control Tower may still block leave/accept.
+`--account-id` accepts one or more comma-separated 12-digit AWS account IDs. The command invites from the destination payer, assumes into the member via the source payer (`OrganizationAccountAccessRole` or `--role`), accepts the handshake, optionally moves the account into a destination OU, then updates local `payer_alias`. Requires Organizations admin on both payers; SCPs/Control Tower may still block leave/accept.
 
 **Cost Explorer (`finops account get-cost`) requires payer accounts only.** Linked-account credentials are for member-account APIs, not payer-level billing queries.
 
