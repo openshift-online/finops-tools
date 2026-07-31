@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/openshift-online/finops-tools/core/sqlrows"
 )
 
@@ -102,17 +103,13 @@ func ValidateQueryOptions(opts QueryOptions) (QueryOptions, error) {
 	return opts, nil
 }
 
-// ParseDate parses a YYYY-MM-DD date string.
+// ParseDate parses a YYYY-MM-DD date string. An empty string returns the zero
+// time (used for optional From/To filters).
 func ParseDate(s string) (time.Time, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	if strings.TrimSpace(s) == "" {
 		return time.Time{}, nil
 	}
-	t, err := time.Parse(dateOnlyLayout, s)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid date %q (expected YYYY-MM-DD)", s)
-	}
-	return t, nil
+	return cost.ParseDate(s)
 }
 
 // BuildHistoricalCountSQL returns SQL and bind args for the configured options. opts must be validated first.
