@@ -142,6 +142,9 @@ func TestLoadSnowflakeConflictingTokenAndPrivateKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when both TOKEN and PRIVATE_KEY are set")
 	}
+	if !strings.Contains(err.Error(), "cannot specify both TOKEN and PRIVATE_KEY/PRIVATE_KEY_FILE") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
 }
 
 func TestLoadSnowflakeConflictingTokenAndEmptyPrivateKeyFile(t *testing.T) {
@@ -306,11 +309,15 @@ func TestLoadSnowflakePrivateKeyFileMissing(t *testing.T) {
 	t.Setenv("SNOWFLAKE_CONNECTIONS", "prod")
 	t.Setenv("SNOWFLAKE_CONN_PROD_ACCOUNT", "acct")
 	t.Setenv("SNOWFLAKE_CONN_PROD_USER", "user")
-	t.Setenv("SNOWFLAKE_CONN_PROD_PRIVATE_KEY_FILE", t.TempDir()+"/does-not-exist")
+	missingPath := t.TempDir() + "/does-not-exist"
+	t.Setenv("SNOWFLAKE_CONN_PROD_PRIVATE_KEY_FILE", missingPath)
 	t.Setenv("SNOWFLAKE_CONN_PROD_WAREHOUSE", "wh")
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for missing private key file")
+	}
+	if !strings.Contains(err.Error(), missingPath) {
+		t.Fatalf("error should mention the configured path %q: %v", missingPath, err)
 	}
 }
 
