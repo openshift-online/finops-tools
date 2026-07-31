@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/openshift-online/finops-tools/core/sqlrows"
 )
 
 const (
@@ -46,18 +48,11 @@ type QueryResult struct {
 	Truncated bool
 }
 
-// RowIterator is the minimal row-iteration interface (mirrors database/sql.Rows).
-type RowIterator interface {
-	Next() bool
-	Scan(dest ...any) error
-	Close() error
-	Err() error
-}
+// RowIterator mirrors database/sql.Rows; kept as an alias for backward compatibility.
+type RowIterator = sqlrows.Rows
 
-// RowQuerier executes a SQL query and returns iterable rows.
-type RowQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (RowIterator, error)
-}
+// RowQuerier executes a SQL query and returns iterable rows; kept as an alias for backward compatibility.
+type RowQuerier = sqlrows.Querier
 
 // DBQuerier adapts *sql.DB to RowQuerier.
 type DBQuerier struct {
