@@ -1,6 +1,9 @@
 package account
 
-import "github.com/aws/aws-sdk-go-v2/aws"
+import (
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/openshift-online/finops-tools/core/progress"
+)
 
 const (
 	organizationsRegion      = "us-east-1"
@@ -40,9 +43,7 @@ type OrganizationAccountTags struct {
 }
 
 // TagFilterProgress reports long-running steps while filtering accounts by tag.
-type TagFilterProgress interface {
-	Step(message string)
-}
+type TagFilterProgress = progress.Reporter
 
 // AccountKind describes whether a validated account session is payer or linked.
 type AccountKind string
