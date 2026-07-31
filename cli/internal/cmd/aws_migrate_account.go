@@ -95,7 +95,7 @@ func init() {
 	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountDestOU, "destination-ou", "", "Optional destination OU or root ID after accept")
 	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountRole, "role", "", "IAM role name in the member account (default: linked config role or aws.linked_role)")
 	awsMigrateAccountCmd.Flags().StringVar(&migrateAccountNotes, "notes", "", "Optional invitation notes")
-	awsMigrateAccountCmd.Flags().BoolVar(&migrateAccountDryRun, "dry-run", false, "Validate and print the plan without calling Organizations APIs")
+	awsMigrateAccountCmd.Flags().BoolVar(&migrateAccountDryRun, "dry-run", false, "Read-only validation and plan (requires valid payer credentials; may call Organizations APIs to inspect account state; no mutations)")
 	awsMigrateAccountCmd.Flags().BoolVar(&migrateAccountYes, "yes", false, "Confirm the migration (required unless --dry-run)")
 }
 
