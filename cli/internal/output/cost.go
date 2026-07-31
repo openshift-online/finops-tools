@@ -117,7 +117,7 @@ func csvBreakdownRow(r cost.CostResult, item cost.CostBreakdownItem) []string {
 		r.Currency,
 		r.StartDate,
 		r.EndDate,
-		item.DisplayLabel(r.GroupBy),
+		item.Label(r.GroupBy),
 		fmt.Sprintf("%.10f", item.Amount),
 	}
 }
