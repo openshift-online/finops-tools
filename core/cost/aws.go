@@ -99,8 +99,8 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		AccountID:   accountID,
 		Metric:      MetricNetAmortized,
 		GroupBy:     q.GroupBy,
-		StartDate:   formatDate(dr.Start),
-		EndDate:     formatDate(dr.End.AddDate(0, 0, -1)),
+		StartDate:   FormatDate(dr.Start),
+		EndDate:     FormatDate(dr.End.AddDate(0, 0, -1)),
 		Amount:      amount,
 		Currency:    currency,
 		Breakdown:   breakdown,
@@ -197,8 +197,8 @@ func sumNetAmortizedCost(ctx context.Context, ce CostExplorerAPI, dr DateRange, 
 	for {
 		out, err := ce.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
 			TimePeriod: &types.DateInterval{
-				Start: aws.String(formatDate(dr.Start)),
-				End:   aws.String(formatDate(dr.End)),
+				Start: aws.String(FormatDate(dr.Start)),
+				End:   aws.String(FormatDate(dr.End)),
 			},
 			Granularity:   types.GranularityDaily,
 			Metrics:       []string{MetricNetAmortized},
@@ -253,8 +253,8 @@ func sumNetAmortizedGrouped(
 	for {
 		out, err := ce.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
 			TimePeriod: &types.DateInterval{
-				Start: aws.String(formatDate(dr.Start)),
-				End:   aws.String(formatDate(dr.End)),
+				Start: aws.String(FormatDate(dr.Start)),
+				End:   aws.String(FormatDate(dr.End)),
 			},
 			Granularity:   types.GranularityDaily,
 			Metrics:       []string{MetricNetAmortized},
@@ -361,8 +361,8 @@ func sumNetAmortizedDaily(ctx context.Context, ce CostExplorerAPI, dr DateRange,
 	for {
 		out, err := ce.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
 			TimePeriod: &types.DateInterval{
-				Start: aws.String(formatDate(dr.Start)),
-				End:   aws.String(formatDate(dr.End)),
+				Start: aws.String(FormatDate(dr.Start)),
+				End:   aws.String(FormatDate(dr.End)),
 			},
 			Granularity:   types.GranularityDaily,
 			Metrics:       []string{MetricNetAmortized},
