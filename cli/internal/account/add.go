@@ -11,7 +11,10 @@ import (
 	"github.com/openshift-online/finops-tools/cli/internal/awsauth"
 )
 
-var errProviderNotImplemented = errors.New("account provider not implemented")
+var (
+	errProviderNotImplemented = errors.New("account provider not implemented")
+	errUseSpecializedMethod   = errors.New("use specialized method for this provider")
+)
 
 // AWSEnsureFunc performs AWS credential ensure (injectable for tests).
 type AWSEnsureFunc func(context.Context, awsauth.EnsureOptions) (awsconfig.Result, error)
@@ -62,9 +65,9 @@ func AddAWS(ctx context.Context, opts AddAWSOptions) (AddResult, error) {
 		return AddResult{}, fmt.Errorf("logged in as account %s, expected %s", res.AccountID, accountID)
 	}
 
-	profile := awsconfig.SanitizeProfileName(accountID)
-	if res.Profile != "" {
-		profile = res.Profile
+	profile := res.Profile
+	if profile == "" {
+		profile = awsconfig.SanitizeProfileName(accountID)
 	}
 
 	return AddResult{
@@ -98,7 +101,7 @@ func Add(ctx context.Context, opts AddOptions) (AddResult, error) {
 	case ProviderGCP:
 		return AddResult{}, fmt.Errorf("%w: gcp", errProviderNotImplemented)
 	case ProviderSnowflake:
-		return AddResult{}, fmt.Errorf("use AddSnowflake for snowflake provider")
+		return AddResult{}, fmt.Errorf("%w: use AddSnowflake for snowflake provider", errUseSpecializedMethod)
 	default:
 		return AddResult{}, fmt.Errorf("unknown provider %q", opts.Provider)
 	}
