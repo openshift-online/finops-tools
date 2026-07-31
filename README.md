@@ -457,6 +457,20 @@ finops aws list-ous --payer rh-control --parent ou-abcd-1234
 finops aws list-ous --payer rh-control --format json
 ```
 
+Migrate a linked (member) account from one payer organization to another (AWS Organizations invite + accept):
+
+```bash
+# Plan only
+finops aws migrate-account --account 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
+
+# Execute (requires --yes)
+finops aws migrate-account --account osd-tenant-1 --from-payer rh-control --to-payer osd-staging-1 --yes
+finops aws migrate-account --account 111111111111 --from-payer rh-control --to-payer osd-staging-1 \
+  --destination-ou ou-abcd-12345678 --yes
+```
+
+`--account` accepts a 12-digit ID or a registered linked alias. The command invites from the destination payer, assumes into the member via the source payer (`OrganizationAccountAccessRole` or `--role`), accepts the handshake, optionally moves the account into a destination OU, then updates local `payer_alias`. Requires Organizations admin on both payers; SCPs/Control Tower may still block leave/accept.
+
 **Cost Explorer (`finops account get-cost`) requires payer accounts only.** Linked-account credentials are for member-account APIs, not payer-level billing queries.
 
 Static secrets (API keys, etc.) for other tools live in `~/.config/finops/.env`; AWS sessions use `~/.aws/credentials` profiles.

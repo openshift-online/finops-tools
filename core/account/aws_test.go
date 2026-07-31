@@ -12,6 +12,7 @@ import (
 )
 
 type fakeOrganizations struct {
+	organizationsMigrateStub
 	accounts map[string]string
 }
 
@@ -101,6 +102,7 @@ func (f fakeOrganizations) ListAccountsForParent(
 }
 
 type fakeOrganizationsTags struct {
+	organizationsMigrateStub
 	pages []*organizations.ListTagsForResourceOutput
 	err   error
 	call  int
@@ -197,6 +199,7 @@ func (f *fakeOrganizationsTags) SetAccountTag(
 }
 
 type fakeDescribeOrganizationClient struct {
+	organizationsMigrateStub
 	output *organizations.DescribeOrganizationOutput
 	err    error
 }
@@ -276,6 +279,7 @@ func (f fakeDescribeOrganizationClient) SetAccountTag(
 }
 
 type fakeOrganizationsTagMutator struct {
+	organizationsMigrateStub
 	lastAccountID string
 	lastTagKey    string
 	lastTagValue  string
@@ -360,6 +364,7 @@ func (f *fakeOrganizationsTagMutator) ListAccountsForParent(
 }
 
 type fakeOrganizationsWithStatus struct {
+	organizationsMigrateStub
 	accounts map[string]struct {
 		name   string
 		status types.AccountStatus
@@ -706,6 +711,7 @@ func organizationWithManagementAccountID(accountID string) *types.Organization {
 }
 
 type fakeOUHierarchy struct {
+	organizationsMigrateStub
 	roots            []string
 	childOUs         map[string][]OrganizationalUnit
 	accountsByParent map[string][]types.Account
@@ -817,6 +823,7 @@ func testOUHierarchy() fakeOUHierarchy {
 }
 
 type fakeOrganizationsFilterByTag struct {
+	organizationsMigrateStub
 	accounts map[string]string
 	tags     map[string][]Tag
 }

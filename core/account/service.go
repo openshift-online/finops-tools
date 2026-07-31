@@ -52,6 +52,31 @@ type OrganizationsAPI interface {
 		params *organizations.ListAccountsForParentInput,
 		optFns ...func(*organizations.Options),
 	) (*organizations.ListAccountsForParentOutput, error)
+	InviteAccountToOrganization(
+		ctx context.Context,
+		params *organizations.InviteAccountToOrganizationInput,
+		optFns ...func(*organizations.Options),
+	) (*organizations.InviteAccountToOrganizationOutput, error)
+	ListHandshakesForAccount(
+		ctx context.Context,
+		params *organizations.ListHandshakesForAccountInput,
+		optFns ...func(*organizations.Options),
+	) (*organizations.ListHandshakesForAccountOutput, error)
+	AcceptHandshake(
+		ctx context.Context,
+		params *organizations.AcceptHandshakeInput,
+		optFns ...func(*organizations.Options),
+	) (*organizations.AcceptHandshakeOutput, error)
+	ListParents(
+		ctx context.Context,
+		params *organizations.ListParentsInput,
+		optFns ...func(*organizations.Options),
+	) (*organizations.ListParentsOutput, error)
+	MoveAccount(
+		ctx context.Context,
+		params *organizations.MoveAccountInput,
+		optFns ...func(*organizations.Options),
+	) (*organizations.MoveAccountOutput, error)
 }
 
 type organizationsClientFactory func(aws.Config) OrganizationsAPI
@@ -183,4 +208,66 @@ func (c organizationsClient) ListAccountsForParent(
 		apilog.Log(ctx, fmt.Sprintf("Organizations.ListAccountsForParent parent=%s", aws.ToString(params.ParentId)))
 	}
 	return c.client.ListAccountsForParent(ctx, params, optFns...)
+}
+
+func (c organizationsClient) InviteAccountToOrganization(
+	ctx context.Context,
+	params *organizations.InviteAccountToOrganizationInput,
+	optFns ...func(*organizations.Options),
+) (*organizations.InviteAccountToOrganizationOutput, error) {
+	targetID := ""
+	if params != nil && params.Target != nil {
+		targetID = aws.ToString(params.Target.Id)
+	}
+	apilog.Log(ctx, fmt.Sprintf("Organizations.InviteAccountToOrganization target=%s", targetID))
+	return c.client.InviteAccountToOrganization(ctx, params, optFns...)
+}
+
+func (c organizationsClient) ListHandshakesForAccount(
+	ctx context.Context,
+	params *organizations.ListHandshakesForAccountInput,
+	optFns ...func(*organizations.Options),
+) (*organizations.ListHandshakesForAccountOutput, error) {
+	if params != nil && params.NextToken != nil && aws.ToString(params.NextToken) != "" {
+		apilog.Log(ctx, "Organizations.ListHandshakesForAccount page=next")
+	} else {
+		apilog.Log(ctx, "Organizations.ListHandshakesForAccount")
+	}
+	return c.client.ListHandshakesForAccount(ctx, params, optFns...)
+}
+
+func (c organizationsClient) AcceptHandshake(
+	ctx context.Context,
+	params *organizations.AcceptHandshakeInput,
+	optFns ...func(*organizations.Options),
+) (*organizations.AcceptHandshakeOutput, error) {
+	handshakeID := ""
+	if params != nil {
+		handshakeID = aws.ToString(params.HandshakeId)
+	}
+	apilog.Log(ctx, fmt.Sprintf("Organizations.AcceptHandshake handshake=%s", handshakeID))
+	return c.client.AcceptHandshake(ctx, params, optFns...)
+}
+
+func (c organizationsClient) ListParents(
+	ctx context.Context,
+	params *organizations.ListParentsInput,
+	optFns ...func(*organizations.Options),
+) (*organizations.ListParentsOutput, error) {
+	apilog.Log(ctx, fmt.Sprintf("Organizations.ListParents child=%s", aws.ToString(params.ChildId)))
+	return c.client.ListParents(ctx, params, optFns...)
+}
+
+func (c organizationsClient) MoveAccount(
+	ctx context.Context,
+	params *organizations.MoveAccountInput,
+	optFns ...func(*organizations.Options),
+) (*organizations.MoveAccountOutput, error) {
+	apilog.Log(ctx, fmt.Sprintf(
+		"Organizations.MoveAccount account=%s source=%s destination=%s",
+		aws.ToString(params.AccountId),
+		aws.ToString(params.SourceParentId),
+		aws.ToString(params.DestinationParentId),
+	))
+	return c.client.MoveAccount(ctx, params, optFns...)
 }
