@@ -148,19 +148,21 @@ func loadConnectionParams(name, prefix string) (coresnowflake.ConnectParams, err
 	account := strings.TrimSpace(os.Getenv(prefix + "ACCOUNT"))
 	user := strings.TrimSpace(os.Getenv(prefix + "USER"))
 	token := strings.TrimSpace(os.Getenv(prefix + "TOKEN"))
+	privateKeyConfigured := strings.TrimSpace(os.Getenv(prefix+"PRIVATE_KEY")) != ""
+	privateKeyFileConfigured := strings.TrimSpace(os.Getenv(prefix+"PRIVATE_KEY_FILE")) != ""
+	if token != "" && (privateKeyConfigured || privateKeyFileConfigured) {
+		return coresnowflake.ConnectParams{}, fmt.Errorf(
+			"snowflake configuration for connection %q: cannot specify both TOKEN and PRIVATE_KEY/PRIVATE_KEY_FILE",
+			name,
+		)
+	}
+
 	privateKey, err := loadPrivateKey(prefix)
 	if err != nil {
 		return coresnowflake.ConnectParams{}, fmt.Errorf(
 			"snowflake configuration for connection %q: %w",
 			name,
 			err,
-		)
-	}
-
-	if token != "" && privateKey != "" {
-		return coresnowflake.ConnectParams{}, fmt.Errorf(
-			"snowflake configuration for connection %q: cannot specify both TOKEN and PRIVATE_KEY/PRIVATE_KEY_FILE",
-			name,
 		)
 	}
 

@@ -144,6 +144,26 @@ func TestLoadSnowflakeConflictingTokenAndPrivateKey(t *testing.T) {
 	}
 }
 
+func TestLoadSnowflakeConflictingTokenAndEmptyPrivateKeyFile(t *testing.T) {
+	clearSnowflakeEnv(t)
+	emptyPath := writeTempKeyFile(t, "   ")
+
+	t.Setenv("SNOWFLAKE_CONNECTIONS", "prod")
+	t.Setenv("SNOWFLAKE_CONN_PROD_ACCOUNT", "acct")
+	t.Setenv("SNOWFLAKE_CONN_PROD_USER", "user")
+	t.Setenv("SNOWFLAKE_CONN_PROD_TOKEN", "token")
+	t.Setenv("SNOWFLAKE_CONN_PROD_PRIVATE_KEY_FILE", emptyPath)
+	t.Setenv("SNOWFLAKE_CONN_PROD_WAREHOUSE", "wh")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error when both TOKEN and PRIVATE_KEY_FILE are set, even if the file is empty")
+	}
+	if !strings.Contains(err.Error(), "cannot specify both TOKEN and PRIVATE_KEY/PRIVATE_KEY_FILE") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestLoadSnowflakeMultipleConnections(t *testing.T) {
 	clearSnowflakeEnv(t)
 	t.Setenv("SNOWFLAKE_CONNECTIONS", "prod,sandbox")
