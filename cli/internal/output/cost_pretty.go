@@ -41,8 +41,8 @@ func writePrettySummary(w io.Writer, s styler, r cost.CostResult) error {
 		{accountLabel, formatAccountList(r.AccountName, r.AccountID)},
 		{"Period", fmt.Sprintf("%s – %s", r.StartDate, r.EndDate)},
 	}
-	if r.SplitBy != cost.SplitByNone {
-		lines = append(lines, struct{ label, value string }{"Split by", string(r.SplitBy)})
+	if r.GroupBy != cost.GroupByNone {
+		lines = append(lines, struct{ label, value string }{"Group by", string(r.GroupBy)})
 	}
 
 	labelWidth := 0
@@ -69,7 +69,7 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 		return err
 	}
 
-	title, keyHeader := breakdownTitles(r.SplitBy)
+	title, keyHeader := breakdownTitles(r.GroupBy)
 	if s.enabled {
 		title = s.bold(s.cyan(title))
 	}
@@ -114,7 +114,7 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 			amountStr = s.bold(amountStr)
 		}
 		table.Append([]string{
-			truncateLabel(item.DisplayLabel(r.SplitBy)),
+			truncateLabel(item.DisplayLabel(r.GroupBy)),
 			amountStr,
 			fmt.Sprintf("%.1f%%", share),
 			renderBar(s, item.Amount/maxAmount, i),
@@ -175,9 +175,9 @@ func cell(s styler, fn func(string) string, text string) string {
 	return text
 }
 
-func breakdownTitles(splitBy cost.SplitBy) (title, keyHeader string) {
-	switch splitBy {
-	case cost.SplitByAccount:
+func breakdownTitles(groupBy cost.GroupBy) (title, keyHeader string) {
+	switch groupBy {
+	case cost.GroupByAccount:
 		return "Cost by linked account", "ACCOUNT ID"
 	default:
 		return "Cost by service", "SERVICE"

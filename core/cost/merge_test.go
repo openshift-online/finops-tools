@@ -39,12 +39,12 @@ func TestMergeResultsPreservesAccountNames(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", AccountName: "Member One", Amount: 60}},
 		},
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "222222222222", AccountName: "Member Two", Amount: 40}},
 		},
 	}
@@ -64,12 +64,12 @@ func TestMergeResultsCombinesLinkedAccounts(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, AccountName: "payer-a", Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", Amount: 60}},
 		},
 		{
 			Provider: ProviderAWS, AccountName: "payer-b", Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", Amount: 10}, {Account: "222222222222", Amount: 30}},
 		},
 	}

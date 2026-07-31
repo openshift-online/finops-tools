@@ -271,7 +271,7 @@ func TestSumNetAmortizedByService(t *testing.T) {
 		Start: time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC),
 	}
-	total, currency, breakdown, err := sumNetAmortizedGrouped(context.Background(), ce, dr, "SERVICE", SplitByService, nil)
+	total, currency, breakdown, err := sumNetAmortizedGrouped(context.Background(), ce, dr, "SERVICE", GroupByService, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestSumNetAmortizedByAccount(t *testing.T) {
 		Start: time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC),
 	}
-	total, _, breakdown, err := sumNetAmortizedGrouped(context.Background(), ce, dr, "LINKED_ACCOUNT", SplitByAccount, nil)
+	total, _, breakdown, err := sumNetAmortizedGrouped(context.Background(), ce, dr, "LINKED_ACCOUNT", GroupByAccount, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestFetchAWSNetAmortizedByService(t *testing.T) {
 		Provider: ProviderAWS,
 		Accounts: []AccountTarget{{AccountID: "123456789012", AWSConfig: aws.Config{}}},
 		Range:   LastNDaysRange(30, now),
-		SplitBy: SplitByService,
+		GroupBy: GroupByService,
 	}, fetchAWSOptions{
 		Now:             now,
 		NewCostExplorer: func(aws.Config) CostExplorerAPI { return ce },
@@ -349,8 +349,8 @@ func TestFetchAWSNetAmortizedByService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SplitBy != SplitByService {
-		t.Errorf("SplitBy = %q", res.SplitBy)
+	if res.GroupBy != GroupByService {
+		t.Errorf("GroupBy = %q", res.GroupBy)
 	}
 	if len(res.Breakdown) != 1 || res.Breakdown[0].Amount != 25 {
 		t.Errorf("Breakdown = %+v", res.Breakdown)

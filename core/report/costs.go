@@ -68,7 +68,7 @@ func BuildCostsReport(ctx context.Context, q cost.CostQuery, progress Progress) 
 	g.Go(func() error {
 		progress.Step(fmt.Sprintf("Fetching total costs from AWS Cost Explorer (%s)…", period))
 		totalQ := q
-		totalQ.SplitBy = cost.SplitByNone
+		totalQ.GroupBy = cost.GroupByNone
 		var err error
 		totalRes, err = cost.Fetch(gctx, totalQ)
 		if err != nil {
@@ -80,7 +80,7 @@ func BuildCostsReport(ctx context.Context, q cost.CostQuery, progress Progress) 
 	g.Go(func() error {
 		progress.Step("Fetching costs by linked account…")
 		byAccountQ := q
-		byAccountQ.SplitBy = cost.SplitByAccount
+		byAccountQ.GroupBy = cost.GroupByAccount
 		var err error
 		byAccountRes, err = cost.Fetch(gctx, byAccountQ)
 		if err != nil {
@@ -92,7 +92,7 @@ func BuildCostsReport(ctx context.Context, q cost.CostQuery, progress Progress) 
 	g.Go(func() error {
 		progress.Step("Fetching costs by service…")
 		byServiceQ := q
-		byServiceQ.SplitBy = cost.SplitByService
+		byServiceQ.GroupBy = cost.GroupByService
 		var err error
 		byServiceRes, err = cost.Fetch(gctx, byServiceQ)
 		if err != nil {

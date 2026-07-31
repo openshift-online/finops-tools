@@ -75,7 +75,7 @@ func TestWriteCostResultCSV(t *testing.T) {
 
 func TestWriteCostResultPrettyPrintWithBreakdown(t *testing.T) {
 	r := fixtureResult()
-	r.SplitBy = cost.SplitByService
+	r.GroupBy = cost.GroupByService
 	r.Breakdown = []cost.CostBreakdownItem{
 		{Service: "Amazon EC2", Amount: 100},
 		{Service: "Amazon S3", Amount: 10},
@@ -109,6 +109,33 @@ func TestWriteCostResultCSVWithBreakdown(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "Amazon S3") {
 		t.Errorf("row = %q", lines[1])
+	}
+}
+
+func TestWriteCostResultCSVWithAccountBreakdownUsesRawID(t *testing.T) {
+	r := fixtureResult()
+	r.GroupBy = cost.GroupByAccount
+	r.Breakdown = []cost.CostBreakdownItem{{
+		Account:     "111111111111",
+		AccountName: "Quay Production",
+		Amount:      10,
+	}}
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatCSV, r); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines:\n%s", buf.String())
+	}
+	if !strings.Contains(lines[0], "linked_account_id") {
+		t.Errorf("header = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "111111111111") {
+		t.Errorf("row missing raw account id: %q", lines[1])
+	}
+	if strings.Contains(lines[1], "Quay Production") {
+		t.Errorf("CSV should use raw account id, not DisplayLabel: %q", lines[1])
 	}
 }
 
