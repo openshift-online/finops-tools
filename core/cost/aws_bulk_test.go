@@ -179,7 +179,7 @@ func TestFetchBulkServiceBatchesRejectMixedCurrency(t *testing.T) {
 	_, err := fetchAWSNetAmortizedBulk(context.Background(), CostQuery{
 		Provider: ProviderAWS,
 		Range:    LastNDaysRange(30, now),
-		SplitBy:  SplitByService,
+		GroupBy:  GroupByService,
 		Workers:  2,
 	}, targets, fetchAWSOptions{
 		Now:             now,
@@ -211,7 +211,7 @@ func TestFetchBulkParallelBatches(t *testing.T) {
 	res, err := fetchAWSNetAmortizedBulk(context.Background(), CostQuery{
 		Provider: ProviderAWS,
 		Range:    LastNDaysRange(30, now),
-		SplitBy:  SplitByAccount,
+		GroupBy:  GroupByAccount,
 		Workers:  4,
 	}, targets, fetchAWSOptions{
 		Now:             now,

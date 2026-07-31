@@ -35,7 +35,7 @@ func TestWritePrettyPrintNoANSIInBuffer(t *testing.T) {
 		{Service: "Amazon S3", Amount: 10},
 	}
 	r.Amount = 100
-	r.SplitBy = cost.SplitByService
+	r.GroupBy = cost.GroupByService
 
 	var buf strings.Builder
 	if err := writePrettyPrint(&buf, r); err != nil {

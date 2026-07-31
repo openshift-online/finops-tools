@@ -1,4 +1,4 @@
-// aws.go calls AWS Cost Explorer to fetch NetAmortizedCost with optional split-by service or linked account.
+// aws.go calls AWS Cost Explorer to fetch NetAmortizedCost with optional group-by service or linked account.
 package cost
 
 import (
@@ -28,7 +28,7 @@ type CostExplorerAPI interface {
 	) (*costexplorer.GetCostAndUsageOutput, error)
 }
 
-// ListAWSAccountNamesFunc maps organization account IDs to display names for split-by-account output.
+// ListAWSAccountNamesFunc maps organization account IDs to display names for group-by-account output.
 type ListAWSAccountNamesFunc func(context.Context, aws.Config) (map[string]string, error)
 
 type fetchAWSOptions struct {
@@ -75,19 +75,21 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		breakdown []CostBreakdownItem
 		fetchErr  error
 	)
-	switch q.SplitBy {
-	case SplitByService:
-		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", SplitByService, filter)
-	case SplitByAccount:
-		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", SplitByAccount, filter)
-	default:
+	switch q.GroupBy {
+	case GroupByService:
+		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", GroupByService, filter)
+	case GroupByAccount:
+		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", GroupByAccount, filter)
+	case GroupByNone:
 		amount, currency, fetchErr = sumNetAmortizedCost(ctx, ce, dr, filter)
+	default:
+		return CostResult{}, fmt.Errorf("unknown group-by %q", q.GroupBy)
 	}
 	if fetchErr != nil {
 		return CostResult{}, fetchErr
 	}
 
-	if q.SplitBy == SplitByAccount {
+	if q.GroupBy == GroupByAccount {
 		breakdown = applyAWSAccountNames(ctx, cfg, breakdown, opts)
 	}
 
@@ -96,7 +98,7 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		AccountName: acct.AccountDisplayName(),
 		AccountID:   accountID,
 		Metric:      MetricNetAmortized,
-		SplitBy:     q.SplitBy,
+		GroupBy:     q.GroupBy,
 		StartDate:   formatDate(dr.Start),
 		EndDate:     formatDate(dr.End.AddDate(0, 0, -1)),
 		Amount:      amount,
@@ -236,14 +238,14 @@ func sumNetAmortizedGrouped(
 	ce CostExplorerAPI,
 	dr DateRange,
 	dimension string,
-	splitBy SplitBy,
+	groupBy GroupBy,
 	filter *types.Expression,
 ) (float64, string, []CostBreakdownItem, error) {
 	byKey := make(map[string]float64)
 	currency := "USD"
 	var token *string
 
-	groupBy := []types.GroupDefinition{{
+	ceGroupDefs := []types.GroupDefinition{{
 		Type: types.GroupDefinitionTypeDimension,
 		Key:  aws.String(dimension),
 	}}
@@ -256,7 +258,7 @@ func sumNetAmortizedGrouped(
 			},
 			Granularity:   types.GranularityDaily,
 			Metrics:       []string{MetricNetAmortized},
-			GroupBy:       groupBy,
+			GroupBy:       ceGroupDefs,
 			Filter:        filter,
 			NextPageToken: token,
 		})
@@ -298,8 +300,8 @@ func sumNetAmortizedGrouped(
 			continue
 		}
 		item := CostBreakdownItem{Amount: amt}
-		switch splitBy {
-		case SplitByAccount:
+		switch groupBy {
+		case GroupByAccount:
 			item.Account = key
 		default:
 			item.Service = key

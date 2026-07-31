@@ -536,15 +536,15 @@ finops account get-cost --account 123456789012
 finops account get-cost --account-alias rh-control,osd-staging-1
 finops account get-cost --account 123456789012 --format json
 finops account get-cost --account 123456789012 --format csv
-finops account get-cost --account 123456789012 --split-by service
-finops account get-cost --account 123456789012 --split-by account
+finops account get-cost --account 123456789012 --group-by service
+finops account get-cost --account 123456789012 --group-by account
 finops account get-cost --account 333333333333 --payer rhc   # member account, payer registered; member need not be in config
 finops aws list-ous --payer rh-control           # discover OU IDs
 finops account get-cost --ou ou-abcd-1234 --payer rh-control
 finops account get-cost --ou ou-abcd-1234 --payer rh-control --ou-direct --days 7
 finops account get-cost --payer rh-control --all-linked
 finops account get-cost --payer rh-control --tag-key organization
-finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
+finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --group-by service
 finops report create costs --payer rh-control --tag-key env --tag-value prod -o prod.html
 ```
 
@@ -569,7 +569,7 @@ finops report create costs --payer rh-control --tag-key env --tag-value prod -o 
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr (cost/CSV/JSON still go to stdout) |
 | `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential) |
-| `--split-by` | Group costs by dimension: `service` (AWS service) or `account` (linked AWS account ID); includes share % and relative cost bars in `pretty-print` |
+| `--group-by` | Group costs by dimension: `service` (AWS service) or `account` (linked AWS account ID); includes share % and relative cost bars in `pretty-print` |
 | `--provider` | `aws` (default). `gcp` is reserved for a future release |
 
 `pretty-print` uses colors and Unicode bars when stdout is a TTY. Set `NO_COLOR=1` to disable; `FORCE_COLOR=1` forces colors when piping to a capable viewer.
