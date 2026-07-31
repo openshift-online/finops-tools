@@ -64,7 +64,7 @@ Examples:
 		if strings.TrimSpace(migrateAccountToPayer) == "" {
 			return fmt.Errorf("--to-payer is required")
 		}
-		if migrateAccountFromPayer == migrateAccountToPayer {
+		if strings.TrimSpace(migrateAccountFromPayer) == strings.TrimSpace(migrateAccountToPayer) {
 			return fmt.Errorf("--from-payer and --to-payer must differ")
 		}
 		accountFlag := strings.TrimSpace(migrateAccountFlag)
@@ -118,6 +118,9 @@ func runAWSMigrateAccount(cmd *cobra.Command, _ []string) error {
 	toPayerID, ok := cfg.PayerAccountIDForAlias(toAlias)
 	if !ok {
 		return errUnknownPayerAlias(toAlias)
+	}
+	if fromPayerID == toPayerID {
+		return fmt.Errorf("--from-payer %q and --to-payer %q resolve to the same payer account ID %s", fromAlias, toAlias, fromPayerID)
 	}
 
 	accountID, accountAlias, roleName, err := resolveMigrateAccountTarget(cmd, cfg, configPath)

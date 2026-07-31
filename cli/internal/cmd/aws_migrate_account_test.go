@@ -120,6 +120,67 @@ func TestAWSMigrateAccountRequiresYes(t *testing.T) {
 	}
 }
 
+func TestAWSMigrateAccountPayersMustDifferAfterTrim(t *testing.T) {
+	migrateAccountFlag = "111111111111"
+	migrateAccountFromPayer = "rh-control"
+	migrateAccountToPayer = "  rh-control  "
+	migrateAccountDryRun = true
+	migrateAccountYes = false
+	defer func() {
+		migrateAccountFlag = ""
+		migrateAccountFromPayer = ""
+		migrateAccountToPayer = ""
+		migrateAccountDryRun = false
+	}()
+
+	err := awsMigrateAccountCmd.PreRunE(awsMigrateAccountCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("expected must-differ error, got %v", err)
+	}
+}
+
+func TestAWSMigrateAccountRejectsSamePayerAccountID(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := configstore.Default()
+	var err error
+	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = cfg.SetAWSAlias("rhc", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	migrateAccountFlag = "111111111111"
+	migrateAccountFromPayer = "rh-control"
+	migrateAccountToPayer = "rhc"
+	migrateAccountDryRun = true
+	migrateAccountYes = false
+	awsFlags.ConfigPath = configPath
+	defer func() {
+		migrateAccountFlag = ""
+		migrateAccountFromPayer = ""
+		migrateAccountToPayer = ""
+		migrateAccountDryRun = false
+		awsFlags.ConfigPath = ""
+	}()
+
+	cmd := &cobra.Command{}
+	err = runAWSMigrateAccount(cmd, nil)
+	if err == nil {
+		t.Fatal("expected same-payer-ID error")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "rh-control") || !strings.Contains(got, "rhc") || !strings.Contains(got, "123456789012") {
+		t.Fatalf("error should name both aliases and account ID, got %v", err)
+	}
+}
+
 func TestResolveMigrateAccountTargetFromAlias(t *testing.T) {
 	cfg := configstore.Default()
 	var err error
