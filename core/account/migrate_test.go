@@ -11,8 +11,6 @@ import (
 )
 
 type fakeMigrateOrganizations struct {
-	organizationsMigrateStub
-
 	memberIDs map[string]struct{}
 
 	inviteAccountID string
