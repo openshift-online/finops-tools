@@ -300,7 +300,7 @@ func reportBulkFetchProgress(progress FetchProgress, accountCount int, groupBy G
 	case GroupByService:
 		progress.Step(fmt.Sprintf("Fetching costs by service for %d account(s) in batched Cost Explorer queries…", accountCount))
 	default:
-		progress.Step(fmt.Sprintf("Fetching costs for %d account(s) in one bulk Cost Explorer query…", accountCount))
+		progress.Step(fmt.Sprintf("Fetching costs for %d account(s) in bulk Cost Explorer queries…", accountCount))
 	}
 }
 
