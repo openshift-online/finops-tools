@@ -33,6 +33,10 @@ func MergeResults(results []CostResult) (CostResult, error) {
 	)
 	byKey := make(map[string]float64)
 	accountNames := make(map[string]string)
+	ouDepths := make(map[string]int)
+	ouOrder := make([]string, 0)
+	ouSeen := make(map[string]struct{})
+	preserveOUOrder := out.GroupBy == GroupByOU
 
 	for _, r := range results {
 		if r.Provider != out.Provider {
@@ -62,6 +66,20 @@ func MergeResults(results []CostResult) (CostResult, error) {
 			if out.GroupBy == GroupByAccount && item.AccountName != "" {
 				accountNames[key] = item.AccountName
 			}
+			if out.GroupBy == GroupByOU {
+				if item.OUName != "" {
+					accountNames[key] = item.OUName
+				}
+				if _, ok := ouDepths[key]; !ok {
+					ouDepths[key] = item.OUDepth
+				}
+				if preserveOUOrder {
+					if _, seen := ouSeen[key]; !seen {
+						ouSeen[key] = struct{}{}
+						ouOrder = append(ouOrder, key)
+					}
+				}
+			}
 		}
 	}
 
@@ -79,14 +97,35 @@ func MergeResults(results []CostResult) (CostResult, error) {
 			case GroupByAccount:
 				item.Account = key
 				item.AccountName = accountNames[key]
+			case GroupByOU:
+				item.OUID = key
+				item.OUName = accountNames[key]
+				if item.OUName == "" {
+					item.OUName = key
+				}
+				item.OUDepth = ouDepths[key]
 			default:
 				item.Service = key
 			}
 			out.Breakdown = append(out.Breakdown, item)
 		}
-		sort.Slice(out.Breakdown, func(i, j int) bool {
-			return out.Breakdown[i].Amount > out.Breakdown[j].Amount
-		})
+		if preserveOUOrder && len(ouOrder) > 0 {
+			byID := make(map[string]CostBreakdownItem, len(out.Breakdown))
+			for _, item := range out.Breakdown {
+				byID[item.OUID] = item
+			}
+			ordered := make([]CostBreakdownItem, 0, len(ouOrder))
+			for _, key := range ouOrder {
+				if item, ok := byID[key]; ok {
+					ordered = append(ordered, item)
+				}
+			}
+			out.Breakdown = ordered
+		} else {
+			sort.Slice(out.Breakdown, func(i, j int) bool {
+				return out.Breakdown[i].Amount > out.Breakdown[j].Amount
+			})
+		}
 	}
 
 	return out, nil

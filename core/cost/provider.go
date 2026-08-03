@@ -33,6 +33,7 @@ const (
 	GroupByNone    GroupBy = ""
 	GroupByService GroupBy = "service"
 	GroupByAccount GroupBy = "account"
+	GroupByOU      GroupBy = "ou"
 )
 
 var errProviderNotImplemented = errors.New("cost provider not implemented")
@@ -46,8 +47,10 @@ func ParseGroupBy(s string) (GroupBy, error) {
 		return GroupByService, nil
 	case string(GroupByAccount):
 		return GroupByAccount, nil
+	case string(GroupByOU):
+		return GroupByOU, nil
 	default:
-		return "", fmt.Errorf("unknown group-by %q (supported: service, account)", s)
+		return "", fmt.Errorf("unknown group-by %q (supported: service, account, ou)", s)
 	}
 }
 
@@ -73,6 +76,17 @@ type AWSFetchOptions struct {
 	ListAccountNames ListAWSAccountNamesFunc
 	// ResolveAccountNames looks up only the given account IDs (fast for small sets).
 	ResolveAccountNames ResolveAWSAccountNamesFunc
+	// AccountOUBuckets maps linked account IDs to OU rollup buckets for GroupByOU.
+	// Prefer immediate parent OUs when OUHierarchy is also set (tree rollup).
+	AccountOUBuckets map[string]OUBucket
+	// OUHierarchy is the DFS pre-order OU tree under the selection root for GroupByOU.
+	OUHierarchy []OUHierarchyNode
+}
+
+// OUBucket identifies an Organizational Unit for cost rollup.
+type OUBucket struct {
+	ID   string
+	Name string
 }
 
 // FetchProgress reports long-running steps while fetching costs.
@@ -133,11 +147,14 @@ type DailyCostItem struct {
 	Amount float64 `json:"amount"`
 }
 
-// CostBreakdownItem is one row when costs are grouped by service or linked account.
+// CostBreakdownItem is one row when costs are split by service, linked account, or OU.
 type CostBreakdownItem struct {
 	Service     string  `json:"service,omitempty"`
 	Account     string  `json:"account,omitempty"`
 	AccountName string  `json:"account_name,omitempty"`
+	OUID        string  `json:"ou_id,omitempty"`
+	OUName      string  `json:"ou_name,omitempty"`
+	OUDepth     int     `json:"ou_depth"`
 	Amount      float64 `json:"amount"`
 }
 
@@ -146,12 +163,17 @@ func (b CostBreakdownItem) Label(groupBy GroupBy) string {
 	switch groupBy {
 	case GroupByAccount:
 		return b.Account
+	case GroupByOU:
+		if id := strings.TrimSpace(b.OUID); id != "" {
+			return id
+		}
+		return b.OUName
 	default:
 		return b.Service
 	}
 }
 
-// DisplayLabel returns the formatted label for output (includes account ID when a name is known).
+// DisplayLabel returns the formatted label for output (includes account/OU ID when a name is known).
 func (b CostBreakdownItem) DisplayLabel(groupBy GroupBy) string {
 	switch groupBy {
 	case GroupByAccount:
@@ -159,6 +181,16 @@ func (b CostBreakdownItem) DisplayLabel(groupBy GroupBy) string {
 			return name + " (" + b.Account + ")"
 		}
 		return b.Label(groupBy)
+	case GroupByOU:
+		name := strings.TrimSpace(b.OUName)
+		id := strings.TrimSpace(b.OUID)
+		if name != "" && id != "" && name != id {
+			return name + " (" + id + ")"
+		}
+		if name != "" {
+			return name
+		}
+		return id
 	default:
 		return b.Label(groupBy)
 	}
@@ -216,12 +248,28 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		}
 	}
 
+	// For GroupByOU, fetch per-account LINKED_ACCOUNT rows and roll up once after
+	// merge. Rolling up before merge flattens the tree (loses depth/DFS order) and
+	// can disorder siblings when multiple payers/orgs are combined.
+	fetchGroupBy := q.GroupBy
+	deferOURollup := q.GroupBy == GroupByOU
+	if deferOURollup {
+		fetchGroupBy = GroupByAccount
+	}
+
 	results := make([]CostResult, len(targets))
 	err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
 		acct := targets[i]
 		reportFetchProgress(q.Progress, acct, i+1, len(targets), q.GroupBy)
 		single := q
 		single.Accounts = []AccountTarget{acct}
+		single.GroupBy = fetchGroupBy
+		if deferOURollup && single.AWSFetch != nil {
+			cp := *single.AWSFetch
+			cp.AccountOUBuckets = nil
+			cp.OUHierarchy = nil
+			single.AWSFetch = &cp
+		}
 
 		var r CostResult
 		var err error
@@ -242,7 +290,15 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 	if err != nil {
 		return CostResult{}, err
 	}
-	return MergeResults(results)
+	merged, err := MergeResults(results)
+	if err != nil {
+		return CostResult{}, err
+	}
+	if deferOURollup {
+		merged.GroupBy = GroupByOU
+		merged.Breakdown = rollupOUBreakdown(merged.Breakdown, q.AWSFetch)
+	}
+	return merged, nil
 }
 
 // FetchDaily retrieves per-day net amortized costs for one or more accounts.
@@ -299,8 +355,10 @@ func reportBulkFetchProgress(progress FetchProgress, accountCount int, groupBy G
 	switch groupBy {
 	case GroupByService:
 		progress.Step(fmt.Sprintf("Fetching costs by service for %d account(s) in batched Cost Explorer queries…", accountCount))
+	case GroupByOU:
+		progress.Step(fmt.Sprintf("Fetching costs by OU for %d account(s) in batched Cost Explorer queries…", accountCount))
 	default:
-		progress.Step(fmt.Sprintf("Fetching costs for %d account(s) in bulk Cost Explorer queries…", accountCount))
+		progress.Step(fmt.Sprintf("Fetching costs for %d account(s) in one bulk Cost Explorer query…", accountCount))
 	}
 }
 

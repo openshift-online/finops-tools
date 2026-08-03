@@ -71,7 +71,7 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 	switch q.GroupBy {
 	case GroupByService:
 		return fetchAWSNetAmortizedBulkByService(ctx, ce, q, targets, plan, dr)
-	case GroupByAccount, GroupByNone:
+	case GroupByAccount, GroupByNone, GroupByOU:
 		ids := sortedAccountIDs(plan.accountIDs)
 		batches := batchStrings(ids, linkedAccountFilterBatchSize)
 		type accountBatchResult struct {
@@ -115,6 +115,9 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 		out := bulkMergedCostResult(targets, q, dr, total, currency, plan.credTarget)
 		if q.GroupBy == GroupByAccount {
 			out.Breakdown = breakdown
+		}
+		if q.GroupBy == GroupByOU {
+			out.Breakdown = rollupOUBreakdown(breakdown, q.AWSFetch)
 		}
 		return out, nil
 	default:

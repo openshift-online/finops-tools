@@ -27,10 +27,34 @@ type OrganizationalUnit struct {
 
 // ListAccountsInOUOptions configures ListAccountsInOU.
 type ListAccountsInOUOptions struct {
+	// MaxDepth limits how deep to walk child OUs from the starting OU.
+	// nil (default) means unbounded descendants. 0 = accounts directly in the OU only;
+	// 1 = the OU plus immediate child OUs; and so on. Negative values mean unbounded.
+	MaxDepth *int
 	// DirectOnly lists accounts directly in ouID only (not descendant OUs).
+	// Deprecated: prefer MaxDepth pointing at 0; when true, overrides MaxDepth.
 	DirectOnly bool
 	// Status filters accounts by Organizations status (default ACTIVE).
 	Status string
+}
+
+// AccountOUBucket is the OU rollup bucket for an account under a selection root.
+type AccountOUBucket struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// OUHierarchyNode is one node in an OU tree under a selection root (DFS pre-order).
+type OUHierarchyNode struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ParentID string `json:"parent_id,omitempty"`
+	Depth    int    `json:"depth"`
+}
+
+// OUDepthPtr returns a pointer to depth for ListAccountsInOUOptions.MaxDepth.
+func OUDepthPtr(depth int) *int {
+	return &depth
 }
 
 // OrganizationAccountTags is one organization account and its Organizations tags.

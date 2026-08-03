@@ -76,7 +76,7 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 	switch q.GroupBy {
 	case GroupByService:
 		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", GroupByService, filter)
-	case GroupByAccount:
+	case GroupByAccount, GroupByOU:
 		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", GroupByAccount, filter)
 	case GroupByNone:
 		amount, currency, fetchErr = sumNetAmortizedCost(ctx, ce, dr, filter)
@@ -87,8 +87,11 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		return CostResult{}, fetchErr
 	}
 
-	if q.GroupBy == GroupByAccount {
+	if q.GroupBy == GroupByAccount || q.GroupBy == GroupByOU {
 		breakdown = applyAWSAccountNames(ctx, cfg, breakdown, opts)
+	}
+	if q.GroupBy == GroupByOU {
+		breakdown = rollupOUBreakdown(breakdown, q.AWSFetch)
 	}
 
 	return CostResult{

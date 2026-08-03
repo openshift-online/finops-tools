@@ -31,6 +31,10 @@ func TestParseGroupBy(t *testing.T) {
 	if err != nil || s != GroupByAccount {
 		t.Fatalf("got %v %v", s, err)
 	}
+	s, err = ParseGroupBy("ou")
+	if err != nil || s != GroupByOU {
+		t.Fatalf("got %v %v", s, err)
+	}
 	_, err = ParseGroupBy("region")
 	if err == nil {
 		t.Fatal("expected error")

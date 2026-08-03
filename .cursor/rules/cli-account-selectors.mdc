@@ -8,12 +8,17 @@ alwaysApply: false
 
 Account-targeting commands must be explicit. Do not autodetect alias vs account ID from a positional argument.
 
+Keep **local alias** and **provider-native ID** as separate flags so future GCP/Azure/Dynatrace IDs never collide with nicknames.
+
 ## Required flags
 
-- **`--account-id`** — 12-digit AWS account ID (never name this flag `--account` on tag commands).
+- **`--account-id`** — provider-native account ID (AWS: 12-digit ID).
 - **`--account-alias`** — registered finops alias.
 
-Require **exactly one** of `--account-id` or `--account-alias`. Validate in command logic (not only Cobra mutual exclusion unless wired).
+For single-account commands (`tag list/add/update`): require **exactly one** of `--account-id` or `--account-alias`.
+
+For multi-account commands (`get-cost`, `snapshot list`, `report create`): use `bindAWSTargetFlags` and **exactly one selection mode**:
+`--account-id`/`--account-alias`, `--payer` alone (entire org), `--payer --ou`, or `--payer --tag`.
 
 ```go
 // ✅ GOOD — tag commands
@@ -26,6 +31,8 @@ bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{Account: &costGetAccount
 
 // ❌ BAD — ambiguous positional
 Use: "list <account>"
+
+// ❌ BAD — combine selection modes (e.g. --account-id with --ou)
 ```
 
 ## Examples
@@ -35,6 +42,8 @@ finops tag list --account-alias rh-control
 finops tag list --account-id 111111111111 --payer rh-control
 finops tag update --account-id 111111111111 --tag-key organization --tag-value "Hybrid Platform" --payer rh-control
 finops account get-cost --account-alias rh-control
+finops account get-cost --payer rh-control
+finops account get-cost --payer rh-control --ou 'ou-abcd-12345678/*'
 finops aws list-ous --payer rh-control
 ```
 
@@ -47,4 +56,4 @@ finops aws list-ous --payer rh-control
 ## Tests and docs
 
 - Command tests set `--account-id` or `--account-alias` on package-level flag vars; do not pass positional account args.
-- README and command `Long` help must use `--account-id`, not `--account`, for tag commands.
+- README and command `Long` help must use `--account-id` (not `--account`) for provider-native IDs.
