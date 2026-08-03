@@ -21,7 +21,7 @@ func MergeResults(results []CostResult) (CostResult, error) {
 	out := CostResult{
 		Provider:  first.Provider,
 		Metric:    first.Metric,
-		SplitBy:   first.SplitBy,
+		GroupBy:   first.GroupBy,
 		StartDate: first.StartDate,
 		EndDate:   first.EndDate,
 		Currency:  first.Currency,
@@ -36,7 +36,7 @@ func MergeResults(results []CostResult) (CostResult, error) {
 	ouDepths := make(map[string]int)
 	ouOrder := make([]string, 0)
 	ouSeen := make(map[string]struct{})
-	preserveOUOrder := out.SplitBy == SplitByOU
+	preserveOUOrder := out.GroupBy == GroupByOU
 
 	for _, r := range results {
 		if r.Provider != out.Provider {
@@ -49,8 +49,8 @@ func MergeResults(results []CostResult) (CostResult, error) {
 		if r.StartDate != out.StartDate || r.EndDate != out.EndDate {
 			return CostResult{}, fmt.Errorf("cannot merge accounts with different periods")
 		}
-		if r.SplitBy != out.SplitBy {
-			return CostResult{}, fmt.Errorf("cannot merge accounts with different split-by settings")
+		if r.GroupBy != out.GroupBy {
+			return CostResult{}, fmt.Errorf("cannot merge accounts with different group-by settings")
 		}
 
 		names = append(names, r.AccountName)
@@ -61,12 +61,12 @@ func MergeResults(results []CostResult) (CostResult, error) {
 		out.Amount += r.Amount
 
 		for _, item := range r.Breakdown {
-			key := item.Label(out.SplitBy)
+			key := item.Label(out.GroupBy)
 			byKey[key] += item.Amount
-			if out.SplitBy == SplitByAccount && item.AccountName != "" {
+			if out.GroupBy == GroupByAccount && item.AccountName != "" {
 				accountNames[key] = item.AccountName
 			}
-			if out.SplitBy == SplitByOU {
+			if out.GroupBy == GroupByOU {
 				if item.OUName != "" {
 					accountNames[key] = item.OUName
 				}
@@ -93,11 +93,11 @@ func MergeResults(results []CostResult) (CostResult, error) {
 				continue
 			}
 			item := CostBreakdownItem{Amount: amt}
-			switch out.SplitBy {
-			case SplitByAccount:
+			switch out.GroupBy {
+			case GroupByAccount:
 				item.Account = key
 				item.AccountName = accountNames[key]
-			case SplitByOU:
+			case GroupByOU:
 				item.OUID = key
 				item.OUName = accountNames[key]
 				if item.OUName == "" {

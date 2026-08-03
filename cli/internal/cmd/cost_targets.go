@@ -25,7 +25,7 @@ type costTargetSelector struct {
 	TagValue        string
 	OrgCacheSkip    bool
 	OrgCacheRefresh bool
-	// SelectionRootID is set after OU/org resolution for --split-by ou rollup.
+	// SelectionRootID is set after OU/org resolution for --group-by ou rollup.
 	SelectionRootID string
 }
 

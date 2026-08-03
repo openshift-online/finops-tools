@@ -1,4 +1,4 @@
-// provider_test.go tests provider/split-by parsing and the Fetch entry point.
+// provider_test.go tests provider/group-by parsing and the Fetch entry point.
 package cost
 
 import "testing"
@@ -18,20 +18,24 @@ func TestMergeResultsSinglePassthrough(t *testing.T) {
 	}
 }
 
-func TestParseSplitBy(t *testing.T) {
-	s, err := ParseSplitBy("service")
-	if err != nil || s != SplitByService {
+func TestParseGroupBy(t *testing.T) {
+	s, err := ParseGroupBy("service")
+	if err != nil || s != GroupByService {
 		t.Fatalf("got %v %v", s, err)
 	}
-	s, err = ParseSplitBy("")
-	if err != nil || s != SplitByNone {
+	s, err = ParseGroupBy("")
+	if err != nil || s != GroupByNone {
 		t.Fatalf("got %v %v", s, err)
 	}
-	s, err = ParseSplitBy("account")
-	if err != nil || s != SplitByAccount {
+	s, err = ParseGroupBy("account")
+	if err != nil || s != GroupByAccount {
 		t.Fatalf("got %v %v", s, err)
 	}
-	_, err = ParseSplitBy("region")
+	s, err = ParseGroupBy("ou")
+	if err != nil || s != GroupByOU {
+		t.Fatalf("got %v %v", s, err)
+	}
+	_, err = ParseGroupBy("region")
 	if err == nil {
 		t.Fatal("expected error")
 	}

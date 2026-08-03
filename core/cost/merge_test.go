@@ -39,12 +39,12 @@ func TestMergeResultsPreservesAccountNames(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", AccountName: "Member One", Amount: 60}},
 		},
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "222222222222", AccountName: "Member Two", Amount: 40}},
 		},
 	}
@@ -64,12 +64,12 @@ func TestMergeResultsCombinesLinkedAccounts(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, AccountName: "payer-a", Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", Amount: 60}},
 		},
 		{
 			Provider: ProviderAWS, AccountName: "payer-b", Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", Amount: 10}, {Account: "222222222222", Amount: 30}},
 		},
 	}
@@ -105,7 +105,7 @@ func TestMergeResultsPreservesOUTreeOrderAndDepth(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 10, SplitBy: SplitByOU,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 10, GroupBy: GroupByOU,
 			Breakdown: []CostBreakdownItem{
 				{OUID: "r-aaaa", OUName: "Org A", OUDepth: 0, Amount: 10},
 				{OUID: "ou-a-prod", OUName: "Production", OUDepth: 1, Amount: 10},
@@ -113,7 +113,7 @@ func TestMergeResultsPreservesOUTreeOrderAndDepth(t *testing.T) {
 		},
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 5, SplitBy: SplitByOU,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 5, GroupBy: GroupByOU,
 			Breakdown: []CostBreakdownItem{
 				{OUID: "r-bbbb", OUName: "Org B", OUDepth: 0, Amount: 5},
 				{OUID: "ou-b-sand", OUName: "Sandbox", OUDepth: 1, Amount: 5},
@@ -145,7 +145,7 @@ func TestMergeResultsSumsSharedOUParents(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 10, SplitBy: SplitByOU,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 10, GroupBy: GroupByOU,
 			Breakdown: []CostBreakdownItem{
 				{OUID: "r-root", OUName: "Root", OUDepth: 0, Amount: 10},
 				{OUID: "ou-prod", OUName: "Production", OUDepth: 1, Amount: 10},
@@ -153,7 +153,7 @@ func TestMergeResultsSumsSharedOUParents(t *testing.T) {
 		},
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 5, SplitBy: SplitByOU,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 5, GroupBy: GroupByOU,
 			Breakdown: []CostBreakdownItem{
 				{OUID: "r-root", OUName: "Root", OUDepth: 0, Amount: 5},
 				{OUID: "ou-sand", OUName: "Sandbox", OUDepth: 1, Amount: 5},

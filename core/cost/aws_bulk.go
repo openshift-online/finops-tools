@@ -68,10 +68,10 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 	ce := opts.NewCostExplorer(cfg)
 	displayNames := targetDisplayNames(targets)
 
-	switch q.SplitBy {
-	case SplitByService:
+	switch q.GroupBy {
+	case GroupByService:
 		return fetchAWSNetAmortizedBulkByService(ctx, ce, q, targets, plan, dr)
-	case SplitByAccount, SplitByNone, SplitByOU:
+	case GroupByAccount, GroupByNone, GroupByOU:
 		ids := sortedAccountIDs(plan.accountIDs)
 		batches := batchStrings(ids, linkedAccountFilterBatchSize)
 		type accountBatchResult struct {
@@ -81,7 +81,7 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 		batchResults := make([]accountBatchResult, len(batches))
 		err := parallel.ForEach(ctx, q.Workers, len(batches), func(ctx context.Context, i int) error {
 			filter := linkedAccountsFilter(batches[i])
-			_, cur, batchBreakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", SplitByAccount, filter)
+			_, cur, batchBreakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", GroupByAccount, filter)
 			if err != nil {
 				return err
 			}
@@ -113,15 +113,15 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 		}
 
 		out := bulkMergedCostResult(targets, q, dr, total, currency, plan.credTarget)
-		if q.SplitBy == SplitByAccount {
+		if q.GroupBy == GroupByAccount {
 			out.Breakdown = breakdown
 		}
-		if q.SplitBy == SplitByOU {
+		if q.GroupBy == GroupByOU {
 			out.Breakdown = rollupOUBreakdown(breakdown, q.AWSFetch)
 		}
 		return out, nil
 	default:
-		return CostResult{}, fmt.Errorf("unknown split-by %q", q.SplitBy)
+		return CostResult{}, fmt.Errorf("unknown group-by %q", q.GroupBy)
 	}
 }
 
@@ -142,7 +142,7 @@ func fetchAWSNetAmortizedBulkByService(
 	batchResults := make([]serviceBatchResult, len(batches))
 	err := parallel.ForEach(ctx, q.Workers, len(batches), func(ctx context.Context, i int) error {
 		filter := linkedAccountsFilter(batches[i])
-		_, cur, breakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", SplitByService, filter)
+		_, cur, breakdown, err := sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", GroupByService, filter)
 		if err != nil {
 			return err
 		}
@@ -255,7 +255,7 @@ func bulkMergedCostResult(targets []AccountTarget, q CostQuery, dr DateRange, am
 		AccountName: strings.Join(names, ", "),
 		AccountID:   strings.Join(ids, ", "),
 		Metric:      MetricNetAmortized,
-		SplitBy:     q.SplitBy,
+		GroupBy:     q.GroupBy,
 		StartDate:   formatDate(dr.Start),
 		EndDate:     formatDate(dr.End.AddDate(0, 0, -1)),
 		Amount:      amount,

@@ -417,7 +417,7 @@ func TestCostGetPreRunETagMode(t *testing.T) {
 	costGetTag = "env"
 	costGetFormat = string(output.FormatPrettyPrint)
 	costGetProvider = string(cost.ProviderAWS)
-	costGetSplitBy = ""
+	costGetGroupBy = ""
 	t.Cleanup(func() {
 		costGetAccount = ""
 		costGetAccountAliases = ""
@@ -425,7 +425,7 @@ func TestCostGetPreRunETagMode(t *testing.T) {
 		costGetTag = ""
 		costGetFormat = ""
 		costGetProvider = ""
-		costGetSplitBy = ""
+		costGetGroupBy = ""
 	})
 
 	if err := accountGetCostCmd.PreRunE(accountGetCostCmd, nil); err != nil {
@@ -441,7 +441,7 @@ func TestCostGetPreRunERejectsAccountAndOU(t *testing.T) {
 	costGetTag = ""
 	costGetFormat = string(output.FormatPrettyPrint)
 	costGetProvider = string(cost.ProviderAWS)
-	costGetSplitBy = ""
+	costGetGroupBy = ""
 	t.Cleanup(func() {
 		costGetAccount = ""
 		costGetPayer = ""

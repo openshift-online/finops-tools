@@ -69,23 +69,23 @@ func TestFilterOverlappingTargets(t *testing.T) {
 
 func TestReportFetchProgress(t *testing.T) {
 	rec := &recordingFetchProgress{}
-	reportFetchProgress(rec, AccountTarget{AccountID: "111111111111", DisplayName: "Prod"}, 1, 100, SplitByNone)
+	reportFetchProgress(rec, AccountTarget{AccountID: "111111111111", DisplayName: "Prod"}, 1, 100, GroupByNone)
 	if len(rec.steps) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(rec.steps))
 	}
 
 	recMid := &recordingFetchProgress{}
-	reportFetchProgress(recMid, AccountTarget{AccountID: "111111111111", DisplayName: "Prod"}, 24, 100, SplitByNone)
+	reportFetchProgress(recMid, AccountTarget{AccountID: "111111111111", DisplayName: "Prod"}, 24, 100, GroupByNone)
 	if len(recMid.steps) != 0 {
 		t.Fatalf("expected throttled step at 24, got %d", len(recMid.steps))
 	}
-	reportFetchProgress(recMid, AccountTarget{AccountID: "111111111111", DisplayName: "Prod"}, 25, 100, SplitByNone)
+	reportFetchProgress(recMid, AccountTarget{AccountID: "111111111111", DisplayName: "Prod"}, 25, 100, GroupByNone)
 	if len(recMid.steps) != 1 {
 		t.Fatalf("expected step at 25, got %d", len(recMid.steps))
 	}
 
 	recSingle := &recordingFetchProgress{}
-	reportFetchProgress(recSingle, AccountTarget{AccountID: "111111111111"}, 1, 1, SplitByNone)
+	reportFetchProgress(recSingle, AccountTarget{AccountID: "111111111111"}, 1, 1, GroupByNone)
 	if len(recSingle.steps) != 0 {
 		t.Fatalf("expected no steps for single account, got %d", len(recSingle.steps))
 	}

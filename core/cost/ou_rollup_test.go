@@ -111,9 +111,9 @@ func TestRollupBreakdownByOUTreeOrphanParent(t *testing.T) {
 	}
 }
 
-func TestParseSplitByOU(t *testing.T) {
-	s, err := ParseSplitBy("ou")
-	if err != nil || s != SplitByOU {
+func TestParseGroupByOU(t *testing.T) {
+	s, err := ParseGroupBy("ou")
+	if err != nil || s != GroupByOU {
 		t.Fatalf("got %q err %v", s, err)
 	}
 }

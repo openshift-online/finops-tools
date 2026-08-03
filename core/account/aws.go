@@ -466,7 +466,7 @@ func effectiveOUMaxDepth(opts ListAccountsInOUOptions) (maxDepth int, unbounded 
 // MapAccountsToChildOUs maps each account ID to the immediate child OU of rootID that
 // contains it, or to rootID itself when the account is a direct member of rootID.
 // rootID may be an OU ID (ou-…) or organization root ID (r-…).
-// Prefer BuildOUAccountMapping for --split-by ou tree output.
+// Prefer BuildOUAccountMapping for --group-by ou tree output.
 func MapAccountsToChildOUs(ctx context.Context, cfg aws.Config, rootID string, accountIDs []string) (map[string]AccountOUBucket, error) {
 	return mapAccountsToChildOUsWithClient(ctx, newOrganizationsClient(cfg), rootID, accountIDs)
 }

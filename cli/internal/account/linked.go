@@ -29,10 +29,12 @@ type AddAWSLinkedOptions struct {
 // AddAWSLinked ensures payer credentials, assumes a role into the linked account, and verifies the session.
 func AddAWSLinked(ctx context.Context, opts AddAWSLinkedOptions) (AddResult, error) {
 	linkedID := strings.TrimSpace(opts.LinkedAccountID)
+	payerID := strings.TrimSpace(opts.PayerAccountID)
+
 	if err := ValidateAWSAccountID(linkedID); err != nil {
 		return AddResult{}, err
 	}
-	if err := ValidateAWSAccountID(opts.PayerAccountID); err != nil {
+	if err := ValidateAWSAccountID(payerID); err != nil {
 		return AddResult{}, fmt.Errorf("payer account: %w", err)
 	}
 
@@ -41,12 +43,12 @@ func AddAWSLinked(ctx context.Context, opts AddAWSLinkedOptions) (AddResult, err
 		ensurePayer = awsauth.EnsureAccountCredentials
 	}
 	payerEnsure := opts.PayerEnsureOpts
-	payerEnsure.AccountName = opts.PayerAccountID
+	payerEnsure.AccountName = payerID
 	payerEnsure.Lookup = awsconfig.CredentialLookup{
-		AccountID: opts.PayerAccountID,
-		Names:     awsProfileNames(opts.PayerAccountID, opts.PayerAlias, nil),
+		AccountID: payerID,
+		Names:     awsProfileNames(payerID, opts.PayerAlias, nil),
 	}
-	payerEnsure.ProfileNames = awsProfileNames(opts.PayerAccountID, opts.PayerAlias, payerEnsure.ProfileNames)
+	payerEnsure.ProfileNames = awsProfileNames(payerID, opts.PayerAlias, payerEnsure.ProfileNames)
 	if _, err := ensurePayer(ctx, payerEnsure); err != nil {
 		return AddResult{}, fmt.Errorf("ensure payer credentials: %w", err)
 	}
@@ -57,10 +59,10 @@ func AddAWSLinked(ctx context.Context, opts AddAWSLinkedOptions) (AddResult, err
 	}
 
 	ensureOpts := opts.EnsureLinkedOpts
-	ensureOpts.PayerAccountID = opts.PayerAccountID
+	ensureOpts.PayerAccountID = payerID
 	ensureOpts.LinkedAccountID = linkedID
 	ensureOpts.RoleARN = opts.RoleARN
-	ensureOpts.PayerProfileNames = awsProfileNames(opts.PayerAccountID, opts.PayerAlias, ensureOpts.PayerProfileNames)
+	ensureOpts.PayerProfileNames = awsProfileNames(payerID, opts.PayerAlias, ensureOpts.PayerProfileNames)
 	ensureOpts.LinkedProfileNames = awsProfileNames(linkedID, opts.Alias, ensureOpts.LinkedProfileNames)
 
 	res, err := ensure(ctx, ensureOpts)
@@ -72,9 +74,9 @@ func AddAWSLinked(ctx context.Context, opts AddAWSLinkedOptions) (AddResult, err
 		return AddResult{}, fmt.Errorf("logged in as account %s, expected %s", res.AccountID, linkedID)
 	}
 
-	profile := awsconfig.SanitizeProfileName(linkedID)
-	if res.Profile != "" {
-		profile = res.Profile
+	profile := res.Profile
+	if profile == "" {
+		profile = awsconfig.SanitizeProfileName(linkedID)
 	}
 
 	return AddResult{

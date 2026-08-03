@@ -21,7 +21,7 @@ var (
 	costGetOU              string
 	costGetPayer           string
 	costGetProvider        string
-	costGetSplitBy         string
+	costGetGroupBy         string
 	costGetTag             string
 	costGetQuiet           bool
 	costGetSkipOrgCache    bool
@@ -54,11 +54,11 @@ Examples:
   finops account get-cost --payer rh-control
   finops account get-cost --payer rh-control --account-id 111111111111,222222222222
   finops account get-cost --payer rh-control --tag organization
-  finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --split-by service
+  finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
   finops account get-cost --ou ou-abcd-12345678 --payer rh-control
   finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
   finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
-  finops account get-cost --payer rh-control --split-by ou
+  finops account get-cost --payer rh-control --group-by ou
 
 Authentication uses --auth-method when set, otherwise defaults.aws.auth_method in config (saml by default).
 
@@ -85,7 +85,7 @@ Only AWS is supported today; GCP will be added later.`,
 		if _, err := cost.ParseProvider(costGetProvider); err != nil {
 			return err
 		}
-		if _, err := cost.ParseSplitBy(costGetSplitBy); err != nil {
+		if _, err := cost.ParseGroupBy(costGetGroupBy); err != nil {
 			return err
 		}
 		if err := validateWorkers(costGetWorkers); err != nil {
@@ -112,8 +112,8 @@ func init() {
 	addOutputFlag(accountGetCostCmd, &costGetOutput)
 	accountGetCostCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
 		"Cloud provider: aws or gcp")
-	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
-		"Split results by dimension (supported: service, account, ou)")
+	accountGetCostCmd.Flags().StringVar(&costGetGroupBy, "group-by", "",
+		"Group results by dimension (supported: service, account, ou)")
 	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(accountGetCostCmd, &costGetWorkers, "")
 	addPeriodFlags(accountGetCostCmd)
@@ -128,7 +128,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	splitBy, err := cost.ParseSplitBy(costGetSplitBy)
+	groupBy, err := cost.ParseGroupBy(costGetGroupBy)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, splitBy))
+		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, groupBy))
 	}
 
 	if provider == cost.ProviderAWS {
@@ -213,16 +213,16 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		Provider: provider,
 		Accounts: targets,
 		Range:    dateRange,
-		SplitBy:  splitBy,
+		GroupBy:  groupBy,
 		Progress: status,
 		Workers:  costGetWorkers,
 	}
-	if provider == cost.ProviderAWS && (splitBy == cost.SplitByAccount || splitBy == cost.SplitByOU) {
+	if provider == cost.ProviderAWS && (groupBy == cost.GroupByAccount || groupBy == cost.GroupByOU) {
 		awsFetch := &cost.AWSFetchOptions{}
-		if splitBy == cost.SplitByAccount {
+		if groupBy == cost.GroupByAccount {
 			awsFetch.ResolveAccountNames = coreaccount.ResolveAccountNames
 		}
-		if splitBy == cost.SplitByOU {
+		if groupBy == cost.GroupByOU {
 			status.Step("Mapping accounts to organizational units…")
 			buckets, hierarchy, _, err := resolveAccountOUBuckets(awsCtx, cfg, sel, targets, awsFlags.CredentialsFile)
 			if err != nil {

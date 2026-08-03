@@ -545,8 +545,8 @@ finops account get-cost --account-id 123456789012
 finops account get-cost --account-alias rh-control,osd-staging-1
 finops account get-cost --account-id 123456789012 --format json
 finops account get-cost --account-id 123456789012 --format csv
-finops account get-cost --account-id 123456789012 --split-by service
-finops account get-cost --account-id 123456789012 --split-by account
+finops account get-cost --account-id 123456789012 --group-by service
+finops account get-cost --account-id 123456789012 --group-by account
 finops account get-cost --payer rh-control --account-id 333333333333   # member account via payer
 finops aws list-ous --payer rh-control           # discover OU IDs
 finops account get-cost --ou ou-abcd-12345678 --payer rh-control
@@ -554,9 +554,9 @@ finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
 finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
 finops account get-cost --ou r-xxxx/ --payer rh-control            # accounts directly under org root
 finops account get-cost --payer rh-control
-finops account get-cost --payer rh-control --split-by ou
+finops account get-cost --payer rh-control --group-by ou
 finops account get-cost --payer rh-control --tag organization
-finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --split-by service
+finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
 finops report create costs --payer rh-control --tag env=prod -o prod.html
 ```
 
@@ -578,7 +578,7 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr (cost/CSV/JSON still go to stdout) |
 | `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential) |
-| `--split-by` | Group costs by dimension: `service`, `account` (linked AWS account ID), or `ou` (OU tree under the selection root; each row is subtree total, indented in pretty-print); includes share % and relative cost bars in `pretty-print` |
+| `--group-by` | Group costs by dimension: `service`, `account` (linked AWS account ID), or `ou` (OU tree under the selection root; each row is subtree total, indented in pretty-print); includes share % and relative cost bars in `pretty-print` |
 | `--provider` | `aws` (default). `gcp` is reserved for a future release |
 
 `pretty-print` uses colors and Unicode bars when stdout is a TTY. Set `NO_COLOR=1` to disable; `FORCE_COLOR=1` forces colors when piping to a capable viewer.
