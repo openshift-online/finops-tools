@@ -101,6 +101,9 @@ func TestAWSMigrateAccountDryRun(t *testing.T) {
 	if !strings.Contains(got, "tenant-a (111111111111)") {
 		t.Fatalf("missing account in plan: %q", got)
 	}
+	if !strings.Contains(got, "update role trust (to-payer)") {
+		t.Fatalf("missing trust update step in plan: %q", got)
+	}
 }
 
 func TestAWSMigrateAccountRequiresYes(t *testing.T) {

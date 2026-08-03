@@ -470,7 +470,7 @@ finops aws migrate-account --account-id 111111111111 --from-payer rh-control --t
   --destination-ou ou-abcd-12345678 --yes
 ```
 
-`--account-id` accepts one or more comma-separated 12-digit AWS account IDs. The command invites from the destination payer, assumes into the member via the source payer (`OrganizationAccountAccessRole` or `--role`), accepts the handshake, optionally moves the account into a destination OU, then updates local `payer_alias`. Requires Organizations admin on both payers; SCPs/Control Tower may still block leave/accept.
+`--account-id` accepts one or more comma-separated 12-digit AWS account IDs. The command invites from the destination payer, assumes into the member via the source payer (`OrganizationAccountAccessRole` or `--role`), accepts the handshake, rewrites that role's trust policy to the destination management account, optionally moves the account into a destination OU, then updates local `payer_alias`. Requires Organizations admin on both payers; SCPs/Control Tower may still block leave/accept.
 
 **Cost Explorer (`finops account get-cost`) requires payer accounts only.** Linked-account credentials are for member-account APIs, not payer-level billing queries.
 

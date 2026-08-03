@@ -26,6 +26,7 @@ var (
 	migrateAccountContains           = coreaccount.OrganizationContainsAccount
 	migrateAccountInvite             = coreaccount.InviteAccount
 	migrateAccountAccept             = coreaccount.AcceptInviteHandshake
+	migrateAccountUpdateTrust        = coreaccount.UpdateLinkedRoleTrust
 	migrateAccountMove               = coreaccount.MoveAccountToParent
 	migrateAccountUpdateConfig       = configstore.UpdateLinkedAccountPayer
 	migrateAccountInvalidateOrgCache = invalidateOrgCacheForPayer
@@ -48,7 +49,8 @@ var awsMigrateAccountCmd = &cobra.Command{
 	Long: `Invite a member account into a destination payer organization and accept the handshake.
 
 Uses AWS Organizations direct transfer (invite from destination management account,
-accept from the member account via role assumption from the source payer).
+accept from the member account via role assumption from the source payer), then
+rewrites the linked role trust policy to the destination management account.
 
 Requires management-account admin on both payers and OrganizationAccountAccessRole
 (or --role) in the member account. SCPs or Control Tower may still block the transfer.
@@ -197,7 +199,7 @@ func migrateOneAccount(
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  destination OU:   %s\n", destOU)
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake → update role trust (to-payer)")
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → move to OU")
 	}
@@ -238,6 +240,13 @@ func migrateOneAccount(
 		return err
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Accepted handshake %s (state %s)\n", accepted.HandshakeID, accepted.State)
+
+	// Invited accounts keep the old management account in the role trust policy;
+	// rewrite it while the source-payer assume session is still valid.
+	if err := migrateAccountUpdateTrust(awsCtx, memberCfg, roleName, toPayerID); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated %s trust to management account %s\n", roleName, toPayerID)
 
 	if destOU != "" {
 		if err := migrateAccountMove(awsCtx, toCfg, accountID, destOU); err != nil {
