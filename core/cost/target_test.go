@@ -41,6 +41,24 @@ func TestAccountTargetScopeToAccount(t *testing.T) {
 	}
 }
 
+func TestGroupByCredentialsAccount(t *testing.T) {
+	groups := GroupByCredentialsAccount([]AccountTarget{
+		{AccountID: "222222222222", PayerAccountID: "987654321098"},
+		{AccountID: "111111111111", PayerAccountID: "123456789012"},
+		{AccountID: "123456789012"},
+	})
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(groups))
+	}
+	if len(groups["123456789012"]) != 2 {
+		t.Fatalf("payer group size = %d, want 2", len(groups["123456789012"]))
+	}
+	ids := SortedCredentialAccountIDs(groups)
+	if len(ids) != 2 || ids[0] != "123456789012" || ids[1] != "987654321098" {
+		t.Fatalf("sorted ids = %v", ids)
+	}
+}
+
 func TestFilterOverlappingTargets(t *testing.T) {
 	independent := FilterOverlappingTargets([]AccountTarget{
 		{AccountID: "123456789012"},

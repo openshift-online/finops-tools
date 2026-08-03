@@ -3,7 +3,6 @@ package report
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
@@ -76,13 +75,13 @@ func resolveReportOUMapping(ctx context.Context, in GenerateInput) (map[string]c
 		return nil, nil, nil
 	}
 
-	groups := groupReportTargetsByCredentialsAccount(in.Targets)
+	groups := cost.GroupByCredentialsAccount(in.Targets)
 	useSelectionRoot := len(groups) == 1 && strings.TrimSpace(in.SelectionRootID) != ""
 
 	out := make(map[string]cost.OUBucket)
 	var nodes []cost.OUHierarchyNode
 
-	for _, credID := range sortedReportCredentialIDs(groups) {
+	for _, credID := range cost.SortedCredentialAccountIDs(groups) {
 		group := groups[credID]
 		cfg := group[0].AWSConfig
 		rootID := ""
@@ -117,25 +116,4 @@ func resolveReportOUMapping(ctx context.Context, in GenerateInput) (map[string]c
 		}
 	}
 	return out, nodes, nil
-}
-
-func groupReportTargetsByCredentialsAccount(targets []cost.AccountTarget) map[string][]cost.AccountTarget {
-	groups := make(map[string][]cost.AccountTarget)
-	for _, t := range targets {
-		credID := t.CredentialsAccountID()
-		if credID == "" {
-			credID = strings.TrimSpace(t.AccountID)
-		}
-		groups[credID] = append(groups[credID], t)
-	}
-	return groups
-}
-
-func sortedReportCredentialIDs(groups map[string][]cost.AccountTarget) []string {
-	ids := make([]string, 0, len(groups))
-	for id := range groups {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }

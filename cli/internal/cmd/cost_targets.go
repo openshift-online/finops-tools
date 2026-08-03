@@ -4,7 +4,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -410,9 +409,11 @@ func resolveCostTargetsByTag(
 		})
 	}
 
-	if rootID, err := organizationRootID(ctx, awsCfg); err == nil {
-		sel.SelectionRootID = rootID
+	rootID, err := organizationRootID(ctx, awsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve organization root: %w", err)
 	}
+	sel.SelectionRootID = rootID
 	return targets, nil
 }
 
@@ -427,14 +428,14 @@ func resolveAccountOUBuckets(
 		return nil, nil, "", nil
 	}
 
-	groups := groupCostTargetsByCredentialsAccount(targets)
+	groups := cost.GroupByCredentialsAccount(targets)
 	useSelectionRoot := len(groups) == 1 && strings.TrimSpace(sel.SelectionRootID) != ""
 
 	out := make(map[string]cost.OUBucket)
 	var nodes []cost.OUHierarchyNode
 	var primaryRoot string
 
-	for _, payerID := range sortedCredentialAccountIDs(groups) {
+	for _, payerID := range cost.SortedCredentialAccountIDs(groups) {
 		group := groups[payerID]
 		awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payerID, credentialsFile)
 		if err != nil {
@@ -476,27 +477,6 @@ func resolveAccountOUBuckets(
 		}
 	}
 	return out, nodes, primaryRoot, nil
-}
-
-func groupCostTargetsByCredentialsAccount(targets []cost.AccountTarget) map[string][]cost.AccountTarget {
-	groups := make(map[string][]cost.AccountTarget)
-	for _, t := range targets {
-		credID := t.CredentialsAccountID()
-		if credID == "" {
-			credID = strings.TrimSpace(t.AccountID)
-		}
-		groups[credID] = append(groups[credID], t)
-	}
-	return groups
-}
-
-func sortedCredentialAccountIDs(groups map[string][]cost.AccountTarget) []string {
-	ids := make([]string, 0, len(groups))
-	for id := range groups {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 func costStep(status costStepper, message string) {
