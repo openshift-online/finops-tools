@@ -24,7 +24,7 @@ var (
 	accountListOUsPayer              string
 )
 
-var parentIDPattern = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32}-[0-9a-z]{4,32})$`)
+var parentIDPattern = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32})$`)
 
 var awsListOUsCmd = &cobra.Command{
 	Use:   "list-ous",

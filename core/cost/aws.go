@@ -78,8 +78,10 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", GroupByService, filter)
 	case GroupByAccount, GroupByOU:
 		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", GroupByAccount, filter)
-	default:
+	case GroupByNone:
 		amount, currency, fetchErr = sumNetAmortizedCost(ctx, ce, dr, filter)
+	default:
+		return CostResult{}, fmt.Errorf("unknown group-by %q", q.GroupBy)
 	}
 	if fetchErr != nil {
 		return CostResult{}, fetchErr
