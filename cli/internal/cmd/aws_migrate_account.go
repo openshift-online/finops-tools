@@ -55,6 +55,12 @@ rewrites the linked role trust policy to the destination management account.
 Requires management-account admin on both payers and OrganizationAccountAccessRole
 (or --role) in the member account. SCPs or Control Tower may still block the transfer.
 
+If accept succeeds but the role trust update fails, the account is already in the
+destination organization while the role still trusts the source management account.
+Assume the linked role from --from-payer (still valid) and retry the trust update;
+do not treat that state as a rollback to the source org. An optional --destination-ou
+move that fails after trust update can be retried from the destination payer.
+
 Examples:
   finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
   finops aws migrate-account --account-id 111111111111,222222222222 --from-payer rh-control --to-payer osd-staging-1 --yes
@@ -147,15 +153,58 @@ func runAWSMigrateAccount(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	var succeeded []string
 	for i, accountID := range accountIDs {
 		if len(accountIDs) > 1 {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "=== Account %d/%d: %s ===\n", i+1, len(accountIDs), accountID)
 		}
 		if err := migrateOneAccount(cmd, awsCtx, cfg, configPath, accountID, fromAlias, toAlias, fromPayerID, toPayerID, fromCfg, toCfg); err != nil {
-			return err
+			if len(accountIDs) == 1 {
+				return err
+			}
+			return fmt.Errorf("%w%s", err, formatMigratePartialSummary(succeeded, accountIDs, i))
 		}
+		succeeded = append(succeeded, accountID)
+	}
+	if len(accountIDs) > 1 {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Migrated %d/%d accounts: %s\n", len(succeeded), len(accountIDs), strings.Join(succeeded, ", "))
 	}
 	return nil
+}
+
+// formatMigratePartialSummary appends a scroll-resistant summary when a multi-account
+// run stops after zero or more successes (failure index is the account that failed).
+func formatMigratePartialSummary(succeeded, accountIDs []string, failedIndex int) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("\nPartial run: %d of %d succeeded before failure on %s",
+		len(succeeded), len(accountIDs), accountIDs[failedIndex]))
+	if len(succeeded) > 0 {
+		b.WriteString(fmt.Sprintf("\n  Succeeded: %s", strings.Join(succeeded, ", ")))
+	}
+	b.WriteString(fmt.Sprintf("\n  Failed:    %s", accountIDs[failedIndex]))
+	if failedIndex+1 < len(accountIDs) {
+		b.WriteString(fmt.Sprintf("\n  Remaining: %s", strings.Join(accountIDs[failedIndex+1:], ", ")))
+	}
+	return b.String()
+}
+
+// wrapMigrateTrustUpdateError adds forward-repair guidance after accept succeeded
+// but the linked role trust rewrite failed (account is already in the destination org).
+func wrapMigrateTrustUpdateError(err error, accountID, roleName, fromAlias, toAlias string) error {
+	return fmt.Errorf("%w\n"+
+		"Account %s is already in destination payer %s; role %s still trusts source payer %s. "+
+		"Assume %s from %s and retry the trust update (or re-run migrate-account once membership prechecks allow). "+
+		"This is not a rollback to the source organization",
+		err, accountID, toAlias, roleName, fromAlias, roleName, fromAlias)
+}
+
+// wrapMigrateOUMoveError adds a light retry hint when membership and trust are done
+// but the optional destination OU move failed.
+func wrapMigrateOUMoveError(err error, accountID, destOU, toAlias string) error {
+	return fmt.Errorf("%w\n"+
+		"Account %s membership and role trust are updated; only the move to %s failed. "+
+		"Retry the OU move from destination payer %s (or re-run with --destination-ou)",
+		err, accountID, destOU, toAlias)
 }
 
 func migrateOneAccount(
@@ -244,13 +293,13 @@ func migrateOneAccount(
 	// Invited accounts keep the old management account in the role trust policy;
 	// rewrite it while the source-payer assume session is still valid.
 	if err := migrateAccountUpdateTrust(awsCtx, memberCfg, roleName, toPayerID); err != nil {
-		return err
+		return wrapMigrateTrustUpdateError(err, accountID, roleName, fromAlias, toAlias)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated %s trust to management account %s\n", roleName, toPayerID)
 
 	if destOU != "" {
 		if err := migrateAccountMove(awsCtx, toCfg, accountID, destOU); err != nil {
-			return err
+			return wrapMigrateOUMoveError(err, accountID, destOU, toAlias)
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved account to %s\n", destOU)
 	}
