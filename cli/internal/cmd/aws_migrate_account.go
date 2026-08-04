@@ -176,14 +176,14 @@ func runAWSMigrateAccount(cmd *cobra.Command, _ []string) error {
 // run stops after zero or more successes (failure index is the account that failed).
 func formatMigratePartialSummary(succeeded, accountIDs []string, failedIndex int) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("\nPartial run: %d of %d succeeded before failure on %s",
-		len(succeeded), len(accountIDs), accountIDs[failedIndex]))
+	fmt.Fprintf(&b, "\nPartial run: %d of %d succeeded before failure on %s",
+		len(succeeded), len(accountIDs), accountIDs[failedIndex])
 	if len(succeeded) > 0 {
-		b.WriteString(fmt.Sprintf("\n  Succeeded: %s", strings.Join(succeeded, ", ")))
+		fmt.Fprintf(&b, "\n  Succeeded: %s", strings.Join(succeeded, ", "))
 	}
-	b.WriteString(fmt.Sprintf("\n  Failed:    %s", accountIDs[failedIndex]))
+	fmt.Fprintf(&b, "\n  Failed:    %s", accountIDs[failedIndex])
 	if failedIndex+1 < len(accountIDs) {
-		b.WriteString(fmt.Sprintf("\n  Remaining: %s", strings.Join(accountIDs[failedIndex+1:], ", ")))
+		fmt.Fprintf(&b, "\n  Remaining: %s", strings.Join(accountIDs[failedIndex+1:], ", "))
 	}
 	return b.String()
 }
