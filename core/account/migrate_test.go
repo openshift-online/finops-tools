@@ -11,7 +11,7 @@ import (
 )
 
 type fakeMigrateOrganizations struct {
-	memberIDs map[string]struct{}
+	memberStatus map[string]types.AccountStatus
 
 	inviteAccountID string
 	inviteNotes     string
@@ -39,23 +39,37 @@ func (f *fakeMigrateOrganizations) ListAccounts(
 	_ *organizations.ListAccountsInput,
 	_ ...func(*organizations.Options),
 ) (*organizations.ListAccountsOutput, error) {
-	accounts := make([]types.Account, 0, len(f.memberIDs))
-	for id := range f.memberIDs {
+	accounts := make([]types.Account, 0, len(f.memberStatus))
+	for id, status := range f.memberStatus {
 		accounts = append(accounts, types.Account{
 			Id:     aws.String(id),
 			Name:   aws.String(id),
-			Status: types.AccountStatusActive,
+			Status: status,
 		})
 	}
 	return &organizations.ListAccountsOutput{Accounts: accounts}, nil
 }
 
 func (f *fakeMigrateOrganizations) DescribeAccount(
-	context.Context,
-	*organizations.DescribeAccountInput,
-	...func(*organizations.Options),
+	_ context.Context,
+	params *organizations.DescribeAccountInput,
+	_ ...func(*organizations.Options),
 ) (*organizations.DescribeAccountOutput, error) {
-	return nil, errors.New("not implemented")
+	id := ""
+	if params != nil {
+		id = aws.ToString(params.AccountId)
+	}
+	status, ok := f.memberStatus[id]
+	if !ok {
+		return nil, &types.AccountNotFoundException{Message: aws.String("account not found")}
+	}
+	return &organizations.DescribeAccountOutput{
+		Account: &types.Account{
+			Id:     aws.String(id),
+			Name:   aws.String(id),
+			Status: status,
+		},
+	}, nil
 }
 
 func (f *fakeMigrateOrganizations) ListTagsForAccount(
@@ -243,14 +257,18 @@ func TestAcceptInviteHandshakeFindsOpenInvite(t *testing.T) {
 
 func TestOrganizationContainsAccountWithClient(t *testing.T) {
 	client := &fakeMigrateOrganizations{
-		memberIDs: map[string]struct{}{
-			"111111111111": {},
-			"222222222222": {},
+		memberStatus: map[string]types.AccountStatus{
+			"111111111111": types.AccountStatusActive,
+			"222222222222": types.AccountStatusSuspended,
 		},
 	}
 	ok, err := organizationContainsAccountWithClient(context.Background(), client, "111111111111")
 	if err != nil || !ok {
 		t.Fatalf("contains = %v, err = %v", ok, err)
+	}
+	ok, err = organizationContainsAccountWithClient(context.Background(), client, "222222222222")
+	if err != nil || ok {
+		t.Fatalf("contains suspended = %v, err = %v", ok, err)
 	}
 	ok, err = organizationContainsAccountWithClient(context.Background(), client, "333333333333")
 	if err != nil || ok {

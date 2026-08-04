@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -137,16 +138,20 @@ func organizationContainsAccountWithClient(ctx context.Context, client Organizat
 	if err := validateAccountID(accountID); err != nil {
 		return false, err
 	}
-	accounts, err := listOrganizationAccountsWithClient(ctx, client, string(types.AccountStatusActive))
+	out, err := client.DescribeAccount(ctx, &organizations.DescribeAccountInput{
+		AccountId: aws.String(accountID),
+	})
 	if err != nil {
-		return false, err
-	}
-	for _, acct := range accounts {
-		if acct.ID == accountID {
-			return true, nil
+		var notFound *types.AccountNotFoundException
+		if errors.As(err, &notFound) {
+			return false, nil
 		}
+		return false, fmt.Errorf("describe account %s: %w", accountID, err)
 	}
-	return false, nil
+	if out.Account == nil {
+		return false, nil
+	}
+	return out.Account.Status == types.AccountStatusActive, nil
 }
 
 // MoveAccountToParent moves accountID to destinationParentID within the same organization (payer credentials).
