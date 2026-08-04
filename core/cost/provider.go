@@ -345,9 +345,10 @@ func shouldReportFetchProgress(index, total int) bool {
 }
 
 func targetProgressLabel(acct AccountTarget) string {
+	accountID := strings.TrimSpace(acct.AccountID)
 	name := acct.AccountDisplayName()
-	if name != acct.AccountID {
-		return fmt.Sprintf("%s (%s)", name, acct.AccountID)
+	if name != accountID {
+		return fmt.Sprintf("%s (%s)", name, accountID)
 	}
-	return acct.AccountID
+	return accountID
 }
