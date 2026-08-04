@@ -14,7 +14,6 @@ import (
 
 var (
 	accountIDPattern   = regexp.MustCompile(`^\d{12}$`)
-	parentIDPattern    = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32})$`)
 	handshakeIDPattern = regexp.MustCompile(`^h-[0-9a-z]{8,32}$`)
 )
 
@@ -208,16 +207,6 @@ func accountParentIDWithClient(ctx context.Context, client OrganizationsAPI, acc
 func validateAccountID(accountID string) error {
 	if !accountIDPattern.MatchString(accountID) {
 		return fmt.Errorf("invalid AWS account ID %q (expected 12 digits)", accountID)
-	}
-	return nil
-}
-
-func validateParentID(parentID string) error {
-	if parentID == "" {
-		return fmt.Errorf("parent ID is required")
-	}
-	if !parentIDPattern.MatchString(parentID) {
-		return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx)", parentID)
 	}
 	return nil
 }
