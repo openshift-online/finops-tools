@@ -1,4 +1,4 @@
-// resolve.go parses --account flags and builds core/cost.AccountTarget slices from config aliases.
+// resolve.go parses --account-id / --account-alias flags and builds core/cost.AccountTarget slices from config aliases.
 package configstore
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
-// ParseAWSAccountIDs parses --account (12-digit IDs only).
+// ParseAWSAccountIDs parses --account-id (12-digit IDs only).
 func ParseAWSAccountIDs(s string) ([]string, error) {
 	ids, err := account.ParseCommaSeparated(s)
 	if err != nil {
@@ -40,11 +40,11 @@ func ParseAccountAliases(s string) ([]string, error) {
 }
 
 // ResolveCostTargets builds cost.AccountTarget values from account IDs and/or aliases.
-// When payerAlias is set, each --account ID is queried through that payer's Cost Explorer
+// When payerAlias is set, each --account-id value is queried through that payer's Cost Explorer
 // credentials; member accounts need not be registered (only the payer must be).
 func ResolveCostTargets(cfg File, accountIDs, aliases []string, payerAlias string) ([]cost.AccountTarget, error) {
 	if len(accountIDs) == 0 && len(aliases) == 0 {
-		return nil, errors.New("at least one of --account or --account-alias is required")
+		return nil, errors.New("at least one of --account-id or --account-alias is required")
 	}
 
 	payerAlias = strings.TrimSpace(payerAlias)

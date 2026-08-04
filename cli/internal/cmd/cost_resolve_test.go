@@ -3,6 +3,7 @@ package cmd
 import (
 	"testing"
 
+	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
@@ -10,17 +11,18 @@ func TestValidateCostTargetSelectorOU(t *testing.T) {
 	if _, err := validateCostTargetSelector(costTargetSelector{}); err == nil {
 		t.Fatal("expected error when no selector provided")
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{OUIDs: []string{"ou-abcd-1234"}}); err == nil {
+	if _, err := validateCostTargetSelector(costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}}); err == nil {
 		t.Fatal("expected error when --ou without --payer")
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{OUDirectOnly: true}); err == nil {
-		t.Fatal("expected error when --ou-direct without --ou")
+	mode, err := validateCostTargetSelector(costTargetSelector{PayerAlias: "rh-control"})
+	if err != nil {
+		t.Fatalf("payer alone should select org: %v", err)
 	}
-	if _, err := validateCostTargetSelector(costTargetSelector{PayerAlias: "rh-control"}); err == nil {
-		t.Fatal("expected error when --payer without --account or --ou")
+	if mode != costTargetModeOrg {
+		t.Fatalf("mode = %v, want org", mode)
 	}
 	if _, err := validateCostTargetSelector(costTargetSelector{
-		OUIDs:      []string{"ou-abcd-1234"},
+		OUs:        []configstore.OUSelector{{ID: "ou-abcd-12345678"}},
 		PayerAlias: "rh-control",
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)

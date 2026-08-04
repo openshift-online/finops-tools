@@ -39,12 +39,12 @@ func TestMergeResultsPreservesAccountNames(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", AccountName: "Member One", Amount: 60}},
 		},
 		{
 			Provider: ProviderAWS, Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "222222222222", AccountName: "Member Two", Amount: 40}},
 		},
 	}
@@ -64,12 +64,12 @@ func TestMergeResultsCombinesLinkedAccounts(t *testing.T) {
 	results := []CostResult{
 		{
 			Provider: ProviderAWS, AccountName: "payer-a", Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 60, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", Amount: 60}},
 		},
 		{
 			Provider: ProviderAWS, AccountName: "payer-b", Currency: "USD",
-			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, SplitBy: SplitByAccount,
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 40, GroupBy: GroupByAccount,
 			Breakdown: []CostBreakdownItem{{Account: "111111111111", Amount: 10}, {Account: "222222222222", Amount: 30}},
 		},
 	}
@@ -101,6 +101,80 @@ func TestMergeDaily(t *testing.T) {
 	}
 }
 
+func TestMergeResultsPreservesOUTreeOrderAndDepth(t *testing.T) {
+	results := []CostResult{
+		{
+			Provider: ProviderAWS, Currency: "USD",
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 10, GroupBy: GroupByOU,
+			Breakdown: []CostBreakdownItem{
+				{OUID: "r-aaaa", OUName: "Org A", OUDepth: 0, Amount: 10},
+				{OUID: "ou-a-prod", OUName: "Production", OUDepth: 1, Amount: 10},
+			},
+		},
+		{
+			Provider: ProviderAWS, Currency: "USD",
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 5, GroupBy: GroupByOU,
+			Breakdown: []CostBreakdownItem{
+				{OUID: "r-bbbb", OUName: "Org B", OUDepth: 0, Amount: 5},
+				{OUID: "ou-b-sand", OUName: "Sandbox", OUDepth: 1, Amount: 5},
+			},
+		},
+	}
+	merged, err := MergeResults(results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Breakdown) != 4 {
+		t.Fatalf("breakdown = %+v", merged.Breakdown)
+	}
+	wantOrder := []string{"r-aaaa", "ou-a-prod", "r-bbbb", "ou-b-sand"}
+	for i, id := range wantOrder {
+		if merged.Breakdown[i].OUID != id {
+			t.Fatalf("order[%d] = %q, want %q (got %+v)", i, merged.Breakdown[i].OUID, id, merged.Breakdown)
+		}
+	}
+	if merged.Breakdown[0].OUDepth != 0 || merged.Breakdown[1].OUDepth != 1 {
+		t.Fatalf("depths lost: %+v", merged.Breakdown)
+	}
+	if merged.Breakdown[0].Amount != 10 || merged.Breakdown[2].Amount != 5 {
+		t.Fatalf("amounts = %+v", merged.Breakdown)
+	}
+}
+
+func TestMergeResultsSumsSharedOUParents(t *testing.T) {
+	results := []CostResult{
+		{
+			Provider: ProviderAWS, Currency: "USD",
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 10, GroupBy: GroupByOU,
+			Breakdown: []CostBreakdownItem{
+				{OUID: "r-root", OUName: "Root", OUDepth: 0, Amount: 10},
+				{OUID: "ou-prod", OUName: "Production", OUDepth: 1, Amount: 10},
+			},
+		},
+		{
+			Provider: ProviderAWS, Currency: "USD",
+			StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 5, GroupBy: GroupByOU,
+			Breakdown: []CostBreakdownItem{
+				{OUID: "r-root", OUName: "Root", OUDepth: 0, Amount: 5},
+				{OUID: "ou-sand", OUName: "Sandbox", OUDepth: 1, Amount: 5},
+			},
+		},
+	}
+	merged, err := MergeResults(results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Breakdown) != 3 {
+		t.Fatalf("breakdown = %+v", merged.Breakdown)
+	}
+	if merged.Breakdown[0].OUID != "r-root" || merged.Breakdown[0].Amount != 15 {
+		t.Fatalf("root = %+v", merged.Breakdown[0])
+	}
+	if merged.Breakdown[1].OUID != "ou-prod" || merged.Breakdown[2].OUID != "ou-sand" {
+		t.Fatalf("children = %+v", merged.Breakdown)
+	}
+}
+
 func TestMergeResultsRejectsMixedCurrency(t *testing.T) {
 	_, err := MergeResults([]CostResult{
 		{Currency: "USD", StartDate: "2026-04-25", EndDate: "2026-05-24", Amount: 1},
@@ -110,3 +184,4 @@ func TestMergeResultsRejectsMixedCurrency(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+

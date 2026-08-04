@@ -24,7 +24,7 @@ var (
 	accountListOUsPayer              string
 )
 
-var parentIDPattern = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32}-[0-9a-z]{4,32})$`)
+var parentIDPattern = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32})$`)
 
 var awsListOUsCmd = &cobra.Command{
 	Use:   "list-ous",
@@ -33,7 +33,7 @@ var awsListOUsCmd = &cobra.Command{
 
 Examples:
   finops aws list-ous --payer rh-control
-  finops aws list-ous --payer rh-control --parent ou-abcd-1234
+  finops aws list-ous --payer rh-control --parent ou-abcd-12345678
   finops aws list-ous --payer rh-control --format json`,
 	Args: cobra.NoArgs,
 	PreRunE: func(_ *cobra.Command, _ []string) error {
@@ -41,7 +41,7 @@ Examples:
 			return fmt.Errorf("--payer is required")
 		}
 		if parent := strings.TrimSpace(accountListOUsParent); parent != "" && !parentIDPattern.MatchString(parent) {
-			return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx-yyyyy)", parent)
+			return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx)", parent)
 		}
 		_, err := output.ParseFormat(accountListOUsFormat)
 		return err

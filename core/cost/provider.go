@@ -26,28 +26,31 @@ const DefaultDays = 30
 // MetricNetAmortized is the AWS Cost Explorer metric name.
 const MetricNetAmortized = "NetAmortizedCost"
 
-// SplitBy identifies how cost results are grouped.
-type SplitBy string
+// GroupBy identifies how cost results are grouped.
+type GroupBy string
 
 const (
-	SplitByNone    SplitBy = ""
-	SplitByService SplitBy = "service"
-	SplitByAccount SplitBy = "account"
+	GroupByNone    GroupBy = ""
+	GroupByService GroupBy = "service"
+	GroupByAccount GroupBy = "account"
+	GroupByOU      GroupBy = "ou"
 )
 
 var errProviderNotImplemented = errors.New("cost provider not implemented")
 
-// ParseSplitBy parses a --split-by flag value (case-insensitive). Empty means no split.
-func ParseSplitBy(s string) (SplitBy, error) {
+// ParseGroupBy parses a --group-by flag value (case-insensitive). Empty means no grouping.
+func ParseGroupBy(s string) (GroupBy, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "":
-		return SplitByNone, nil
-	case string(SplitByService):
-		return SplitByService, nil
-	case string(SplitByAccount):
-		return SplitByAccount, nil
+		return GroupByNone, nil
+	case string(GroupByService):
+		return GroupByService, nil
+	case string(GroupByAccount):
+		return GroupByAccount, nil
+	case string(GroupByOU):
+		return GroupByOU, nil
 	default:
-		return "", fmt.Errorf("unknown split-by %q (supported: service, account)", s)
+		return "", fmt.Errorf("unknown group-by %q (supported: service, account, ou)", s)
 	}
 }
 
@@ -73,6 +76,17 @@ type AWSFetchOptions struct {
 	ListAccountNames ListAWSAccountNamesFunc
 	// ResolveAccountNames looks up only the given account IDs (fast for small sets).
 	ResolveAccountNames ResolveAWSAccountNamesFunc
+	// AccountOUBuckets maps linked account IDs to OU rollup buckets for GroupByOU.
+	// Prefer immediate parent OUs when OUHierarchy is also set (tree rollup).
+	AccountOUBuckets map[string]OUBucket
+	// OUHierarchy is the DFS pre-order OU tree under the selection root for GroupByOU.
+	OUHierarchy []OUHierarchyNode
+}
+
+// OUBucket identifies an Organizational Unit for cost rollup.
+type OUBucket struct {
+	ID   string
+	Name string
 }
 
 // FetchProgress reports long-running steps while fetching costs.
@@ -85,7 +99,7 @@ type CostQuery struct {
 	Provider Provider
 	Accounts []AccountTarget
 	Range    DateRange
-	SplitBy  SplitBy
+	GroupBy  GroupBy
 	AWSFetch *AWSFetchOptions
 	Progress FetchProgress
 	// Workers bounds concurrent Cost Explorer queries for multi-account fetches (0 = default).
@@ -133,34 +147,52 @@ type DailyCostItem struct {
 	Amount float64 `json:"amount"`
 }
 
-// CostBreakdownItem is one row when costs are split by service or linked account.
+// CostBreakdownItem is one row when costs are split by service, linked account, or OU.
 type CostBreakdownItem struct {
 	Service     string  `json:"service,omitempty"`
 	Account     string  `json:"account,omitempty"`
 	AccountName string  `json:"account_name,omitempty"`
+	OUID        string  `json:"ou_id,omitempty"`
+	OUName      string  `json:"ou_name,omitempty"`
+	OUDepth     int     `json:"ou_depth"`
 	Amount      float64 `json:"amount"`
 }
 
 // Label returns the merge/group key for this breakdown row (always the raw dimension value).
-func (b CostBreakdownItem) Label(splitBy SplitBy) string {
-	switch splitBy {
-	case SplitByAccount:
+func (b CostBreakdownItem) Label(groupBy GroupBy) string {
+	switch groupBy {
+	case GroupByAccount:
 		return b.Account
+	case GroupByOU:
+		if id := strings.TrimSpace(b.OUID); id != "" {
+			return id
+		}
+		return b.OUName
 	default:
 		return b.Service
 	}
 }
 
-// DisplayLabel returns the formatted label for output (includes account ID when a name is known).
-func (b CostBreakdownItem) DisplayLabel(splitBy SplitBy) string {
-	switch splitBy {
-	case SplitByAccount:
+// DisplayLabel returns the formatted label for output (includes account/OU ID when a name is known).
+func (b CostBreakdownItem) DisplayLabel(groupBy GroupBy) string {
+	switch groupBy {
+	case GroupByAccount:
 		if name := strings.TrimSpace(b.AccountName); name != "" && name != b.Account {
 			return name + " (" + b.Account + ")"
 		}
-		return b.Label(splitBy)
+		return b.Label(groupBy)
+	case GroupByOU:
+		name := strings.TrimSpace(b.OUName)
+		id := strings.TrimSpace(b.OUID)
+		if name != "" && id != "" && name != id {
+			return name + " (" + id + ")"
+		}
+		if name != "" {
+			return name
+		}
+		return id
 	default:
-		return b.Label(splitBy)
+		return b.Label(groupBy)
 	}
 }
 
@@ -170,7 +202,7 @@ type CostResult struct {
 	AccountName string              `json:"account_name"`
 	AccountID   string              `json:"account_id"`
 	Metric      string              `json:"metric"`
-	SplitBy     SplitBy             `json:"split_by,omitempty"`
+	GroupBy     GroupBy             `json:"group_by,omitempty"`
 	StartDate   string              `json:"start_date"`
 	EndDate     string              `json:"end_date"`
 	Amount      float64             `json:"amount"`
@@ -181,12 +213,12 @@ type CostResult struct {
 }
 
 // EmptyResult is a zero-amount summary for a period when no accounts were selected.
-func EmptyResult(provider Provider, dr DateRange, splitBy SplitBy) CostResult {
+func EmptyResult(provider Provider, dr DateRange, groupBy GroupBy) CostResult {
 	endInclusive := dr.End.AddDate(0, 0, -1)
 	return CostResult{
 		Provider:  provider,
 		Metric:    MetricNetAmortized,
-		SplitBy:   splitBy,
+		GroupBy:   groupBy,
 		StartDate: formatDate(dr.Start),
 		EndDate:   formatDate(endInclusive),
 	}
@@ -200,7 +232,7 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 	targets := FilterOverlappingTargets(q.Accounts)
 
 	if _, ok := planBulkFetch(targets); ok {
-		reportBulkFetchProgress(q.Progress, len(targets), q.SplitBy)
+		reportBulkFetchProgress(q.Progress, len(targets), q.GroupBy)
 		switch q.Provider {
 		case ProviderAWS, "":
 			opts := fetchAWSOptions{Now: time.Now()}
@@ -216,12 +248,28 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		}
 	}
 
+	// For GroupByOU, fetch per-account LINKED_ACCOUNT rows and roll up once after
+	// merge. Rolling up before merge flattens the tree (loses depth/DFS order) and
+	// can disorder siblings when multiple payers/orgs are combined.
+	fetchGroupBy := q.GroupBy
+	deferOURollup := q.GroupBy == GroupByOU
+	if deferOURollup {
+		fetchGroupBy = GroupByAccount
+	}
+
 	results := make([]CostResult, len(targets))
 	err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
 		acct := targets[i]
-		reportFetchProgress(q.Progress, acct, i+1, len(targets), q.SplitBy)
+		reportFetchProgress(q.Progress, acct, i+1, len(targets), q.GroupBy)
 		single := q
 		single.Accounts = []AccountTarget{acct}
+		single.GroupBy = fetchGroupBy
+		if deferOURollup && single.AWSFetch != nil {
+			cp := *single.AWSFetch
+			cp.AccountOUBuckets = nil
+			cp.OUHierarchy = nil
+			single.AWSFetch = &cp
+		}
 
 		var r CostResult
 		var err error
@@ -242,7 +290,15 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 	if err != nil {
 		return CostResult{}, err
 	}
-	return MergeResults(results)
+	merged, err := MergeResults(results)
+	if err != nil {
+		return CostResult{}, err
+	}
+	if deferOURollup {
+		merged.GroupBy = GroupByOU
+		merged.Breakdown = rollupOUBreakdown(merged.Breakdown, q.AWSFetch)
+	}
+	return merged, nil
 }
 
 // FetchDaily retrieves per-day net amortized costs for one or more accounts.
@@ -254,7 +310,7 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 	case ProviderAWS, "":
 		targets := FilterOverlappingTargets(q.Accounts)
 		if _, ok := planBulkFetch(targets); ok {
-			reportBulkFetchProgress(q.Progress, len(targets), SplitByNone)
+			reportBulkFetchProgress(q.Progress, len(targets), GroupByNone)
 			opts := fetchAWSOptions{Now: time.Now()}
 			return fetchAWSDailyNetAmortizedBulk(ctx, q, targets, opts)
 		}
@@ -262,7 +318,7 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 		currencies := make([]string, len(targets))
 		err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
 			acct := targets[i]
-			reportFetchProgress(q.Progress, acct, i+1, len(targets), SplitByNone)
+			reportFetchProgress(q.Progress, acct, i+1, len(targets), GroupByNone)
 			single := q
 			single.Accounts = []AccountTarget{acct}
 			daily, cur, err := fetchAWSDailyNetAmortized(ctx, single)
@@ -292,27 +348,29 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 	}
 }
 
-func reportBulkFetchProgress(progress FetchProgress, accountCount int, splitBy SplitBy) {
+func reportBulkFetchProgress(progress FetchProgress, accountCount int, groupBy GroupBy) {
 	if progress == nil || accountCount <= 1 {
 		return
 	}
-	switch splitBy {
-	case SplitByService:
+	switch groupBy {
+	case GroupByService:
 		progress.Step(fmt.Sprintf("Fetching costs by service for %d account(s) in batched Cost Explorer queries…", accountCount))
+	case GroupByOU:
+		progress.Step(fmt.Sprintf("Fetching costs by OU for %d account(s) in batched Cost Explorer queries…", accountCount))
 	default:
 		progress.Step(fmt.Sprintf("Fetching costs for %d account(s) in one bulk Cost Explorer query…", accountCount))
 	}
 }
 
-func reportFetchProgress(progress FetchProgress, acct AccountTarget, index, total int, splitBy SplitBy) {
+func reportFetchProgress(progress FetchProgress, acct AccountTarget, index, total int, groupBy GroupBy) {
 	if progress == nil || total <= 1 || !shouldReportFetchProgress(index, total) {
 		return
 	}
 	label := targetProgressLabel(acct)
-	switch splitBy {
-	case SplitByService:
+	switch groupBy {
+	case GroupByService:
 		progress.Step(fmt.Sprintf("Fetching costs by service for %s [%d/%d]…", label, index, total))
-	case SplitByAccount:
+	case GroupByAccount:
 		progress.Step(fmt.Sprintf("Fetching costs for %s [%d/%d]…", label, index, total))
 	default:
 		progress.Step(fmt.Sprintf("Fetching costs for %s [%d/%d]…", label, index, total))

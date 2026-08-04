@@ -16,16 +16,13 @@ import (
 var (
 	costGetAccount         string
 	costGetAccountAliases  string
-	costGetAllLinked       bool
 	costGetFormat          string
 	costGetOutput          string
 	costGetOU              string
-	costGetOUDirect        bool
 	costGetPayer           string
 	costGetProvider        string
-	costGetSplitBy         string
-	costGetTagKey          string
-	costGetTagValue        string
+	costGetGroupBy         string
+	costGetTag             string
 	costGetQuiet           bool
 	costGetSkipOrgCache    bool
 	costGetRefreshOrgCache bool
@@ -36,29 +33,32 @@ var accountGetCostCmd = &cobra.Command{
 	Use:   "get-cost",
 	Short: "Get net amortized cost for a date range",
 	Long: `Fetch the sum of AWS Cost Explorer NetAmortizedCost for one or more payer or linked accounts.
-Provide --account with 12-digit AWS account IDs and/or --account-alias with configured aliases (see finops config account add aws).
-Alternatively, select accounts by AWS Organizations tag with --payer and --tag-key (optional --tag-value).
+
+Account selection (exactly one mode):
+  --account-id / --account-alias   Explicit accounts (optional --payer for unregistered member IDs)
+  --payer                       All active member accounts in the payer's organization
+  --payer --ou                  Accounts under an OU or org root (scope suffix on each ID)
+  --payer --tag KEY[=VALUE]     Accounts matching an Organizations tag
+
+--ou scope suffixes (per ID):
+  ou-xxxx / r-xxxx      all accounts under parent (default)
+  ou-xxxx/              accounts directly in that OU/root only
+  ou-xxxx/*             that OU/root + immediate child OUs only
+  ou-xxxx/**            same as bare ID (explicit subtree)
 
 Period (default: last 30 calendar days, or defaults.cost.* in config):
   --days, --months, --from/--to, --exclude-recent-days (omit recent incomplete CE days)
 
-For linked accounts, credentials are obtained from the registered payer account.
-Use --payer with --account to query a member account that is not registered (the payer alias must be registered).
-Use --payer with --tag-key to query all org accounts matching an Organizations account tag.
-Use --payer with --all-linked to query all active member accounts in the payer's AWS Organization.
-
 Examples:
   finops account get-cost --account-alias rh-control
-  finops account get-cost --payer rh-control --all-linked
-  finops account get-cost --payer rh-control --tag-key organization
-  finops account get-cost --payer rh-control --tag-key organization --tag-value "Hybrid Platform" --split-by service
-
-Use --ou with --payer to query all accounts in an AWS Organizational Unit (recursive by default).
-Add --ou-direct to include only accounts directly in the OU, not descendant OUs.
-
-Examples:
-  finops account get-cost --ou ou-abcd-1234 --payer rh-control
-  finops account get-cost --ou ou-abcd-1234 --payer rh-control --ou-direct --days 7
+  finops account get-cost --payer rh-control
+  finops account get-cost --payer rh-control --account-id 111111111111,222222222222
+  finops account get-cost --payer rh-control --tag organization
+  finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
+  finops account get-cost --ou ou-abcd-12345678 --payer rh-control
+  finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
+  finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
+  finops account get-cost --payer rh-control --group-by ou
 
 Authentication uses --auth-method when set, otherwise defaults.aws.auth_method in config (saml by default).
 
@@ -67,8 +67,8 @@ Only AWS is supported today; GCP will be added later.`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		sel, err := parseCostTargetSelector(
 			costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
-			costGetTagKey, costGetTagValue, costGetOUDirect,
-			costGetSkipOrgCache, costGetRefreshOrgCache, costGetAllLinked,
+			costGetTag,
+			costGetSkipOrgCache, costGetRefreshOrgCache,
 		)
 		if err != nil {
 			return err
@@ -85,7 +85,7 @@ Only AWS is supported today; GCP will be added later.`,
 		if _, err := cost.ParseProvider(costGetProvider); err != nil {
 			return err
 		}
-		if _, err := cost.ParseSplitBy(costGetSplitBy); err != nil {
+		if _, err := cost.ParseGroupBy(costGetGroupBy); err != nil {
 			return err
 		}
 		if err := validateWorkers(costGetWorkers); err != nil {
@@ -101,12 +101,9 @@ func init() {
 	bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{
 		Account:         &costGetAccount,
 		AccountAliases:  &costGetAccountAliases,
-		AllLinked:       &costGetAllLinked,
 		OU:              &costGetOU,
-		OUDirect:        &costGetOUDirect,
 		Payer:           &costGetPayer,
-		TagKey:          &costGetTagKey,
-		TagValue:        &costGetTagValue,
+		Tag:             &costGetTag,
 		SkipOrgCache:    &costGetSkipOrgCache,
 		RefreshOrgCache: &costGetRefreshOrgCache,
 	})
@@ -115,8 +112,8 @@ func init() {
 	addOutputFlag(accountGetCostCmd, &costGetOutput)
 	accountGetCostCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
 		"Cloud provider: aws or gcp")
-	accountGetCostCmd.Flags().StringVar(&costGetSplitBy, "split-by", "",
-		"Split results by dimension (supported: service, account)")
+	accountGetCostCmd.Flags().StringVar(&costGetGroupBy, "group-by", "",
+		"Group results by dimension (supported: service, account, ou)")
 	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(accountGetCostCmd, &costGetWorkers, "")
 	addPeriodFlags(accountGetCostCmd)
@@ -131,7 +128,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	splitBy, err := cost.ParseSplitBy(costGetSplitBy)
+	groupBy, err := cost.ParseGroupBy(costGetGroupBy)
 	if err != nil {
 		return err
 	}
@@ -156,15 +153,15 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 
 	sel, err := parseCostTargetSelector(
 		costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
-		costGetTagKey, costGetTagValue, costGetOUDirect,
-		costGetSkipOrgCache, costGetRefreshOrgCache, costGetAllLinked,
+		costGetTag,
+		costGetSkipOrgCache, costGetRefreshOrgCache,
 	)
 	if err != nil {
 		return err
 	}
 
 	targets, err := resolveCostTargets(
-		cmd, cfg, sel,
+		cmd, cfg, &sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
 	)
@@ -185,7 +182,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, splitBy))
+		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, groupBy))
 	}
 
 	if provider == cost.ProviderAWS {
@@ -216,14 +213,25 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		Provider: provider,
 		Accounts: targets,
 		Range:    dateRange,
-		SplitBy:  splitBy,
+		GroupBy:  groupBy,
 		Progress: status,
 		Workers:  costGetWorkers,
 	}
-	if provider == cost.ProviderAWS && splitBy == cost.SplitByAccount {
-		costQuery.AWSFetch = &cost.AWSFetchOptions{
-			ResolveAccountNames: coreaccount.ResolveAccountNames,
+	if provider == cost.ProviderAWS && (groupBy == cost.GroupByAccount || groupBy == cost.GroupByOU) {
+		awsFetch := &cost.AWSFetchOptions{}
+		if groupBy == cost.GroupByAccount {
+			awsFetch.ResolveAccountNames = coreaccount.ResolveAccountNames
 		}
+		if groupBy == cost.GroupByOU {
+			status.Step("Mapping accounts to organizational units…")
+			buckets, hierarchy, _, err := resolveAccountOUBuckets(awsCtx, cfg, sel, targets, awsFlags.CredentialsFile)
+			if err != nil {
+				return err
+			}
+			awsFetch.AccountOUBuckets = buckets
+			awsFetch.OUHierarchy = hierarchy
+		}
+		costQuery.AWSFetch = awsFetch
 	}
 
 	result, err := cost.Fetch(awsCtx, costQuery)

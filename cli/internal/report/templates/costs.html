@@ -42,6 +42,30 @@
   {{ end }}
 </section>
 
+{{ if .ByOU }}
+<section>
+  <h2>Costs per organizational unit (tree; amounts include nested OUs)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>OU</th>
+        <th class="amount">Amount</th>
+        <th class="percent">Share</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .ByOU }}
+      <tr>
+        <td>{{ .Label }}</td>
+        <td class="amount">{{ .AmountFormatted }}</td>
+        <td class="percent">{{ .PercentFormatted }}</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+</section>
+{{ end }}
+
 <section>
   <h2>Costs per service</h2>
   {{ if .ByService }}

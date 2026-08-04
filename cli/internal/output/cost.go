@@ -60,7 +60,7 @@ func writeCSV(w io.Writer, r cost.CostResult) error {
 	defer cw.Flush()
 
 	if len(r.Breakdown) > 0 {
-		dimCol := breakdownCSVColumn(r.SplitBy)
+		dimCol := breakdownCSVColumn(r.GroupBy)
 		header := []string{
 			"provider", "account_name", "account_id", "metric",
 			"currency", "start_date", "end_date", dimCol, "amount",
@@ -99,10 +99,12 @@ func writeCSV(w io.Writer, r cost.CostResult) error {
 	return cw.Error()
 }
 
-func breakdownCSVColumn(splitBy cost.SplitBy) string {
-	switch splitBy {
-	case cost.SplitByAccount:
+func breakdownCSVColumn(groupBy cost.GroupBy) string {
+	switch groupBy {
+	case cost.GroupByAccount:
 		return "linked_account_id"
+	case cost.GroupByOU:
+		return "ou"
 	default:
 		return "service"
 	}
@@ -117,7 +119,7 @@ func csvBreakdownRow(r cost.CostResult, item cost.CostBreakdownItem) []string {
 		r.Currency,
 		r.StartDate,
 		r.EndDate,
-		item.DisplayLabel(r.SplitBy),
+		item.Label(r.GroupBy),
 		fmt.Sprintf("%.10f", item.Amount),
 	}
 }

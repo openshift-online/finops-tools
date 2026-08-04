@@ -21,7 +21,7 @@ func MergeResults(results []CostResult) (CostResult, error) {
 	out := CostResult{
 		Provider:  first.Provider,
 		Metric:    first.Metric,
-		SplitBy:   first.SplitBy,
+		GroupBy:   first.GroupBy,
 		StartDate: first.StartDate,
 		EndDate:   first.EndDate,
 		Currency:  first.Currency,
@@ -33,6 +33,10 @@ func MergeResults(results []CostResult) (CostResult, error) {
 	)
 	byKey := make(map[string]float64)
 	accountNames := make(map[string]string)
+	ouDepths := make(map[string]int)
+	ouOrder := make([]string, 0)
+	ouSeen := make(map[string]struct{})
+	preserveOUOrder := out.GroupBy == GroupByOU
 
 	for _, r := range results {
 		if r.Provider != out.Provider {
@@ -45,8 +49,8 @@ func MergeResults(results []CostResult) (CostResult, error) {
 		if r.StartDate != out.StartDate || r.EndDate != out.EndDate {
 			return CostResult{}, fmt.Errorf("cannot merge accounts with different periods")
 		}
-		if r.SplitBy != out.SplitBy {
-			return CostResult{}, fmt.Errorf("cannot merge accounts with different split-by settings")
+		if r.GroupBy != out.GroupBy {
+			return CostResult{}, fmt.Errorf("cannot merge accounts with different group-by settings")
 		}
 
 		names = append(names, r.AccountName)
@@ -57,10 +61,24 @@ func MergeResults(results []CostResult) (CostResult, error) {
 		out.Amount += r.Amount
 
 		for _, item := range r.Breakdown {
-			key := item.Label(out.SplitBy)
+			key := item.Label(out.GroupBy)
 			byKey[key] += item.Amount
-			if out.SplitBy == SplitByAccount && item.AccountName != "" {
+			if out.GroupBy == GroupByAccount && item.AccountName != "" {
 				accountNames[key] = item.AccountName
+			}
+			if out.GroupBy == GroupByOU {
+				if item.OUName != "" {
+					accountNames[key] = item.OUName
+				}
+				if _, ok := ouDepths[key]; !ok {
+					ouDepths[key] = item.OUDepth
+				}
+				if preserveOUOrder {
+					if _, seen := ouSeen[key]; !seen {
+						ouSeen[key] = struct{}{}
+						ouOrder = append(ouOrder, key)
+					}
+				}
 			}
 		}
 	}
@@ -75,18 +93,39 @@ func MergeResults(results []CostResult) (CostResult, error) {
 				continue
 			}
 			item := CostBreakdownItem{Amount: amt}
-			switch out.SplitBy {
-			case SplitByAccount:
+			switch out.GroupBy {
+			case GroupByAccount:
 				item.Account = key
 				item.AccountName = accountNames[key]
+			case GroupByOU:
+				item.OUID = key
+				item.OUName = accountNames[key]
+				if item.OUName == "" {
+					item.OUName = key
+				}
+				item.OUDepth = ouDepths[key]
 			default:
 				item.Service = key
 			}
 			out.Breakdown = append(out.Breakdown, item)
 		}
-		sort.Slice(out.Breakdown, func(i, j int) bool {
-			return out.Breakdown[i].Amount > out.Breakdown[j].Amount
-		})
+		if preserveOUOrder && len(ouOrder) > 0 {
+			byID := make(map[string]CostBreakdownItem, len(out.Breakdown))
+			for _, item := range out.Breakdown {
+				byID[item.OUID] = item
+			}
+			ordered := make([]CostBreakdownItem, 0, len(ouOrder))
+			for _, key := range ouOrder {
+				if item, ok := byID[key]; ok {
+					ordered = append(ordered, item)
+				}
+			}
+			out.Breakdown = ordered
+		} else {
+			sort.Slice(out.Breakdown, func(i, j int) bool {
+				return out.Breakdown[i].Amount > out.Breakdown[j].Amount
+			})
+		}
 	}
 
 	return out, nil

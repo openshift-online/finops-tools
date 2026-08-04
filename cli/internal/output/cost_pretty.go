@@ -41,8 +41,8 @@ func writePrettySummary(w io.Writer, s styler, r cost.CostResult) error {
 		{accountLabel, formatAccountList(r.AccountName, r.AccountID)},
 		{"Period", fmt.Sprintf("%s – %s", r.StartDate, r.EndDate)},
 	}
-	if r.SplitBy != cost.SplitByNone {
-		lines = append(lines, struct{ label, value string }{"Split by", string(r.SplitBy)})
+	if r.GroupBy != cost.GroupByNone {
+		lines = append(lines, struct{ label, value string }{"Group by", string(r.GroupBy)})
 	}
 
 	labelWidth := 0
@@ -69,7 +69,7 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 		return err
 	}
 
-	title, keyHeader := breakdownTitles(r.SplitBy)
+	title, keyHeader := breakdownTitles(r.GroupBy)
 	if s.enabled {
 		title = s.bold(s.cyan(title))
 	}
@@ -78,6 +78,14 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 	}
 
 	maxAmount := r.Amount
+	if r.GroupBy == cost.GroupByOU {
+		maxAmount = 0
+		for _, item := range r.Breakdown {
+			if item.Amount > maxAmount {
+				maxAmount = item.Amount
+			}
+		}
+	}
 	if maxAmount <= 0 && len(r.Breakdown) > 0 {
 		maxAmount = r.Breakdown[0].Amount
 	}
@@ -113,8 +121,12 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 		if s.enabled && i == 0 {
 			amountStr = s.bold(amountStr)
 		}
+		label := item.DisplayLabel(r.GroupBy)
+		if r.GroupBy == cost.GroupByOU && item.OUDepth > 0 {
+			label = strings.Repeat("  ", item.OUDepth) + label
+		}
 		table.Append([]string{
-			truncateLabel(item.DisplayLabel(r.SplitBy)),
+			truncateLabel(label),
 			amountStr,
 			fmt.Sprintf("%.1f%%", share),
 			renderBar(s, item.Amount/maxAmount, i),
@@ -175,10 +187,12 @@ func cell(s styler, fn func(string) string, text string) string {
 	return text
 }
 
-func breakdownTitles(splitBy cost.SplitBy) (title, keyHeader string) {
-	switch splitBy {
-	case cost.SplitByAccount:
+func breakdownTitles(groupBy cost.GroupBy) (title, keyHeader string) {
+	switch groupBy {
+	case cost.GroupByAccount:
 		return "Cost by linked account", "ACCOUNT ID"
+	case cost.GroupByOU:
+		return "Cost by organizational unit (tree; amounts include nested OUs)", "OU"
 	default:
 		return "Cost by service", "SERVICE"
 	}

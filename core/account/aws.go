@@ -14,7 +14,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/organizations/types"
 )
 
-var ouIDPattern = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}$`)
+var (
+	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{8,32}$`)
+	rootIDPattern = regexp.MustCompile(`^r-[0-9a-z]{4,32}$`)
+)
 
 // ListTags returns AWS Organizations tags for accountID.
 func ListTags(ctx context.Context, cfg aws.Config, accountID string) ([]Tag, error) {
@@ -364,10 +367,28 @@ func ListAccountsInOU(ctx context.Context, cfg aws.Config, ouID string, opts Lis
 	return listAccountsInOUWithClient(ctx, newOrganizationsClient(cfg), ouID, opts)
 }
 
+// ListAccountsUnderParent returns active accounts under an OU or organization root ID,
+// with the same depth options as ListAccountsInOU.
+func ListAccountsUnderParent(ctx context.Context, cfg aws.Config, parentID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
+	parentID = strings.TrimSpace(parentID)
+	if err := validateParentID(parentID); err != nil {
+		return nil, err
+	}
+	return listAccountsUnderParentWithClient(ctx, newOrganizationsClient(cfg), parentID, opts)
+}
+
 func listAccountsInOUWithClient(ctx context.Context, client OrganizationsAPI, ouID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
 	ouID = strings.TrimSpace(ouID)
 	if err := validateOUID(ouID); err != nil {
 		return nil, err
+	}
+	return listAccountsUnderParentWithClient(ctx, client, ouID, opts)
+}
+
+func listAccountsUnderParentWithClient(ctx context.Context, client OrganizationsAPI, parentID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return nil, fmt.Errorf("parent ID is required")
 	}
 
 	statusFilter := strings.TrimSpace(opts.Status)
@@ -375,11 +396,13 @@ func listAccountsInOUWithClient(ctx context.Context, client OrganizationsAPI, ou
 		statusFilter = string(types.AccountStatusActive)
 	}
 
+	maxDepth, unbounded := effectiveOUMaxDepth(opts)
+
 	seen := make(map[string]struct{})
 	out := make([]OrganizationAccount, 0)
 
-	collectAccounts := func(parentID string) error {
-		accounts, err := listAccountsForParentWithClient(ctx, client, parentID, statusFilter)
+	collectAccounts := func(id string) error {
+		accounts, err := listAccountsForParentWithClient(ctx, client, id, statusFilter)
 		if err != nil {
 			return err
 		}
@@ -393,28 +416,28 @@ func listAccountsInOUWithClient(ctx context.Context, client OrganizationsAPI, ou
 		return nil
 	}
 
-	if opts.DirectOnly {
-		if err := collectAccounts(ouID); err != nil {
-			return nil, err
-		}
-		return out, nil
+	type queueItem struct {
+		id    string
+		depth int
 	}
-
-	queue := []string{ouID}
+	queue := []queueItem{{id: parentID, depth: 0}}
 	for len(queue) > 0 {
-		parentID := queue[0]
+		item := queue[0]
 		queue = queue[1:]
 
-		if err := collectAccounts(parentID); err != nil {
+		if err := collectAccounts(item.id); err != nil {
 			return nil, err
 		}
+		if !unbounded && item.depth >= maxDepth {
+			continue
+		}
 
-		childOUs, err := listOrganizationalUnitsWithClient(ctx, client, parentID)
+		childOUs, err := listOrganizationalUnitsWithClient(ctx, client, item.id)
 		if err != nil {
 			return nil, err
 		}
 		for _, child := range childOUs {
-			queue = append(queue, child.ID)
+			queue = append(queue, queueItem{id: child.ID, depth: item.depth + 1})
 		}
 	}
 
@@ -425,6 +448,192 @@ func listAccountsInOUWithClient(ctx context.Context, client OrganizationsAPI, ou
 		return strings.Compare(a.ID, b.ID)
 	})
 	return out, nil
+}
+
+func effectiveOUMaxDepth(opts ListAccountsInOUOptions) (maxDepth int, unbounded bool) {
+	if opts.DirectOnly {
+		return 0, false
+	}
+	if opts.MaxDepth == nil {
+		return 0, true
+	}
+	if *opts.MaxDepth < 0 {
+		return 0, true
+	}
+	return *opts.MaxDepth, false
+}
+
+// MapAccountsToChildOUs maps each account ID to the immediate child OU of rootID that
+// contains it, or to rootID itself when the account is a direct member of rootID.
+// rootID may be an OU ID (ou-…) or organization root ID (r-…).
+// Prefer BuildOUAccountMapping for --group-by ou tree output.
+func MapAccountsToChildOUs(ctx context.Context, cfg aws.Config, rootID string, accountIDs []string) (map[string]AccountOUBucket, error) {
+	return mapAccountsToChildOUsWithClient(ctx, newOrganizationsClient(cfg), rootID, accountIDs)
+}
+
+// BuildOUAccountMapping walks the OU tree under rootID and returns:
+//   - parents: each wanted account → its immediate parent OU (or root)
+//   - hierarchy: all OU/root nodes under rootID in DFS pre-order (for tree display)
+func BuildOUAccountMapping(ctx context.Context, cfg aws.Config, rootID string, accountIDs []string) (map[string]AccountOUBucket, []OUHierarchyNode, error) {
+	return buildOUAccountMappingWithClient(ctx, newOrganizationsClient(cfg), rootID, accountIDs)
+}
+
+func buildOUAccountMappingWithClient(ctx context.Context, client OrganizationsAPI, rootID string, accountIDs []string) (map[string]AccountOUBucket, []OUHierarchyNode, error) {
+	rootID = strings.TrimSpace(rootID)
+	if err := validateParentID(rootID); err != nil {
+		return nil, nil, err
+	}
+
+	wanted := make(map[string]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		wanted[id] = struct{}{}
+	}
+
+	rootName, err := parentDisplayName(ctx, client, rootID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	parents := make(map[string]AccountOUBucket, len(wanted))
+	hierarchy := make([]OUHierarchyNode, 0)
+
+	var walk func(id, name, parentID string, depth int) error
+	walk = func(id, name, parentID string, depth int) error {
+		hierarchy = append(hierarchy, OUHierarchyNode{
+			ID:       id,
+			Name:     name,
+			ParentID: parentID,
+			Depth:    depth,
+		})
+		bucket := AccountOUBucket{ID: id, Name: name}
+
+		directAccounts, err := listAccountsForParentWithClient(ctx, client, id, string(types.AccountStatusActive))
+		if err != nil {
+			return err
+		}
+		for _, acct := range directAccounts {
+			if _, ok := wanted[acct.ID]; ok {
+				parents[acct.ID] = bucket
+			}
+		}
+
+		childOUs, err := listOrganizationalUnitsWithClient(ctx, client, id)
+		if err != nil {
+			return err
+		}
+		for _, child := range childOUs {
+			childName := child.Name
+			if childName == "" {
+				childName = child.ID
+			}
+			if err := walk(child.ID, childName, id, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := walk(rootID, rootName, "", 0); err != nil {
+		return nil, nil, err
+	}
+	return parents, hierarchy, nil
+}
+
+func mapAccountsToChildOUsWithClient(ctx context.Context, client OrganizationsAPI, rootID string, accountIDs []string) (map[string]AccountOUBucket, error) {
+	rootID = strings.TrimSpace(rootID)
+	if err := validateParentID(rootID); err != nil {
+		return nil, err
+	}
+
+	wanted := make(map[string]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		wanted[id] = struct{}{}
+	}
+	if len(wanted) == 0 {
+		return map[string]AccountOUBucket{}, nil
+	}
+
+	rootName, err := parentDisplayName(ctx, client, rootID)
+	if err != nil {
+		return nil, err
+	}
+	rootBucket := AccountOUBucket{ID: rootID, Name: rootName}
+
+	out := make(map[string]AccountOUBucket, len(wanted))
+
+	directAccounts, err := listAccountsForParentWithClient(ctx, client, rootID, string(types.AccountStatusActive))
+	if err != nil {
+		return nil, err
+	}
+	for _, acct := range directAccounts {
+		if _, ok := wanted[acct.ID]; ok {
+			out[acct.ID] = rootBucket
+		}
+	}
+
+	childOUs, err := listOrganizationalUnitsWithClient(ctx, client, rootID)
+	if err != nil {
+		return nil, err
+	}
+	for _, child := range childOUs {
+		childBucket := AccountOUBucket(child)
+		accounts, err := listAccountsUnderParentWithClient(ctx, client, child.ID, ListAccountsInOUOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("list accounts under OU %s: %w", child.ID, err)
+		}
+		for _, acct := range accounts {
+			if _, ok := wanted[acct.ID]; !ok {
+				continue
+			}
+			if _, already := out[acct.ID]; already {
+				continue
+			}
+			out[acct.ID] = childBucket
+		}
+	}
+
+	return out, nil
+}
+
+func parentDisplayName(ctx context.Context, client OrganizationsAPI, parentID string) (string, error) {
+	if strings.HasPrefix(parentID, "r-") {
+		var token *string
+		for {
+			resp, err := client.ListRoots(ctx, &organizations.ListRootsInput{NextToken: token})
+			if err != nil {
+				return "", fmt.Errorf("list organization roots: %w", err)
+			}
+			for _, root := range resp.Roots {
+				if strings.TrimSpace(aws.ToString(root.Id)) == parentID {
+					name := strings.TrimSpace(aws.ToString(root.Name))
+					if name == "" {
+						return parentID, nil
+					}
+					return name, nil
+				}
+			}
+			if resp.NextToken == nil || aws.ToString(resp.NextToken) == "" {
+				break
+			}
+			token = resp.NextToken
+		}
+		return parentID, nil
+	}
+	// OU display names are resolved from parent listings when available; fall back to ID.
+	return parentID, nil
+}
+
+// OrganizationRootID returns the first organization root ID for cfg.
+func OrganizationRootID(ctx context.Context, cfg aws.Config) (string, error) {
+	return firstRootID(ctx, newOrganizationsClient(cfg))
 }
 
 func listAccountsForParentWithClient(ctx context.Context, client OrganizationsAPI, parentID, statusFilter string) ([]OrganizationAccount, error) {
@@ -488,6 +697,16 @@ func validateOUID(ouID string) error {
 		return fmt.Errorf("invalid OU ID %q (expected format ou-xxxx-yyyyy)", ouID)
 	}
 	return nil
+}
+
+func validateParentID(parentID string) error {
+	if parentID == "" {
+		return fmt.Errorf("parent ID is required")
+	}
+	if ouIDPattern.MatchString(parentID) || rootIDPattern.MatchString(parentID) {
+		return nil
+	}
+	return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx)", parentID)
 }
 
 // DetectAccountKind classifies callerAccountID against organization management account.

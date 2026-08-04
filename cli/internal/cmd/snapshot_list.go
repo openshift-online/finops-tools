@@ -15,27 +15,24 @@ import (
 )
 
 var (
-	snapshotListAccount        string
-	snapshotListAccountAliases string
-	snapshotListAllLinked      bool
-	snapshotListFormat         string
-	snapshotListOutput         string
-	snapshotListMinSizeGiB     float64
-	snapshotListOlderThanDays  int
-	snapshotListOU             string
-	snapshotListOUDirect       bool
-	snapshotListPayer          string
-	snapshotListQuiet          bool
-	snapshotListRegions        string
-	snapshotListRole           string
-	snapshotListSkipOrgCache   bool
+	snapshotListAccount         string
+	snapshotListAccountAliases  string
+	snapshotListFormat          string
+	snapshotListOutput          string
+	snapshotListMinSizeGiB      float64
+	snapshotListOlderThanDays   int
+	snapshotListOU              string
+	snapshotListPayer           string
+	snapshotListQuiet           bool
+	snapshotListRegions         string
+	snapshotListRole            string
+	snapshotListSkipOrgCache    bool
 	snapshotListRefreshOrgCache bool
-	snapshotListTagKey         string
-	snapshotListTagValue       string
-	snapshotListTypes          string
-	snapshotListProvider       string
-	snapshotListWorkers        int
-	snapshotListFetch          = snapshot.Fetch
+	snapshotListTag             string
+	snapshotListTypes           string
+	snapshotListProvider        string
+	snapshotListWorkers         int
+	snapshotListFetch           = snapshot.Fetch
 )
 
 var snapshotListCmd = &cobra.Command{
@@ -43,7 +40,7 @@ var snapshotListCmd = &cobra.Command{
 	Short: "List EBS and RDS snapshots with estimated storage costs",
 	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
-Account selection matches finops account get-cost: --account, --account-alias, --ou, --tag-key, or --all-linked with --payer.
+Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone.
 Linked member accounts are scanned using role assumption from the payer.
 Accounts that cannot be assumed into, or that fail credentialed API calls during the scan,
 are skipped and listed under "Skipped accounts" in the output.
@@ -63,15 +60,15 @@ ce:GetCostAndUsage with LINKED_ACCOUNT scope for billed cost lines.
 Examples:
   finops snapshot list --account-alias rh-control
   finops snapshot list --account-alias rh-control --older-than-days 365 --format json
-  finops snapshot list --payer rh-control --all-linked
-  finops snapshot list --payer rh-control --tag-key organization
-  finops snapshot list --ou ou-abcd-1234 --payer rh-control --types ebs`,
+  finops snapshot list --payer rh-control
+  finops snapshot list --payer rh-control --tag organization
+  finops snapshot list --ou ou-abcd-12345678 --payer rh-control --types ebs`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
 		sel, err := parseCostTargetSelector(
 			snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
-			snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
-			snapshotListSkipOrgCache, snapshotListRefreshOrgCache, snapshotListAllLinked,
+			snapshotListTag,
+			snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
 		)
 		if err != nil {
 			return err
@@ -110,12 +107,9 @@ func init() {
 	bindAWSTargetFlags(snapshotListCmd, awsTargetFlagRefs{
 		Account:         &snapshotListAccount,
 		AccountAliases:  &snapshotListAccountAliases,
-		AllLinked:       &snapshotListAllLinked,
 		OU:              &snapshotListOU,
-		OUDirect:        &snapshotListOUDirect,
 		Payer:           &snapshotListPayer,
-		TagKey:          &snapshotListTagKey,
-		TagValue:        &snapshotListTagValue,
+		Tag:             &snapshotListTag,
 		SkipOrgCache:    &snapshotListSkipOrgCache,
 		RefreshOrgCache: &snapshotListRefreshOrgCache,
 	})
@@ -167,8 +161,8 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 
 	sel, err := parseCostTargetSelector(
 		snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
-		snapshotListTagKey, snapshotListTagValue, snapshotListOUDirect,
-		snapshotListSkipOrgCache, snapshotListRefreshOrgCache, snapshotListAllLinked,
+		snapshotListTag,
+		snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
 	)
 	if err != nil {
 		return err
@@ -177,7 +171,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	// costTargets are the selected accounts (IDs + payer credential mapping).
 	// scanTargets are the subset we can assume into for EC2/RDS API scans.
 	costTargets, err := resolveCostTargets(
-		cmd, cfg, sel,
+		cmd, cfg, &sel,
 		awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
 		status,
 	)
