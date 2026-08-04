@@ -15,8 +15,6 @@ import (
 	"github.com/openshift-online/finops-tools/core/cost"
 )
 
-const costExplorerRegion = "us-east-1"
-
 // CostAnomaliesAPI is the subset of the CE client used for anomaly fetch (mockable).
 type CostAnomaliesAPI interface {
 	GetAnomalies(
@@ -73,11 +71,11 @@ type ceClientFactory func(cfg aws.Config) CostAnomaliesAPI
 func defaultCEClientFactory(cfg aws.Config) CostAnomaliesAPI {
 	region := cfg.Region
 	if region == "" {
-		region = costExplorerRegion
+		region = cost.CostExplorerRegion
 	}
 	cfg.Region = region
 	inner := costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
-		o.Region = costExplorerRegion
+		o.Region = cost.CostExplorerRegion
 	})
 	return apilog.WrapCostAnomalies(inner)
 }
@@ -102,7 +100,7 @@ func buildWith(ctx context.Context, newClient ceClientFactory, accounts []cost.A
 
 		raw, err := fetchAll(ctx, ce, dr)
 		if err != nil {
-			return Report{}, fmt.Errorf("%s: %w", accountDisplayName(group[0]), err)
+			return Report{}, fmt.Errorf("%s: %w", group[0].AccountDisplayName(), err)
 		}
 
 		anomalies := parseAnomalies(raw)
@@ -191,16 +189,6 @@ func filterAnomaliesForAccounts(anomalies []Anomaly, accountIDs map[string]struc
 		filtered = append(filtered, a)
 	}
 	return filtered
-}
-
-func accountDisplayName(acct cost.AccountTarget) string {
-	if name := strings.TrimSpace(acct.DisplayName); name != "" {
-		return name
-	}
-	if alias := strings.TrimSpace(acct.DisplayAlias); alias != "" {
-		return alias
-	}
-	return strings.TrimSpace(acct.AccountID)
 }
 
 // fetchAll paginates through GetAnomalies until all results are collected.

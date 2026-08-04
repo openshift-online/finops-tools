@@ -155,11 +155,11 @@ func TestFetchAWSNetAmortizedLinkedAccount(t *testing.T) {
 	}
 }
 
-func TestDisplayAccountNameFallsBackToDisplayAlias(t *testing.T) {
-	name := displayAccountName(AccountTarget{
+func TestAccountDisplayNameFallsBackToDisplayAlias(t *testing.T) {
+	name := AccountTarget{
 		AccountID:    "111111111111",
 		DisplayAlias: "quay",
-	})
+	}.AccountDisplayName()
 	if name != "quay" {
 		t.Errorf("name = %q, want quay", name)
 	}
