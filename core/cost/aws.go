@@ -15,7 +15,9 @@ import (
 	"github.com/openshift-online/finops-tools/core/apilog"
 )
 
-const costExplorerRegion = "us-east-1"
+// CostExplorerRegion is the AWS region Cost Explorer's API is served from
+// (Cost Explorer is a global service reachable only via us-east-1).
+const CostExplorerRegion = "us-east-1"
 
 // CostExplorerAPI is the subset of the CE client used for cost fetch (mockable).
 type CostExplorerAPI interface {
@@ -60,12 +62,12 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 	accountID := acct.AccountID
 	cfg := acct.AWSConfig
 	if cfg.Region == "" {
-		cfg.Region = costExplorerRegion
+		cfg.Region = CostExplorerRegion
 	}
 
 	dr := EffectiveRange(q, opts.Now)
 	ce := opts.NewCostExplorer(cfg)
-	filter := linkedAccountFilter(accountID, acct.ScopeToAccount())
+	filter := LinkedAccountFilter(accountID, acct.ScopeToAccount())
 
 	var (
 		amount    float64
@@ -96,7 +98,7 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 
 	return CostResult{
 		Provider:    ProviderAWS,
-		AccountName: displayAccountName(acct),
+		AccountName: acct.AccountDisplayName(),
 		AccountID:   accountID,
 		Metric:      MetricNetAmortized,
 		GroupBy:     q.GroupBy,
@@ -107,16 +109,6 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		Breakdown:   breakdown,
 		Linked:      acct.IsLinked(),
 	}, nil
-}
-
-func displayAccountName(acct AccountTarget) string {
-	if name := strings.TrimSpace(acct.DisplayName); name != "" {
-		return name
-	}
-	if alias := strings.TrimSpace(acct.DisplayAlias); alias != "" {
-		return alias
-	}
-	return strings.TrimSpace(acct.AccountID)
 }
 
 func applyAWSAccountNames(
@@ -140,21 +132,30 @@ func applyAWSAccountNames(
 	return breakdown
 }
 
-func breakdownAccountIDs(breakdown []CostBreakdownItem) []string {
-	seen := make(map[string]struct{}, len(breakdown))
-	ids := make([]string, 0, len(breakdown))
-	for _, item := range breakdown {
-		id := strings.TrimSpace(item.Account)
-		if id == "" {
+// UniqueAccountIDs deduplicates and trims account IDs from a given slice.
+func UniqueAccountIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		if _, ok := seen[trimmed]; ok {
 			continue
 		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
 	}
-	return ids
+	return result
+}
+
+func breakdownAccountIDs(breakdown []CostBreakdownItem) []string {
+	rawIDs := make([]string, 0, len(breakdown))
+	for _, item := range breakdown {
+		rawIDs = append(rawIDs, item.Account)
+	}
+	return UniqueAccountIDs(rawIDs)
 }
 
 func lookupAWSAccountNames(
@@ -175,7 +176,9 @@ func lookupAWSAccountNames(
 	return nil, nil
 }
 
-func linkedAccountFilter(accountID string, linked bool) *types.Expression {
+// LinkedAccountFilter builds a Cost Explorer filter expression scoping results
+// to a single linked account, or nil when the query should be unscoped.
+func LinkedAccountFilter(accountID string, linked bool) *types.Expression {
 	if !linked {
 		return nil
 	}
@@ -335,19 +338,19 @@ func fetchAWSDailyNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchA
 	acct := q.Accounts[0]
 	cfg := acct.AWSConfig
 	if cfg.Region == "" {
-		cfg.Region = costExplorerRegion
+		cfg.Region = CostExplorerRegion
 	}
 
 	dr := EffectiveRange(q, opts.Now)
 	ce := opts.NewCostExplorer(cfg)
-	filter := linkedAccountFilter(acct.AccountID, acct.ScopeToAccount())
+	filter := LinkedAccountFilter(acct.AccountID, acct.ScopeToAccount())
 	return sumNetAmortizedDaily(ctx, ce, dr, filter)
 }
 
 func defaultCostExplorerFactory() func(aws.Config) CostExplorerAPI {
 	return func(cfg aws.Config) CostExplorerAPI {
 		inner := costexplorer.NewFromConfig(cfg, func(o *costexplorer.Options) {
-			o.Region = costExplorerRegion
+			o.Region = CostExplorerRegion
 		})
 		return apilog.WrapGetCostAndUsage(inner)
 	}

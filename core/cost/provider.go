@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/openshift-online/finops-tools/core/parallel"
+	"github.com/openshift-online/finops-tools/core/progress"
 )
 
 // Provider identifies a cloud cost data source.
@@ -90,9 +91,7 @@ type OUBucket struct {
 }
 
 // FetchProgress reports long-running steps while fetching costs.
-type FetchProgress interface {
-	Step(message string)
-}
+type FetchProgress = progress.Reporter
 
 // CostQuery describes a cost fetch request.
 type CostQuery struct {
@@ -120,6 +119,18 @@ type AccountTarget struct {
 	DisplayAlias string
 	// ScopeAccountOnly forces a LINKED_ACCOUNT CE filter even when the target is the payer account.
 	ScopeAccountOnly bool
+}
+
+// AccountDisplayName returns the preferred display name for the target,
+// falling back to DisplayAlias, and finally AccountID.
+func (t AccountTarget) AccountDisplayName() string {
+	if name := strings.TrimSpace(t.DisplayName); name != "" {
+		return name
+	}
+	if alias := strings.TrimSpace(t.DisplayAlias); alias != "" {
+		return alias
+	}
+	return strings.TrimSpace(t.AccountID)
 }
 
 // CredentialsAccountID returns the account ID whose credentials are in AWSConfig.
@@ -391,11 +402,9 @@ func shouldReportFetchProgress(index, total int) bool {
 }
 
 func targetProgressLabel(acct AccountTarget) string {
-	if name := strings.TrimSpace(acct.DisplayName); name != "" {
+	name := acct.AccountDisplayName()
+	if name != acct.AccountID {
 		return fmt.Sprintf("%s (%s)", name, acct.AccountID)
-	}
-	if alias := strings.TrimSpace(acct.DisplayAlias); alias != "" {
-		return fmt.Sprintf("%s (%s)", alias, acct.AccountID)
 	}
 	return acct.AccountID
 }
