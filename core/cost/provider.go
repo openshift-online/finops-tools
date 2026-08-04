@@ -122,6 +122,18 @@ type AccountTarget struct {
 	ScopeAccountOnly bool
 }
 
+// AccountDisplayName returns the preferred display name for the target,
+// falling back to DisplayAlias, and finally AccountID.
+func (t AccountTarget) AccountDisplayName() string {
+	if name := strings.TrimSpace(t.DisplayName); name != "" {
+		return name
+	}
+	if alias := strings.TrimSpace(t.DisplayAlias); alias != "" {
+		return alias
+	}
+	return strings.TrimSpace(t.AccountID)
+}
+
 // CredentialsAccountID returns the account ID whose credentials are in AWSConfig.
 func (t AccountTarget) CredentialsAccountID() string {
 	if id := strings.TrimSpace(t.PayerAccountID); id != "" {
@@ -219,8 +231,8 @@ func EmptyResult(provider Provider, dr DateRange, groupBy GroupBy) CostResult {
 		Provider:  provider,
 		Metric:    MetricNetAmortized,
 		GroupBy:   groupBy,
-		StartDate: formatDate(dr.Start),
-		EndDate:   formatDate(endInclusive),
+		StartDate: FormatDate(dr.Start),
+		EndDate:   FormatDate(endInclusive),
 	}
 }
 
@@ -391,11 +403,9 @@ func shouldReportFetchProgress(index, total int) bool {
 }
 
 func targetProgressLabel(acct AccountTarget) string {
-	if name := strings.TrimSpace(acct.DisplayName); name != "" {
+	name := acct.AccountDisplayName()
+	if name != acct.AccountID {
 		return fmt.Sprintf("%s (%s)", name, acct.AccountID)
-	}
-	if alias := strings.TrimSpace(acct.DisplayAlias); alias != "" {
-		return fmt.Sprintf("%s (%s)", alias, acct.AccountID)
 	}
 	return acct.AccountID
 }

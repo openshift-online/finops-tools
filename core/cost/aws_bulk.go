@@ -62,7 +62,7 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 
 	cfg := plan.credTarget.AWSConfig
 	if cfg.Region == "" {
-		cfg.Region = costExplorerRegion
+		cfg.Region = CostExplorerRegion
 	}
 	dr := EffectiveRange(q, opts.Now)
 	ce := opts.NewCostExplorer(cfg)
@@ -203,7 +203,7 @@ func fetchAWSDailyNetAmortizedBulk(ctx context.Context, q CostQuery, targets []A
 
 	cfg := plan.credTarget.AWSConfig
 	if cfg.Region == "" {
-		cfg.Region = costExplorerRegion
+		cfg.Region = CostExplorerRegion
 	}
 	dr := EffectiveRange(q, opts.Now)
 	ce := opts.NewCostExplorer(cfg)
@@ -246,7 +246,7 @@ func bulkMergedCostResult(targets []AccountTarget, q CostQuery, dr DateRange, am
 	names := make([]string, len(targets))
 	ids := make([]string, len(targets))
 	for i, t := range targets {
-		names[i] = displayAccountName(t)
+		names[i] = t.AccountDisplayName()
 		ids[i] = t.AccountID
 	}
 
@@ -256,8 +256,8 @@ func bulkMergedCostResult(targets []AccountTarget, q CostQuery, dr DateRange, am
 		AccountID:   strings.Join(ids, ", "),
 		Metric:      MetricNetAmortized,
 		GroupBy:     q.GroupBy,
-		StartDate:   formatDate(dr.Start),
-		EndDate:     formatDate(dr.End.AddDate(0, 0, -1)),
+		StartDate:   FormatDate(dr.Start),
+		EndDate:     FormatDate(dr.End.AddDate(0, 0, -1)),
 		Amount:      amount,
 		Currency:    currency,
 		Linked:      true,
@@ -269,7 +269,7 @@ func linkedAccountsFilter(accountIDs []string) *types.Expression {
 		return nil
 	}
 	if len(accountIDs) == 1 {
-		return linkedAccountFilter(accountIDs[0], true)
+		return LinkedAccountFilter(accountIDs[0], true)
 	}
 	return &types.Expression{
 		Dimensions: &types.DimensionValues{
@@ -295,7 +295,7 @@ func filterBreakdownAccounts(breakdown []CostBreakdownItem, wanted map[string]st
 func targetDisplayNames(targets []AccountTarget) map[string]string {
 	names := make(map[string]string, len(targets))
 	for _, t := range targets {
-		if name := displayAccountName(t); name != "" {
+		if name := t.AccountDisplayName(); name != "" {
 			names[t.AccountID] = name
 		}
 	}
