@@ -1,6 +1,7 @@
 package account
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -54,9 +55,35 @@ func (c iamClient) UpdateAssumeRolePolicy(
 
 // trustPolicyDocument is a flexible assume-role policy used for merge updates.
 // Statement values are kept as raw JSON so unrelated statements are preserved verbatim.
+// AWS IAM accepts Statement as either a single object or an array; UnmarshalJSON normalizes both to a slice.
 type trustPolicyDocument struct {
 	Version   string            `json:"Version"`
 	Statement []json.RawMessage `json:"Statement"`
+}
+
+func (p *trustPolicyDocument) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Version   string          `json:"Version"`
+		Statement json.RawMessage `json:"Statement"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.Version = raw.Version
+	stmt := bytes.TrimSpace(raw.Statement)
+	if len(stmt) == 0 || bytes.Equal(stmt, []byte("null")) {
+		p.Statement = nil
+		return nil
+	}
+	switch stmt[0] {
+	case '[':
+		return json.Unmarshal(stmt, &p.Statement)
+	case '{':
+		p.Statement = []json.RawMessage{append(json.RawMessage(nil), stmt...)}
+		return nil
+	default:
+		return fmt.Errorf("Statement must be a JSON object or array")
+	}
 }
 
 // managementAccountTrustStatement is the Organizations-style trust statement for a management account.

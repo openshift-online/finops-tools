@@ -91,6 +91,61 @@ func TestUpdateLinkedRoleTrustWithClient(t *testing.T) {
 	}
 }
 
+func TestUpdateLinkedRoleTrustAcceptsSingleObjectStatement(t *testing.T) {
+	// AWS IAM may return Statement as a scalar object when there is only one statement.
+	client := &fakeIAM{
+		existingPolicy: `{"Version":"2012-10-17","Statement":{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:root"},"Action":"sts:AssumeRole"}}`,
+	}
+	if err := updateLinkedRoleTrustWithClient(context.Background(), client, "OrganizationAccountAccessRole", "987654321098"); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var policy trustPolicyDocument
+	if err := json.Unmarshal([]byte(client.policy), &policy); err != nil {
+		t.Fatalf("unmarshal policy: %v\n%s", err, client.policy)
+	}
+	if len(policy.Statement) != 1 {
+		t.Fatalf("want 1 statement, got %d: %s", len(policy.Statement), client.policy)
+	}
+	var stmt managementAccountTrustStatement
+	if err := json.Unmarshal(policy.Statement[0], &stmt); err != nil {
+		t.Fatalf("unmarshal statement: %v", err)
+	}
+	if stmt.Principal["AWS"] != "arn:aws:iam::987654321098:root" {
+		t.Fatalf("principal = %#v", stmt.Principal)
+	}
+}
+
+func TestTrustPolicyDocumentUnmarshalStatementForms(t *testing.T) {
+	t.Run("array", func(t *testing.T) {
+		var policy trustPolicyDocument
+		err := json.Unmarshal([]byte(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow"},{"Effect":"Deny"}]}`), &policy)
+		if err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(policy.Statement) != 2 {
+			t.Fatalf("got %d statements", len(policy.Statement))
+		}
+	})
+	t.Run("single object", func(t *testing.T) {
+		var policy trustPolicyDocument
+		err := json.Unmarshal([]byte(`{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"sts:AssumeRole"}}`), &policy)
+		if err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(policy.Statement) != 1 {
+			t.Fatalf("got %d statements", len(policy.Statement))
+		}
+		var stmt map[string]string
+		if err := json.Unmarshal(policy.Statement[0], &stmt); err != nil {
+			t.Fatalf("unmarshal statement: %v", err)
+		}
+		if stmt["Effect"] != "Allow" || stmt["Action"] != "sts:AssumeRole" {
+			t.Fatalf("unexpected statement: %#v", stmt)
+		}
+	})
+}
+
 func TestUpdateLinkedRoleTrustPreservesOtherStatements(t *testing.T) {
 	client := &fakeIAM{
 		existingPolicy: `{
