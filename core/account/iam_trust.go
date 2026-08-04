@@ -82,7 +82,7 @@ func (p *trustPolicyDocument) UnmarshalJSON(data []byte) error {
 		p.Statement = []json.RawMessage{append(json.RawMessage(nil), stmt...)}
 		return nil
 	default:
-		return fmt.Errorf("Statement must be a JSON object or array")
+		return fmt.Errorf("statement must be a JSON object or array")
 	}
 }
 
