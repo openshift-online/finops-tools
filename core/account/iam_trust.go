@@ -93,28 +93,29 @@ type managementAccountTrustStatement struct {
 	Action    string            `json:"Action"`
 }
 
-// principalProbe is used only to inspect an existing statement's AWS principal.
-type principalProbe struct {
-	Principal map[string]json.RawMessage `json:"Principal"`
+// UpdateLinkedRoleTrust rewrites roleName's management-account trust from sourceManagementAccountID
+// to destinationManagementAccountID. Other trust statements (service principals, other account roots)
+// are preserved. Call with member-account credentials (typically still valid from the source-payer
+// assume session).
+func UpdateLinkedRoleTrust(ctx context.Context, cfg aws.Config, roleName, sourceManagementAccountID, destinationManagementAccountID string) error {
+	return updateLinkedRoleTrustWithClient(ctx, newIAMClient(cfg), roleName, sourceManagementAccountID, destinationManagementAccountID)
 }
 
-// UpdateLinkedRoleTrust sets roleName's assume-role trust to the destination management account.
-// Call with member-account credentials (typically still valid from the source-payer assume session).
-func UpdateLinkedRoleTrust(ctx context.Context, cfg aws.Config, roleName, managementAccountID string) error {
-	return updateLinkedRoleTrustWithClient(ctx, newIAMClient(cfg), roleName, managementAccountID)
-}
-
-func updateLinkedRoleTrustWithClient(ctx context.Context, client IAMAPI, roleName, managementAccountID string) error {
+func updateLinkedRoleTrustWithClient(ctx context.Context, client IAMAPI, roleName, sourceManagementAccountID, destinationManagementAccountID string) error {
 	roleName = strings.TrimSpace(roleName)
-	managementAccountID = strings.TrimSpace(managementAccountID)
+	sourceManagementAccountID = strings.TrimSpace(sourceManagementAccountID)
+	destinationManagementAccountID = strings.TrimSpace(destinationManagementAccountID)
 	if roleName == "" {
 		return fmt.Errorf("role name is required")
 	}
 	if strings.Contains(roleName, "/") || strings.Contains(roleName, ":") || strings.HasPrefix(roleName, "arn:") {
 		return fmt.Errorf("invalid role name %q (pass the role name only)", roleName)
 	}
-	if err := validateAccountID(managementAccountID); err != nil {
-		return fmt.Errorf("management account: %w", err)
+	if err := validateAccountID(sourceManagementAccountID); err != nil {
+		return fmt.Errorf("source management account: %w", err)
+	}
+	if err := validateAccountID(destinationManagementAccountID); err != nil {
+		return fmt.Errorf("destination management account: %w", err)
 	}
 
 	roleOut, err := client.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(roleName)})
@@ -138,11 +139,11 @@ func updateLinkedRoleTrustWithClient(ctx context.Context, client IAMAPI, roleNam
 		policy.Version = "2012-10-17"
 	}
 
-	mgmtStmt, err := marshalManagementAccountTrustPolicy(managementAccountID)
+	mgmtStmt, err := marshalManagementAccountTrustPolicy(destinationManagementAccountID)
 	if err != nil {
 		return err
 	}
-	merged, err := replaceManagementAccountTrustStatement(policy.Statement, managementAccountID, mgmtStmt)
+	merged, err := replaceManagementAccountTrustStatement(policy.Statement, sourceManagementAccountID, destinationManagementAccountID, mgmtStmt)
 	if err != nil {
 		return fmt.Errorf("merge trust policy on role %s: %w", roleName, err)
 	}
@@ -158,7 +159,7 @@ func updateLinkedRoleTrustWithClient(ctx context.Context, client IAMAPI, roleNam
 		PolicyDocument: aws.String(string(doc)),
 	})
 	if err != nil {
-		return fmt.Errorf("update trust policy on role %s for management account %s: %w", roleName, managementAccountID, err)
+		return fmt.Errorf("update trust policy on role %s for management account %s: %w", roleName, destinationManagementAccountID, err)
 	}
 	return nil
 }
@@ -180,66 +181,123 @@ func marshalManagementAccountTrustPolicy(managementAccountID string) (json.RawMe
 	return raw, nil
 }
 
+func managementAccountRootARN(accountID string) string {
+	return fmt.Sprintf("arn:aws:iam::%s:root", accountID)
+}
+
 func replaceManagementAccountTrustStatement(
 	stmts []json.RawMessage,
-	managementAccountID string,
+	sourceManagementAccountID, destinationManagementAccountID string,
 	replacement json.RawMessage,
 ) ([]json.RawMessage, error) {
+	sourceRoot := managementAccountRootARN(sourceManagementAccountID)
+	destinationRoot := managementAccountRootARN(destinationManagementAccountID)
+
 	out := make([]json.RawMessage, 0, len(stmts)+1)
-	replaced := false
+	touched := false
 	for _, raw := range stmts {
-		matches, err := statementPrincipalReferencesManagementAccount(raw, managementAccountID)
+		rewritten, found, err := rewriteManagementPrincipalInStatement(raw, sourceRoot, destinationRoot)
 		if err != nil {
 			return nil, err
 		}
-		if !matches {
-			out = append(out, raw)
-			continue
+		if found {
+			touched = true
 		}
-		if !replaced {
-			out = append(out, replacement)
-			replaced = true
-		}
+		out = append(out, rewritten)
 	}
-	if !replaced {
+	if !touched {
 		out = append(out, replacement)
 	}
 	return out, nil
 }
 
-func statementPrincipalReferencesManagementAccount(raw json.RawMessage, managementAccountID string) (bool, error) {
-	var probe principalProbe
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return false, err
+// parseAWSPrincipals returns Principal.AWS as a list, plus whether the original value was an array.
+func parseAWSPrincipals(awsPrincipalRaw json.RawMessage) (principals []string, isArray bool, ok bool) {
+	var single string
+	if err := json.Unmarshal(awsPrincipalRaw, &single); err == nil {
+		return []string{single}, false, true
 	}
-	awsPrincipalRaw, ok := probe.Principal["AWS"]
+	var multiple []string
+	if err := json.Unmarshal(awsPrincipalRaw, &multiple); err == nil {
+		return multiple, true, true
+	}
+	return nil, false, false
+}
+
+// rewriteManagementPrincipalInStatement swaps sourceRoot for destinationRoot inside Principal.AWS
+// (string or array form). Other principals and statement fields are preserved. found is true when
+// either management root was present (so callers know not to append a duplicate trust statement).
+func rewriteManagementPrincipalInStatement(raw json.RawMessage, sourceRoot, destinationRoot string) (json.RawMessage, bool, error) {
+	var stmt map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &stmt); err != nil {
+		return nil, false, err
+	}
+	principalRaw, ok := stmt["Principal"]
+	if !ok || len(principalRaw) == 0 {
+		return raw, false, nil
+	}
+	var principal map[string]json.RawMessage
+	if err := json.Unmarshal(principalRaw, &principal); err != nil {
+		return raw, false, nil
+	}
+	awsPrincipalRaw, ok := principal["AWS"]
 	if !ok || len(awsPrincipalRaw) == 0 {
-		return false, nil
+		return raw, false, nil
 	}
 
-	var awsPrincipal string
-	if err := json.Unmarshal(awsPrincipalRaw, &awsPrincipal); err != nil {
-		// Principal.AWS may be an array; treat as non-management single-root statement.
-		return false, nil
-	}
-	awsPrincipal = strings.TrimSpace(awsPrincipal)
-	if awsPrincipal == "" {
-		return false, nil
+	principals, isArray, ok := parseAWSPrincipals(awsPrincipalRaw)
+	if !ok {
+		return raw, false, nil
 	}
 
-	want := fmt.Sprintf("arn:aws:iam::%s:root", managementAccountID)
-	if awsPrincipal == want {
-		return true, nil
+	found := false
+	rewrote := false
+	next := make([]string, 0, len(principals))
+	seen := make(map[string]struct{}, len(principals))
+	for _, p := range principals {
+		p = strings.TrimSpace(p)
+		switch p {
+		case "":
+			continue
+		case sourceRoot:
+			found = true
+			rewrote = true
+			p = destinationRoot
+		case destinationRoot:
+			found = true
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		next = append(next, p)
+	}
+	if !found || !rewrote {
+		return raw, found, nil
+	}
+	if len(next) == 0 {
+		return nil, false, fmt.Errorf("trust statement principal became empty after rewriting management account")
 	}
 
-	// Migrate path: existing trust still points at the source management account root.
-	const (
-		prefix     = "arn:aws:iam::"
-		rootSuffix = ":root"
-	)
-	if !strings.HasPrefix(awsPrincipal, prefix) || !strings.HasSuffix(awsPrincipal, rootSuffix) {
-		return false, nil
+	var newAWS json.RawMessage
+	var err error
+	if isArray {
+		newAWS, err = json.Marshal(next)
+	} else {
+		newAWS, err = json.Marshal(next[0])
 	}
-	accountID := strings.TrimSuffix(strings.TrimPrefix(awsPrincipal, prefix), rootSuffix)
-	return validateAccountID(accountID) == nil, nil
+	if err != nil {
+		return nil, false, err
+	}
+	principal["AWS"] = newAWS
+	principalBytes, err := json.Marshal(principal)
+	if err != nil {
+		return nil, false, err
+	}
+	stmt["Principal"] = principalBytes
+	out, err := json.Marshal(stmt)
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }

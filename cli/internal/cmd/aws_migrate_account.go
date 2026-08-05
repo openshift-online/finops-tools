@@ -292,7 +292,7 @@ func migrateOneAccount(
 
 	// Invited accounts keep the old management account in the role trust policy;
 	// rewrite it while the source-payer assume session is still valid.
-	if err := migrateAccountUpdateTrust(awsCtx, memberCfg, roleName, toPayerID); err != nil {
+	if err := migrateAccountUpdateTrust(awsCtx, memberCfg, roleName, fromPayerID, toPayerID); err != nil {
 		return wrapMigrateTrustUpdateError(err, accountID, roleName, fromAlias, toAlias)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated %s trust to management account %s\n", roleName, toPayerID)
