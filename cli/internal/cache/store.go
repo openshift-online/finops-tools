@@ -82,6 +82,23 @@ func (s *Store) Path(namespace, key string) string {
 	return filepath.Join(s.Dir(namespace), sanitizeSegment(key)+".json")
 }
 
+// Delete removes a cache entry when present. Missing files are ignored.
+func (s *Store) Delete(namespace, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errors.New("cache key is required")
+	}
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return errors.New("cache namespace is required")
+	}
+	err := os.Remove(s.Path(namespace, key))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // Load reads a cache entry when present.
 func Load[T any](s *Store, namespace, key string) (Entry[T], error) {
 	key = strings.TrimSpace(key)
