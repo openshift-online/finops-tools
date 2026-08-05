@@ -383,6 +383,85 @@ func TestUpdateLinkedRoleTrustDedupesSourceAndDestinationInArray(t *testing.T) {
 	}
 }
 
+func TestUpdateLinkedRoleTrustAppendsWhenOnlyDenyMentionsSource(t *testing.T) {
+	// A Deny (or conditioned) statement naming the source root must still be rewritten,
+	// but must not suppress appending an unconditional Allow for the destination.
+	client := &fakeIAM{
+		existingPolicy: `{
+			"Version":"2012-10-17",
+			"Statement":[{
+				"Effect":"Deny",
+				"Principal":{"AWS":"arn:aws:iam::123456789012:root"},
+				"Action":"sts:AssumeRole"
+			}]
+		}`,
+	}
+	if err := updateLinkedRoleTrustWithClient(context.Background(), client, "OrganizationAccountAccessRole", testSourceManagementAccountID, testDestinationManagementAccountID); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var policy trustPolicyDocument
+	if err := json.Unmarshal([]byte(client.policy), &policy); err != nil {
+		t.Fatalf("unmarshal policy: %v\n%s", err, client.policy)
+	}
+	if len(policy.Statement) != 2 {
+		t.Fatalf("want 2 statements (rewritten Deny + appended Allow), got %d: %s", len(policy.Statement), client.policy)
+	}
+	if strings.Contains(client.policy, "arn:aws:iam::123456789012:root") {
+		t.Fatalf("source management root still present: %s", client.policy)
+	}
+
+	var deny map[string]json.RawMessage
+	if err := json.Unmarshal(policy.Statement[0], &deny); err != nil {
+		t.Fatalf("unmarshal deny: %v", err)
+	}
+	if string(deny["Effect"]) != `"Deny"` {
+		t.Fatalf("first statement Effect = %s, want Deny", deny["Effect"])
+	}
+	if !strings.Contains(string(deny["Principal"]), "arn:aws:iam::987654321098:root") {
+		t.Fatalf("Deny principal not rewritten to destination: %s", deny["Principal"])
+	}
+
+	var allow managementAccountTrustStatement
+	if err := json.Unmarshal(policy.Statement[1], &allow); err != nil {
+		t.Fatalf("unmarshal allow: %v", err)
+	}
+	if allow.Effect != "Allow" || allow.Principal["AWS"] != "arn:aws:iam::987654321098:root" {
+		t.Fatalf("appended allow = %+v", allow)
+	}
+}
+
+func TestUpdateLinkedRoleTrustAppendsWhenSourceAllowIsConditioned(t *testing.T) {
+	client := &fakeIAM{
+		existingPolicy: `{
+			"Version":"2012-10-17",
+			"Statement":[{
+				"Effect":"Allow",
+				"Principal":{"AWS":"arn:aws:iam::123456789012:root"},
+				"Action":"sts:AssumeRole",
+				"Condition":{"Bool":{"aws:MultiFactorAuthPresent":"true"}}
+			}]
+		}`,
+	}
+	if err := updateLinkedRoleTrustWithClient(context.Background(), client, "OrganizationAccountAccessRole", testSourceManagementAccountID, testDestinationManagementAccountID); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var policy trustPolicyDocument
+	if err := json.Unmarshal([]byte(client.policy), &policy); err != nil {
+		t.Fatalf("unmarshal policy: %v\n%s", err, client.policy)
+	}
+	if len(policy.Statement) != 2 {
+		t.Fatalf("want 2 statements, got %d: %s", len(policy.Statement), client.policy)
+	}
+	if strings.Contains(client.policy, "arn:aws:iam::123456789012:root") {
+		t.Fatalf("source management root still present: %s", client.policy)
+	}
+	if !strings.Contains(client.policy, "aws:MultiFactorAuthPresent") {
+		t.Fatalf("Condition not preserved: %s", client.policy)
+	}
+}
+
 func TestUpdateLinkedRoleTrustRejectsInvalidInputs(t *testing.T) {
 	cases := []struct {
 		name     string

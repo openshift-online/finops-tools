@@ -212,6 +212,7 @@ func replaceManagementAccountTrustStatement(
 }
 
 // parseAWSPrincipals returns Principal.AWS as a list, plus whether the original value was an array.
+// It also works for Action values, which use the same string-or-array JSON shapes.
 func parseAWSPrincipals(awsPrincipalRaw json.RawMessage) (principals []string, isArray bool, ok bool) {
 	var single string
 	if err := json.Unmarshal(awsPrincipalRaw, &single); err == nil {
@@ -224,14 +225,42 @@ func parseAWSPrincipals(awsPrincipalRaw json.RawMessage) (principals []string, i
 	return nil, false, false
 }
 
+// statementGrantsAssumeRole reports whether stmt unconditionally allows sts:AssumeRole,
+// so callers know the statement can carry management-account trust.
+func statementGrantsAssumeRole(stmt map[string]json.RawMessage) bool {
+	if _, conditioned := stmt["Condition"]; conditioned {
+		return false
+	}
+	var effect string
+	if err := json.Unmarshal(stmt["Effect"], &effect); err != nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(effect), "Allow") {
+		return false
+	}
+	actions, _, ok := parseAWSPrincipals(stmt["Action"])
+	if !ok {
+		return false
+	}
+	for _, a := range actions {
+		switch strings.TrimSpace(a) {
+		case "sts:AssumeRole", "sts:*", "*":
+			return true
+		}
+	}
+	return false
+}
+
 // rewriteManagementPrincipalInStatement swaps sourceRoot for destinationRoot inside Principal.AWS
-// (string or array form). Other principals and statement fields are preserved. found is true when
-// either management root was present (so callers know not to append a duplicate trust statement).
+// (string or array form). Other principals and statement fields are preserved. found is true only
+// when a management root appears in a statement that unconditionally allows sts:AssumeRole, so
+// callers know not to append a duplicate trust statement.
 func rewriteManagementPrincipalInStatement(raw json.RawMessage, sourceRoot, destinationRoot string) (json.RawMessage, bool, error) {
 	var stmt map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &stmt); err != nil {
 		return nil, false, err
 	}
+	grantsAssumeRole := statementGrantsAssumeRole(stmt)
 	principalRaw, ok := stmt["Principal"]
 	if !ok || len(principalRaw) == 0 {
 		return raw, false, nil
@@ -260,11 +289,11 @@ func rewriteManagementPrincipalInStatement(raw json.RawMessage, sourceRoot, dest
 		case "":
 			continue
 		case sourceRoot:
-			found = true
+			found = found || grantsAssumeRole
 			rewrote = true
 			p = destinationRoot
 		case destinationRoot:
-			found = true
+			found = found || grantsAssumeRole
 		}
 		if _, dup := seen[p]; dup {
 			continue
@@ -272,7 +301,7 @@ func rewriteManagementPrincipalInStatement(raw json.RawMessage, sourceRoot, dest
 		seen[p] = struct{}{}
 		next = append(next, p)
 	}
-	if !found || !rewrote {
+	if !rewrote {
 		return raw, found, nil
 	}
 	if len(next) == 0 {
@@ -299,5 +328,5 @@ func rewriteManagementPrincipalInStatement(raw json.RawMessage, sourceRoot, dest
 	if err != nil {
 		return nil, false, err
 	}
-	return out, true, nil
+	return out, found, nil
 }
