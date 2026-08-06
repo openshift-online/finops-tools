@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,6 +28,9 @@ type fakeMigrateOrganizations struct {
 
 	parentsByChild map[string]string
 	listParentsErr error
+
+	knownParents             map[string]struct{}
+	listAccountsForParentErr error
 
 	movedAccountID string
 	movedSource    string
@@ -107,11 +111,23 @@ func (f *fakeMigrateOrganizations) ListOrganizationalUnitsForParent(
 }
 
 func (f *fakeMigrateOrganizations) ListAccountsForParent(
-	context.Context,
-	*organizations.ListAccountsForParentInput,
-	...func(*organizations.Options),
+	_ context.Context,
+	params *organizations.ListAccountsForParentInput,
+	_ ...func(*organizations.Options),
 ) (*organizations.ListAccountsForParentOutput, error) {
-	return nil, errors.New("not implemented")
+	parentID := ""
+	if params != nil {
+		parentID = aws.ToString(params.ParentId)
+	}
+	if f.listAccountsForParentErr != nil {
+		return nil, f.listAccountsForParentErr
+	}
+	if len(f.knownParents) > 0 {
+		if _, ok := f.knownParents[parentID]; !ok {
+			return nil, &types.ParentNotFoundException{Message: aws.String("parent not found")}
+		}
+	}
+	return &organizations.ListAccountsForParentOutput{}, nil
 }
 
 func (f *fakeMigrateOrganizations) InviteAccountToOrganization(
@@ -273,6 +289,36 @@ func TestOrganizationContainsAccountWithClient(t *testing.T) {
 	ok, err = organizationContainsAccountWithClient(context.Background(), client, "333333333333")
 	if err != nil || ok {
 		t.Fatalf("contains missing = %v, err = %v", ok, err)
+	}
+}
+
+func TestAccountParentIDWithClient(t *testing.T) {
+	client := &fakeMigrateOrganizations{
+		parentsByChild: map[string]string{
+			"111111111111": "ou-abcd-source01",
+		},
+	}
+	got, err := accountParentIDWithClient(context.Background(), client, "111111111111")
+	if err != nil {
+		t.Fatalf("parent: %v", err)
+	}
+	if got != "ou-abcd-source01" {
+		t.Fatalf("parent = %q", got)
+	}
+}
+
+func TestVerifyParentExistsWithClient(t *testing.T) {
+	client := &fakeMigrateOrganizations{
+		knownParents: map[string]struct{}{
+			"ou-abcd-dest0001": {},
+		},
+	}
+	if err := verifyParentExistsWithClient(context.Background(), client, "ou-abcd-dest0001"); err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	err := verifyParentExistsWithClient(context.Background(), client, "ou-abcd-missing1")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not found, got %v", err)
 	}
 }
 

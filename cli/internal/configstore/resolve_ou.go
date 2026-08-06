@@ -4,16 +4,11 @@ package configstore
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/openshift-online/finops-tools/cli/internal/account"
+	coreaccount "github.com/openshift-online/finops-tools/core/account"
 	"github.com/openshift-online/finops-tools/core/cost"
-)
-
-var (
-	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{8,32}$`)
-	rootIDPattern = regexp.MustCompile(`^r-[0-9a-z]{4,32}$`)
 )
 
 // OUSelector is one --ou value: an OU or org-root ID plus optional walk depth.
@@ -76,8 +71,8 @@ func parseOUSelectorToken(token string) (OUSelector, error) {
 	}
 
 	id = strings.TrimSpace(id)
-	if !ouIDPattern.MatchString(id) && !rootIDPattern.MatchString(id) {
-		return OUSelector{}, fmt.Errorf("invalid OU ID %q (expected ou-xxxx-yyyyy or r-xxxx)", id)
+	if err := coreaccount.ValidateParentID(id); err != nil {
+		return OUSelector{}, fmt.Errorf("invalid OU ID: %w", err)
 	}
 	return OUSelector{ID: id, MaxDepth: maxDepth}, nil
 }

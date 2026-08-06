@@ -906,16 +906,16 @@ func (f fakeOrganizationsFilterByTag) ListAccountsForParent(
 }
 
 func TestValidateOUID(t *testing.T) {
-	if err := validateOUID("ou-abcd-12345678"); err != nil {
+	if err := ValidateOUID("ou-abcd-12345678"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := validateOUID("ou-abcd-1234"); err == nil {
+	if err := ValidateOUID("ou-abcd-1234"); err == nil {
 		t.Fatal("expected error for short OU suffix")
 	}
-	if err := validateOUID(""); err == nil {
+	if err := ValidateOUID(""); err == nil {
 		t.Fatal("expected error for empty OU ID")
 	}
-	if err := validateOUID("r-root"); err == nil {
+	if err := ValidateOUID("r-root"); err == nil {
 		t.Fatal("expected error for root ID")
 	}
 }

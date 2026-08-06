@@ -457,6 +457,19 @@ finops aws list-ous --payer rh-control --parent ou-abcd-12345678
 finops aws list-ous --payer rh-control --format json
 ```
 
+Move a linked account between OUs (or root) **within the same payer** (Organizations `MoveAccount`):
+
+```bash
+# Plan only
+finops aws move-to-ou --payer rh-control --account-id 111111111111 --destination-ou ou-abcd-12345678 --dry-run
+
+# Execute (requires --yes); --account-id accepts comma-separated IDs
+finops aws move-to-ou --payer rh-control --account-id 111111111111 --destination-ou ou-abcd-12345678 --yes
+finops aws move-to-ou --payer rh-control --account-id 111111111111,222222222222 --destination-ou ou-abcd-12345678 --yes
+```
+
+Same-payer only: billing stays with the payer; inherited SCPs / Control Tower / StackSets may change. For moving an account to a **different** payer organization, use `migrate-account` below.
+
 Migrate a linked (member) account from one payer organization to another (AWS Organizations invite + accept):
 
 ```bash

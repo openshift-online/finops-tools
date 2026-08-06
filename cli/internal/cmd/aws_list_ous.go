@@ -3,7 +3,6 @@ package cmd
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/openshift-online/finops-tools/cli/internal/account"
@@ -24,8 +23,6 @@ var (
 	accountListOUsPayer              string
 )
 
-var parentIDPattern = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32})$`)
-
 var awsListOUsCmd = &cobra.Command{
 	Use:   "list-ous",
 	Short: "List AWS Organizational Units under a payer",
@@ -40,8 +37,10 @@ Examples:
 		if strings.TrimSpace(accountListOUsPayer) == "" {
 			return fmt.Errorf("--payer is required")
 		}
-		if parent := strings.TrimSpace(accountListOUsParent); parent != "" && !parentIDPattern.MatchString(parent) {
-			return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx)", parent)
+		if parent := strings.TrimSpace(accountListOUsParent); parent != "" {
+			if err := coreaccount.ValidateParentID(parent); err != nil {
+				return fmt.Errorf("invalid --parent: %w", err)
+			}
 		}
 		_, err := output.ParseFormat(accountListOUsFormat)
 		return err

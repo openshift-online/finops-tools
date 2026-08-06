@@ -153,6 +153,39 @@ func organizationContainsAccountWithClient(ctx context.Context, client Organizat
 	return out.Account.Status == types.AccountStatusActive, nil
 }
 
+// AccountParentID returns the current parent root or OU ID for accountID (payer credentials).
+func AccountParentID(ctx context.Context, cfg aws.Config, accountID string) (string, error) {
+	accountID = strings.TrimSpace(accountID)
+	if err := validateAccountID(accountID); err != nil {
+		return "", err
+	}
+	return accountParentIDWithClient(ctx, newOrganizationsClient(cfg), accountID)
+}
+
+// VerifyParentExists checks that parentID (OU or organization root) exists in the organization for cfg.
+func VerifyParentExists(ctx context.Context, cfg aws.Config, parentID string) error {
+	return verifyParentExistsWithClient(ctx, newOrganizationsClient(cfg), parentID)
+}
+
+func verifyParentExistsWithClient(ctx context.Context, client OrganizationsAPI, parentID string) error {
+	parentID = strings.TrimSpace(parentID)
+	if err := ValidateParentID(parentID); err != nil {
+		return err
+	}
+	_, err := client.ListAccountsForParent(ctx, &organizations.ListAccountsForParentInput{
+		ParentId:   aws.String(parentID),
+		MaxResults: aws.Int32(1),
+	})
+	if err != nil {
+		var notFound *types.ParentNotFoundException
+		if errors.As(err, &notFound) {
+			return fmt.Errorf("parent %s not found in organization", parentID)
+		}
+		return fmt.Errorf("verify parent %s: %w", parentID, err)
+	}
+	return nil
+}
+
 // MoveAccountToParent moves accountID to destinationParentID within the same organization (payer credentials).
 func MoveAccountToParent(ctx context.Context, cfg aws.Config, accountID, destinationParentID string) error {
 	return moveAccountToParentWithClient(ctx, newOrganizationsClient(cfg), accountID, destinationParentID)
@@ -164,7 +197,7 @@ func moveAccountToParentWithClient(ctx context.Context, client OrganizationsAPI,
 	if err := validateAccountID(accountID); err != nil {
 		return err
 	}
-	if err := validateParentID(destinationParentID); err != nil {
+	if err := ValidateParentID(destinationParentID); err != nil {
 		return err
 	}
 
