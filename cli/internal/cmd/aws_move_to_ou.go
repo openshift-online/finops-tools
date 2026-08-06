@@ -191,13 +191,13 @@ func moveOneAccountToOU(
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  from:             %s\n", currentParent)
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  to:               %s\n", destOU)
 
-	if moveToOUDryRun {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete; no changes made.")
+	if currentParent == destOU {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Account already under %s; nothing to do.\n", destOU)
 		return false, nil
 	}
 
-	if currentParent == destOU {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Account already under %s; nothing to do.\n", destOU)
+	if moveToOUDryRun {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete; no changes made.")
 		return false, nil
 	}
 

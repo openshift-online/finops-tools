@@ -759,3 +759,152 @@ func TestAWSMoveToOUMultiAccountSummaryExcludesNoop(t *testing.T) {
 		t.Fatalf("should not count noop as moved: %q", got)
 	}
 }
+
+func TestAWSMoveToOUDryRunAlreadyUnderDestination(t *testing.T) {
+	stubMoveToOUVerifyParentOK(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := configstore.Default()
+	var err error
+	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := moveToOUEnsureCredentials
+	origLoad := moveToOULoadConfigForCreds
+	origContains := moveToOUContains
+	origParent := moveToOUParentID
+	origMove := moveToOUMove
+	defer func() {
+		moveToOUEnsureCredentials = origEnsure
+		moveToOULoadConfigForCreds = origLoad
+		moveToOUContains = origContains
+		moveToOUParentID = origParent
+		moveToOUMove = origMove
+	}()
+
+	moveToOUEnsureCredentials = func(context.Context, awsauth.EnsureOptions) (awsconfig.Result, error) {
+		return awsconfig.Result{}, nil
+	}
+	moveToOULoadConfigForCreds = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	moveToOUContains = func(context.Context, aws.Config, string) (bool, error) {
+		return true, nil
+	}
+	moveToOUParentID = func(context.Context, aws.Config, string) (string, error) {
+		return "ou-abcd-dest0001", nil
+	}
+	moveToOUMove = func(context.Context, aws.Config, string, string) error {
+		t.Fatal("move should not run on dry-run")
+		return nil
+	}
+
+	moveToOUAccountIDFlag = "111111111111"
+	moveToOUPayer = "rh-control"
+	moveToOUDestOU = "ou-abcd-dest0001"
+	moveToOUDryRun = true
+	moveToOUYes = false
+	awsFlags.ConfigPath = configPath
+	defer func() {
+		moveToOUAccountIDFlag = ""
+		moveToOUPayer = ""
+		moveToOUDestOU = ""
+		moveToOUDryRun = false
+		awsFlags.ConfigPath = ""
+	}()
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := runAWSMoveToOU(cmd, nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "nothing to do") {
+		t.Fatalf("expected noop message on dry-run when already under dest: %q", got)
+	}
+	if strings.Contains(got, "Dry run complete") {
+		t.Fatalf("should not claim dry-run move when already under dest: %q", got)
+	}
+}
+
+func TestAWSMoveToOUMultiAccountAllNoop(t *testing.T) {
+	stubMoveToOUVerifyParentOK(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := configstore.Default()
+	var err error
+	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := moveToOUEnsureCredentials
+	origLoad := moveToOULoadConfigForCreds
+	origContains := moveToOUContains
+	origParent := moveToOUParentID
+	origMove := moveToOUMove
+	origInvalidate := moveToOUInvalidateOrgCache
+	defer func() {
+		moveToOUEnsureCredentials = origEnsure
+		moveToOULoadConfigForCreds = origLoad
+		moveToOUContains = origContains
+		moveToOUParentID = origParent
+		moveToOUMove = origMove
+		moveToOUInvalidateOrgCache = origInvalidate
+	}()
+
+	moveToOUEnsureCredentials = func(context.Context, awsauth.EnsureOptions) (awsconfig.Result, error) {
+		return awsconfig.Result{}, nil
+	}
+	moveToOULoadConfigForCreds = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	moveToOUContains = func(context.Context, aws.Config, string) (bool, error) {
+		return true, nil
+	}
+	moveToOUParentID = func(context.Context, aws.Config, string) (string, error) {
+		return "ou-abcd-dest0001", nil
+	}
+	moveToOUMove = func(context.Context, aws.Config, string, string) error {
+		t.Fatal("move should not run when already under destination")
+		return nil
+	}
+	moveToOUInvalidateOrgCache = func(_, _ string) error { return nil }
+
+	moveToOUAccountIDFlag = "111111111111,222222222222"
+	moveToOUPayer = "rh-control"
+	moveToOUDestOU = "ou-abcd-dest0001"
+	moveToOUDryRun = false
+	moveToOUYes = true
+	awsFlags.ConfigPath = configPath
+	defer func() {
+		moveToOUAccountIDFlag = ""
+		moveToOUPayer = ""
+		moveToOUDestOU = ""
+		moveToOUYes = false
+		awsFlags.ConfigPath = ""
+	}()
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := runAWSMoveToOU(cmd, nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "none required a move") {
+		t.Fatalf("expected all-noop summary: %q", got)
+	}
+	if !strings.Contains(got, "nothing to do") {
+		t.Fatalf("expected per-account noop message: %q", got)
+	}
+}
