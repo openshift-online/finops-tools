@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -219,9 +220,15 @@ func TestParseOUSelectors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for short OU suffix")
 	}
+	if !strings.Contains(err.Error(), "invalid OU ID") || !strings.Contains(err.Error(), "invalid parent ID") {
+		t.Fatalf("expected wrapped validation detail, got %v", err)
+	}
 	_, err = ParseOUSelectors("not-an-ou")
 	if err == nil {
 		t.Fatal("expected error for invalid ID")
+	}
+	if !strings.Contains(err.Error(), "invalid parent ID") {
+		t.Fatalf("expected wrapped ValidateParentID detail, got %v", err)
 	}
 }
 

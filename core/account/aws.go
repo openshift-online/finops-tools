@@ -5,18 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	"github.com/aws/aws-sdk-go-v2/service/organizations/types"
-)
-
-var (
-	ouIDPattern   = regexp.MustCompile(`^ou-[0-9a-z]{4,32}-[0-9a-z]{8,32}$`)
-	rootIDPattern = regexp.MustCompile(`^r-[0-9a-z]{4,32}$`)
 )
 
 // ListTags returns AWS Organizations tags for accountID.
@@ -371,7 +365,7 @@ func ListAccountsInOU(ctx context.Context, cfg aws.Config, ouID string, opts Lis
 // with the same depth options as ListAccountsInOU.
 func ListAccountsUnderParent(ctx context.Context, cfg aws.Config, parentID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
 	parentID = strings.TrimSpace(parentID)
-	if err := validateParentID(parentID); err != nil {
+	if err := ValidateParentID(parentID); err != nil {
 		return nil, err
 	}
 	return listAccountsUnderParentWithClient(ctx, newOrganizationsClient(cfg), parentID, opts)
@@ -379,7 +373,7 @@ func ListAccountsUnderParent(ctx context.Context, cfg aws.Config, parentID strin
 
 func listAccountsInOUWithClient(ctx context.Context, client OrganizationsAPI, ouID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
 	ouID = strings.TrimSpace(ouID)
-	if err := validateOUID(ouID); err != nil {
+	if err := ValidateOUID(ouID); err != nil {
 		return nil, err
 	}
 	return listAccountsUnderParentWithClient(ctx, client, ouID, opts)
@@ -480,7 +474,7 @@ func BuildOUAccountMapping(ctx context.Context, cfg aws.Config, rootID string, a
 
 func buildOUAccountMappingWithClient(ctx context.Context, client OrganizationsAPI, rootID string, accountIDs []string) (map[string]AccountOUBucket, []OUHierarchyNode, error) {
 	rootID = strings.TrimSpace(rootID)
-	if err := validateParentID(rootID); err != nil {
+	if err := ValidateParentID(rootID); err != nil {
 		return nil, nil, err
 	}
 
@@ -545,7 +539,7 @@ func buildOUAccountMappingWithClient(ctx context.Context, client OrganizationsAP
 
 func mapAccountsToChildOUsWithClient(ctx context.Context, client OrganizationsAPI, rootID string, accountIDs []string) (map[string]AccountOUBucket, error) {
 	rootID = strings.TrimSpace(rootID)
-	if err := validateParentID(rootID); err != nil {
+	if err := ValidateParentID(rootID); err != nil {
 		return nil, err
 	}
 
@@ -687,26 +681,6 @@ func firstRootID(ctx context.Context, client OrganizationsAPI) (string, error) {
 		token = resp.NextToken
 	}
 	return "", fmt.Errorf("list organization roots: no root found")
-}
-
-func validateOUID(ouID string) error {
-	if ouID == "" {
-		return fmt.Errorf("OU ID is required")
-	}
-	if !ouIDPattern.MatchString(ouID) {
-		return fmt.Errorf("invalid OU ID %q (expected format ou-xxxx-yyyyy)", ouID)
-	}
-	return nil
-}
-
-func validateParentID(parentID string) error {
-	if parentID == "" {
-		return fmt.Errorf("parent ID is required")
-	}
-	if ouIDPattern.MatchString(parentID) || rootIDPattern.MatchString(parentID) {
-		return nil
-	}
-	return fmt.Errorf("invalid parent ID %q (expected ou-xxxx-yyyyy or r-xxxx)", parentID)
 }
 
 // DetectAccountKind classifies callerAccountID against organization management account.

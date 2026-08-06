@@ -4,7 +4,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -40,8 +39,6 @@ var (
 	migrateAccountDryRun    bool
 	migrateAccountYes       bool
 )
-
-var migrateDestinationParentPattern = regexp.MustCompile(`^(ou-[0-9a-z]{4,32}-[0-9a-z]{4,32}|r-[0-9a-z]{4,32})$`)
 
 var awsMigrateAccountCmd = &cobra.Command{
 	Use:   "migrate-account",
@@ -79,8 +76,10 @@ Examples:
 		if _, err := configstore.ParseAWSAccountIDs(migrateAccountIDFlag); err != nil {
 			return fmt.Errorf("--account-id: %w", err)
 		}
-		if dest := strings.TrimSpace(migrateAccountDestOU); dest != "" && !migrateDestinationParentPattern.MatchString(dest) {
-			return fmt.Errorf("invalid --destination-ou %q (expected ou-xxxx-yyyyy or r-xxxx)", dest)
+		if dest := strings.TrimSpace(migrateAccountDestOU); dest != "" {
+			if err := coreaccount.ValidateParentID(dest); err != nil {
+				return fmt.Errorf("invalid --destination-ou: %w", err)
+			}
 		}
 		if cmd.Flags().Changed("role") {
 			if _, err := resolveLinkedRoleName(cmd, awsFlags.ConfigPath, migrateAccountRole); err != nil {
