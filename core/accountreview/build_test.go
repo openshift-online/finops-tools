@@ -2,6 +2,7 @@ package accountreview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -172,6 +173,38 @@ func TestBuildContinuesWhenListTagsFailsForOneAccount(t *testing.T) {
 	}
 	if result.Reports[1].OwnerEmail != "jdoe@redhat.com" {
 		t.Fatalf("second owner = %q", result.Reports[1].OwnerEmail)
+	}
+}
+
+func TestBuildReturnsCanceledListTagsError(t *testing.T) {
+	t.Parallel()
+
+	result, err := Build(context.Background(), BuildInput{
+		CostTargets: []cost.AccountTarget{
+			{AccountID: "111111111111", AWSConfig: aws.Config{Region: "us-east-1"}},
+			{AccountID: "222222222222", AWSConfig: aws.Config{Region: "us-east-1"}},
+		},
+		Workers: 1,
+		Now:     time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		listTags: func(_ context.Context, _ aws.Config, accountID string) ([]coreaccount.Tag, error) {
+			if accountID == "111111111111" {
+				return nil, context.Canceled
+			}
+			return []coreaccount.Tag{{Key: "owner", Value: "jdoe"}}, nil
+		},
+		fetchMonthly: func(_ context.Context, q cost.CostQuery) ([]cost.AccountMonthlyCosts, error) {
+			out := make([]cost.AccountMonthlyCosts, len(q.Accounts))
+			for i, acct := range q.Accounts {
+				out[i] = cost.AccountMonthlyCosts{AccountID: acct.AccountID}
+			}
+			return out, nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Build() error = %v, want context.Canceled", err)
+	}
+	if len(result.Reports) != 0 {
+		t.Fatalf("got partial BuildResult with %d reports, want none", len(result.Reports))
 	}
 }
 

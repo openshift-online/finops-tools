@@ -6,6 +6,8 @@ GOLANGCI_LINT := $(GOPATH_BIN)/golangci-lint
 GOLANGCI_VERSION := v2.12.2
 GOLANGCI_PACKAGES := $(shell go list -f '{{.Dir}}/...' -m)
 GOLANGCI_MODULE_DIRS := $(shell go list -f '{{.Dir}}' -m)
+# .SHELLSTATUS is GNU Make 4.2+; older make expands it empty.
+GOLANGCI_MODULE_DIRS_STATUS := $(.SHELLSTATUS)
 # Event-specific baseline for only-new-issues. CI uses --new-from-patch (PR/push
 # diff). Override to match an event, e.g.:
 #   make lint LINT_NEW_FROM=<pr-base-sha>       # pull_request
@@ -25,7 +27,15 @@ $(GOLANGCI_LINT):
 # golangci-lint cannot use ./... at the go.work root; lint each workspace module.
 # Default matches CI (only-new-issues). Use make lint-all to scan the whole tree.
 lint: $(GOLANGCI_LINT)
-	@ref="$(LINT_NEW_FROM)"; \
+	@if [ -n "$(GOLANGCI_MODULE_DIRS_STATUS)" ] && [ "$(GOLANGCI_MODULE_DIRS_STATUS)" != 0 ]; then \
+		echo "error: go list -m failed with status $(GOLANGCI_MODULE_DIRS_STATUS)" >&2; \
+		exit 1; \
+	fi; \
+	if [ -z "$(GOLANGCI_MODULE_DIRS)" ]; then \
+		echo "error: go list -m discovered no modules" >&2; \
+		exit 1; \
+	fi; \
+	ref="$(LINT_NEW_FROM)"; \
 	if [ -z "$$ref" ]; then \
 		echo "error: LINT_NEW_FROM is empty; set it to a git ref or SHA (CI --new-from-patch baseline)" >&2; \
 		exit 1; \
@@ -59,7 +69,8 @@ lint-all: $(GOLANGCI_LINT)
 # already in this clone is moved to pre-push.local and chained; installation is
 # refused if that would overwrite a distinct pre-push.local.
 install-hooks:
-	@hooks_dir=$$(git rev-parse --git-path hooks); \
+	@set -e; \
+	hooks_dir=$$(git rev-parse --git-path hooks) || exit $$?; \
 	src=.githooks/pre-push; \
 	dest=$$hooks_dir/pre-push; \
 	saved=$$hooks_dir/pre-push.local; \

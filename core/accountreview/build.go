@@ -2,6 +2,7 @@ package accountreview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -107,6 +108,9 @@ func Build(ctx context.Context, in BuildInput) (BuildResult, error) {
 		reportTagProgress(in.Progress, ct, i+1, len(in.CostTargets))
 		tags, tagErr := in.listTags(ctx, ct.AWSConfig, accountID)
 		if tagErr != nil {
+			if errors.Is(tagErr, context.Canceled) {
+				return tagErr
+			}
 			// Keep building the rest of the reports; this account will have OwnerError set.
 			tagErrs[i] = tagErr
 			return nil
