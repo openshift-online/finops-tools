@@ -390,16 +390,7 @@ func reportFetchProgress(progress FetchProgress, acct AccountTarget, index, tota
 }
 
 func shouldReportFetchProgress(index, total int) bool {
-	if total <= 1 {
-		return false
-	}
-	if index == 1 || index == total {
-		return true
-	}
-	if total <= 10 {
-		return true
-	}
-	return index%25 == 0
+	return parallel.ShouldReportProgress(index, total)
 }
 
 func targetProgressLabel(acct AccountTarget) string {

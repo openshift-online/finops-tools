@@ -32,7 +32,13 @@ func listTagsWithClient(ctx context.Context, client OrganizationsAPI, accountID 
 	tags := make([]Tag, 0)
 	var token *string
 	for {
-		pageTags, nextToken, err := client.ListTagsForAccount(ctx, accountID, token)
+		var pageTags []Tag
+		var nextToken *string
+		err := retryOnThrottle(ctx, defaultThrottleRetries, func() error {
+			var callErr error
+			pageTags, nextToken, callErr = client.ListTagsForAccount(ctx, accountID, token)
+			return callErr
+		})
 		if err != nil {
 			return nil, err
 		}
