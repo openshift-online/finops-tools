@@ -195,7 +195,7 @@ th{color:#656d76}.amount{text-align:right;white-space:nowrap}.meta{color:#656d76
 .action ul{margin:.5rem 0 0 1.25rem;padding:0}
 footer{margin-top:1rem;color:#656d76;font-size:.85rem;text-align:center}
 </style></head><body><div class="container">`)
-	b.WriteString(fmt.Sprintf(`<header><h1>AWS account review</h1><p class="meta">Generated %s</p></header>`, generatedAt(reports).Format("2006-01-02 15:04 UTC")))
+	fmt.Fprintf(&b, `<header><h1>AWS account review</h1><p class="meta">Generated %s</p></header>`, generatedAt(reports).Format("2006-01-02 15:04 UTC"))
 	writeActionRequiredHTML(&b, len(reports))
 
 	for _, r := range reports {

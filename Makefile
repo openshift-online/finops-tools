@@ -1,10 +1,13 @@
-.PHONY: test lint lint-install build run clean build-backend test-backend podman-build podman-push \
-	openshift-apply openshift-restart openshift-refresh
+.PHONY: test lint lint-all lint-install install-hooks build run clean build-backend test-backend \
+	podman-build podman-push openshift-apply openshift-restart openshift-refresh
 
 GOPATH_BIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOPATH_BIN)/golangci-lint
 GOLANGCI_VERSION := v2.12.2
 GOLANGCI_PACKAGES := $(shell go list -f '{{.Dir}}/...' -m)
+GOLANGCI_MODULE_DIRS := $(shell go list -f '{{.Dir}}' -m)
+# Match GitHub Actions only-new-issues: report findings introduced since this ref.
+LINT_NEW_FROM ?= origin/main
 
 test:
 	go test ./core/... ./cli/... ./backend/...
@@ -16,8 +19,21 @@ $(GOLANGCI_LINT):
 	$(MAKE) lint-install
 
 # golangci-lint cannot use ./... at the go.work root; lint each workspace module.
+# Default matches CI (only-new-issues). Use make lint-all to scan the whole tree.
 lint: $(GOLANGCI_LINT)
+	@for dir in $(GOLANGCI_MODULE_DIRS); do \
+		echo "golangci-lint $$dir (new vs $(LINT_NEW_FROM))"; \
+		( cd $$dir && $(GOLANGCI_LINT) run --new-from-rev=$(LINT_NEW_FROM) ./... ) || exit $$?; \
+	done
+
+lint-all: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run $(GOLANGCI_PACKAGES)
+
+# Copy the shared pre-push hook into this clone. Does not change core.hooksPath, so
+# existing hooks such as rh-multi-pre-commit stay in place.
+install-hooks:
+	install -d $(shell git rev-parse --git-path hooks)
+	install -m 755 .githooks/pre-push $(shell git rev-parse --git-path hooks)/pre-push
 
 build:
 	go build -o bin/finops ./cli/cmd/finops

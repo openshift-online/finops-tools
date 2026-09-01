@@ -17,13 +17,13 @@ func EncodeMIME(from, to, subject, textBody, htmlBody string) string {
 	to = rfc822HeaderValue(to)
 	subject = rfc822HeaderValue(subject)
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("From: %s\r\n", from))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject)))
+	fmt.Fprintf(&msg, "From: %s\r\n", from)
+	fmt.Fprintf(&msg, "To: %s\r\n", to)
+	fmt.Fprintf(&msg, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
 	msg.WriteString("MIME-Version: 1.0\r\n")
 
 	boundary := "finops-mail-boundary"
-	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary))
+	fmt.Fprintf(&msg, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
 
 	writePart := func(contentType, body string) {
 		msg.WriteString("--" + boundary + "\r\n")

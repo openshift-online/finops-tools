@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Runs the same golangci-lint check as GitHub Actions before git push.
+# Install: make install-hooks
+# Bypass:  git push --no-verify   or   SKIP_LINT=1 git push
+set -euo pipefail
+
+if [ "${SKIP_LINT:-}" = "1" ]; then
+	echo "pre-push: skipping lint (SKIP_LINT=1)"
+	exit 0
+fi
+
+zero="$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')"
+pushing_commits=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	if [ -n "${local_sha:-}" ] && [ "$local_sha" != "$zero" ]; then
+		pushing_commits=1
+		break
+	fi
+done
+
+if [ "$pushing_commits" -eq 0 ]; then
+	exit 0
+fi
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+echo "pre-push: make lint (new issues vs origin/main, same as CI)"
+if ! make lint; then
+	echo "pre-push: golangci-lint failed. Fix the findings, or bypass with git push --no-verify." >&2
+	exit 1
+fi

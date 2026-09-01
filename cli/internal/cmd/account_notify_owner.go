@@ -191,10 +191,7 @@ func runAccountNotifyOwner(cmd *cobra.Command, _ []string) error {
 
 	summaryOut := cmd.OutOrStdout()
 
-	var deliveryResults []accountreview.DeliveryResult
-	for _, skip := range skippedFromEmptyTargets(costTargets) {
-		deliveryResults = append(deliveryResults, skip)
-	}
+	deliveryResults := skippedFromEmptyTargets(costTargets)
 	if len(costTargets) == 0 {
 		return writeNotifyDeliverySummary(summaryOut, format, deliveryResults)
 	}
