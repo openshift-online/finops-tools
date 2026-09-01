@@ -232,8 +232,26 @@ func sortInventory(inv *AccountInventory) {
 	sort.Slice(inv.HostedZones, func(i, j int) bool {
 		return inv.HostedZones[i].Name < inv.HostedZones[j].Name
 	})
+	sort.Slice(inv.UnattachedEBS, func(i, j int) bool {
+		return inv.UnattachedEBS[i].VolumeID < inv.UnattachedEBS[j].VolumeID
+	})
+	sort.Slice(inv.ElasticIPs, func(i, j int) bool {
+		return inv.ElasticIPs[i].PublicIP < inv.ElasticIPs[j].PublicIP
+	})
+	sort.Slice(inv.LoadBalancers, func(i, j int) bool {
+		return inv.LoadBalancers[i].Name < inv.LoadBalancers[j].Name
+	})
+	sort.Slice(inv.NATGateways, func(i, j int) bool {
+		return inv.NATGateways[i].GatewayID < inv.NATGateways[j].GatewayID
+	})
 	sort.Slice(inv.S3Buckets, func(i, j int) bool {
 		return inv.S3Buckets[i].Name < inv.S3Buckets[j].Name
+	})
+	sort.Slice(inv.LambdaFunctions, func(i, j int) bool {
+		return inv.LambdaFunctions[i].Name < inv.LambdaFunctions[j].Name
+	})
+	sort.Slice(inv.VPCs, func(i, j int) bool {
+		return inv.VPCs[i].VPCID < inv.VPCs[j].VPCID
 	})
 }
 

@@ -52,7 +52,7 @@ make build-backend
 ./bin/finops-backend      # starts HTTP server on :8080 (see HTTP API below)
 ```
 
-`make lint` uses golangci-lint v2.12.2 and `.golangci.yml`, and reports only issues introduced since `origin/main` (same as GitHub Actions `only-new-issues`). `make lint-all` scans the whole tree, including findings already on main. After `make install-hooks`, `git push` runs `make lint`. Bypass with `git push --no-verify` or `SKIP_LINT=1 git push`.
+`make lint` uses golangci-lint v2.12.2 and `.golangci.yml`, and reports only issues introduced since the merge-base with `origin/main` (local equivalent of GitHub Actions `only-new-issues` / `--new-from-patch`). Override the baseline with `make lint LINT_NEW_FROM=<sha>` to match a specific CI event. `make lint-all` scans the whole tree, including findings already on main. After `make install-hooks`, `git push` runs `make lint`. Bypass with `git push --no-verify` or `SKIP_LINT=1 git push`.
 
 Or without Make:
 

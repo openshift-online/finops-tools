@@ -79,7 +79,7 @@ Examples:
 		if _, err := accountreview.ParseGroupBy(notifyOwnerGroupBy); err != nil {
 			return err
 		}
-		if _, err := output.ParseFormat(notifyOwnerFormat); err != nil {
+		if _, err := parseNotifySummaryFormat(notifyOwnerFormat); err != nil {
 			return err
 		}
 		if notifyOwnerMonths <= 0 {
@@ -124,6 +124,21 @@ func init() {
 	bindWorkersFlag(accountNotifyOwnerCmd, &notifyOwnerWorkers, "")
 }
 
+// parseNotifySummaryFormat accepts only formats WriteNotifySummary can render.
+// output.ParseFormat also allows csv, which this command rejects before AWS work.
+func parseNotifySummaryFormat(s string) (output.Format, error) {
+	format, err := output.ParseFormat(s)
+	if err != nil {
+		return "", err
+	}
+	switch format {
+	case output.FormatPrettyPrint, output.FormatJSON:
+		return format, nil
+	default:
+		return "", fmt.Errorf("notify summary supports pretty-print and json only")
+	}
+}
+
 // validateNotifyOwnerSendFlags requires an explicit delivery choice with --send
 // so a dry-run cannot accidentally email owners.
 func validateNotifyOwnerSendFlags(send, yes bool, redirectPrefix string) error {
@@ -149,7 +164,7 @@ func validateNotifyOwnerSendFlags(send, yes bool, redirectPrefix string) error {
 }
 
 func runAccountNotifyOwner(cmd *cobra.Command, _ []string) error {
-	format, err := output.ParseFormat(notifyOwnerFormat)
+	format, err := parseNotifySummaryFormat(notifyOwnerFormat)
 	if err != nil {
 		return err
 	}
@@ -327,7 +342,7 @@ func runAccountNotifyOwner(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	return writeNotifyDeliverySummary(summaryOut, format, deliveryResults)
+	return notifyOwnerAfterSummary(writeNotifyDeliverySummary(summaryOut, format, deliveryResults), deliveryResults)
 }
 
 func plannedDeliveryReason(msg notify.Message) string {
@@ -371,6 +386,28 @@ func skippedFromEmptyTargets(targets []cost.AccountTarget) []accountreview.Deliv
 		Status: accountreview.StatusSkipped,
 		Reason: "no accounts matched the selection",
 	}}
+}
+
+// notifyOwnerAfterSummary returns the summary-write error if set; otherwise a
+// non-nil error when any result is StatusSendFailed so the command exits
+// non-zero after the summary has already been written.
+func notifyOwnerAfterSummary(summaryErr error, results []accountreview.DeliveryResult) error {
+	if summaryErr != nil {
+		return summaryErr
+	}
+	n := 0
+	for _, r := range results {
+		if r.Status == accountreview.StatusSendFailed {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	if n == 1 {
+		return fmt.Errorf("1 notification failed to send")
+	}
+	return fmt.Errorf("%d notifications failed to send", n)
 }
 
 func writeNotifyDeliverySummary(w io.Writer, format output.Format, results []accountreview.DeliveryResult) error {

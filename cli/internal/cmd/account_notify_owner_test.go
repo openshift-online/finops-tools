@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,43 @@ import (
 	"github.com/openshift-online/finops-tools/core/accountreview"
 	"github.com/spf13/cobra"
 )
+
+func TestParseNotifySummaryFormat(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in      string
+		want    output.Format
+		wantErr bool
+	}{
+		{in: "pretty-print", want: output.FormatPrettyPrint},
+		{in: "json", want: output.FormatJSON},
+		{in: "JSON", want: output.FormatJSON},
+		{in: "", want: output.FormatPrettyPrint},
+		{in: "csv", wantErr: true},
+		{in: "CSV", wantErr: true},
+		{in: "yaml", wantErr: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseNotifySummaryFormat(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestValidateNotifyOwnerSendFlags(t *testing.T) {
 	t.Parallel()
@@ -38,6 +76,59 @@ func TestValidateNotifyOwnerSendFlags(t *testing.T) {
 			}
 			if !tc.wantFail && err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNotifyOwnerAfterSummary(t *testing.T) {
+	t.Parallel()
+
+	writeErr := errors.New("write failed")
+	sendFailed := []accountreview.DeliveryResult{{Status: accountreview.StatusSendFailed}}
+	twoFailed := []accountreview.DeliveryResult{
+		{Status: accountreview.StatusSendFailed},
+		{Status: accountreview.StatusSent},
+		{Status: accountreview.StatusSendFailed},
+	}
+
+	cases := []struct {
+		name       string
+		summaryErr error
+		results    []accountreview.DeliveryResult
+		wantErr    error
+		wantMsg    string
+	}{
+		{name: "summary write error with send failures", summaryErr: writeErr, results: sendFailed, wantErr: writeErr},
+		{name: "summary write error with no send failures", summaryErr: writeErr, results: []accountreview.DeliveryResult{{Status: accountreview.StatusSent}}, wantErr: writeErr},
+		{name: "zero failures sent", results: []accountreview.DeliveryResult{{Status: accountreview.StatusSent}}},
+		{name: "zero failures planned", results: []accountreview.DeliveryResult{{Status: accountreview.StatusPlanned}}},
+		{name: "owner not found is not send failure", results: []accountreview.DeliveryResult{{Status: accountreview.StatusOwnerNotFound}}},
+		{name: "invalid owner is not send failure", results: []accountreview.DeliveryResult{{Status: accountreview.StatusInvalidOwner}}},
+		{name: "skipped is not send failure", results: []accountreview.DeliveryResult{{Status: accountreview.StatusSkipped}}},
+		{name: "nil results"},
+		{name: "one send failed", results: sendFailed, wantMsg: "1 notification failed to send"},
+		{name: "two send failed", results: twoFailed, wantMsg: "2 notifications failed to send"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := notifyOwnerAfterSummary(tc.summaryErr, tc.results)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("error = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if tc.wantMsg == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.wantMsg {
+				t.Fatalf("error = %v, want %q", err, tc.wantMsg)
 			}
 		})
 	}

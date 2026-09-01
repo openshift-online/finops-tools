@@ -107,6 +107,32 @@ func TestListLambdaFunctionsPaginatesPastFifty(t *testing.T) {
 	}
 }
 
+func TestSortInventoryOrdersAllSlices(t *testing.T) {
+	t.Parallel()
+	inv := AccountInventory{
+		EC2Instances:    []EC2Instance{{InstanceID: "i-2"}, {InstanceID: "i-1"}},
+		RDSInstances:    []RDSInstance{{InstanceID: "db-b"}, {InstanceID: "db-a"}},
+		RDSClusters:     []RDSCluster{{ClusterID: "cl-b"}, {ClusterID: "cl-a"}},
+		HostedZones:     []HostedZone{{Name: "z.example"}, {Name: "a.example"}},
+		UnattachedEBS:   []EBSVolume{{VolumeID: "vol-2"}, {VolumeID: "vol-1"}},
+		ElasticIPs:      []ElasticIP{{PublicIP: "2.2.2.2"}, {PublicIP: "1.1.1.1"}},
+		LoadBalancers:   []LoadBalancer{{Name: "lb-b"}, {Name: "lb-a"}},
+		NATGateways:     []NATGateway{{GatewayID: "nat-2"}, {GatewayID: "nat-1"}},
+		S3Buckets:       []S3Bucket{{Name: "bucket-b"}, {Name: "bucket-a"}},
+		LambdaFunctions: []LambdaFunction{{Name: "fn-b"}, {Name: "fn-a"}},
+		VPCs:            []VPC{{VPCID: "vpc-2"}, {VPCID: "vpc-1"}},
+	}
+	sortInventory(&inv)
+	if inv.EC2Instances[0].InstanceID != "i-1" || inv.RDSInstances[0].InstanceID != "db-a" ||
+		inv.RDSClusters[0].ClusterID != "cl-a" || inv.HostedZones[0].Name != "a.example" ||
+		inv.UnattachedEBS[0].VolumeID != "vol-1" || inv.ElasticIPs[0].PublicIP != "1.1.1.1" ||
+		inv.LoadBalancers[0].Name != "lb-a" || inv.NATGateways[0].GatewayID != "nat-1" ||
+		inv.S3Buckets[0].Name != "bucket-a" || inv.LambdaFunctions[0].Name != "fn-a" ||
+		inv.VPCs[0].VPCID != "vpc-1" {
+		t.Fatalf("sortInventory() did not order all slices: %+v", inv)
+	}
+}
+
 func TestScanRegionalResourcesKeepsRDSWhenEC2Fails(t *testing.T) {
 	origEC2 := listRegionalEC2
 	origRDS := listRegionalRDS

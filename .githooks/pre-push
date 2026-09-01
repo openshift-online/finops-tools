@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
+# finops-tools: pre-push
 # Runs the same golangci-lint check as GitHub Actions before git push.
 # Install: make install-hooks
 # Bypass:  git push --no-verify   or   SKIP_LINT=1 git push
+# If hooks/pre-push.local exists (saved by make install-hooks), it is run with
+# the same stdin and arguments; the first non-zero exit status is preserved.
 set -euo pipefail
+
+stdin_file=$(mktemp)
+trap 'rm -f "$stdin_file"' EXIT
+cat > "$stdin_file"
+
+status=0
+
+local_hook="$(git rev-parse --git-path hooks)/pre-push.local"
+if [ -x "$local_hook" ]; then
+	"$local_hook" "$@" < "$stdin_file" || status=$?
+fi
 
 if [ "${SKIP_LINT:-}" = "1" ]; then
 	echo "pre-push: skipping lint (SKIP_LINT=1)"
-	exit 0
+	exit "$status"
 fi
 
 zero="$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')"
@@ -16,17 +30,21 @@ while read -r _local_ref local_sha _remote_ref _remote_sha; do
 		pushing_commits=1
 		break
 	fi
-done
+done < "$stdin_file"
 
 if [ "$pushing_commits" -eq 0 ]; then
-	exit 0
+	exit "$status"
 fi
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
-echo "pre-push: make lint (new issues vs origin/main, same as CI)"
+echo "pre-push: make lint (new issues vs merge-base with origin/main, same as CI only-new-issues)"
 if ! make lint; then
 	echo "pre-push: golangci-lint failed. Fix the findings, or bypass with git push --no-verify." >&2
-	exit 1
+	if [ "$status" -eq 0 ]; then
+		status=1
+	fi
 fi
+
+exit "$status"
