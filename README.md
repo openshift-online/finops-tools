@@ -44,11 +44,15 @@ From the repository root (uses `go.work`):
 ```bash
 go work sync
 make test
+make lint
+make install-hooks        # git push runs make lint (same golangci-lint as CI)
 make build
 make build-backend
 ./bin/finops --help
 ./bin/finops-backend      # starts HTTP server on :8080 (see HTTP API below)
 ```
+
+`make lint` uses golangci-lint v2.12.2 and `.golangci.yml`, and reports only issues introduced since the merge-base with `origin/main` (local equivalent of GitHub Actions `only-new-issues` / `--new-from-patch`). Override the baseline with `make lint LINT_NEW_FROM=<sha>` to match a specific CI event. `make lint-all` scans the whole tree, including findings already on main. After `make install-hooks`, `git push` runs `make lint`. Bypass with `git push --no-verify` or `SKIP_LINT=1 git push`.
 
 Or without Make:
 
@@ -610,6 +614,48 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--provider` | `aws` (default). `gcp` is reserved for a future release |
 
 `pretty-print` uses colors and Unicode bars when stdout is a TTY. Set `NO_COLOR=1` to disable; `FORCE_COLOR=1` forces colors when piping to a capable viewer.
+
+### Account owner notification (AWS)
+
+Gather **monthly cost trends** and **resource inventory** (EC2, RDS, Route53, S3, Lambda, load balancers, and more) for delete/keep decisions, then notify the account owner. The owner email is derived from the Organizations `owner` tag, appending `@redhat.com` when the tag value has no `@` sign.
+
+Email is sent through **Gmail** using gcloud Application Default Credentials. By default the command only builds reports and prints a delivery plan. To send mail, pass `--send` with either `--yes` (owner addresses) or `--redirect-prefix` (test delivery to `PREFIX+<owner>@redhat.com`).
+
+A Cost Explorer, inventory, or owner-tag failure on one account is recorded for that account and does not stop the rest of the run.
+
+Gmail uses existing gcloud Application Default Credentials. finops does **not** modify `~/.config/gcloud/application_default_credentials.json`. API quota is billed to `hcmfinops` via client options.
+
+```bash
+# Sign in with gcloud (only if needed; run this yourself)
+# --disable-quota-project: do not write your gcloud config project into ADC
+gcloud auth application-default login \
+  --disable-quota-project \
+  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/gmail.readonly
+
+# Verify finops can send Gmail with your existing ADC
+finops config gmail login
+
+# Plan only (no email sent)
+finops account notify-owner --account-alias my-linked
+
+# Test send to your inbox via plus-addressing
+finops account notify-owner --payer rh-control --account-id 111111111111 --send --redirect-prefix finops
+
+# Production send to owner addresses
+finops account notify-owner --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes
+```
+
+| Flag | Description |
+|------|-------------|
+| `--send` | Send emails via Gmail (default: plan only, no send) |
+| `--yes` | With `--send`, deliver to resolved owner emails |
+| `--redirect-prefix` | With `--send`, deliver to `PREFIX+<owner>@redhat.com` (test mode) |
+| `--group-by` | `account` (default) or `owner` — one email per account or per owner |
+| `--months` | Calendar months of cost history to include (default: `6`) |
+| `--exclude-recent-days` | Omit the last N UTC days from the cost end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |
+| `--format` | Delivery summary format: `pretty-print` (default) or `json` |
+
+Gmail API quota/billing defaults to the `hcmfinops` GCP project (via API client options, not by changing ADC). Override with `FINOPS_GMAIL_QUOTA_PROJECT`.
 
 ### Snapshot (AWS)
 

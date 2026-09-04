@@ -187,3 +187,63 @@ func rollupOUBreakdown(breakdown []CostBreakdownItem, opts *AWSFetchOptions) []C
 	}
 	return RollupBreakdownByOU(breakdown, buckets)
 }
+
+// FormatAccountOUPaths builds "Root / Parent / OU" labels for each account from
+// immediate-parent buckets and the OU tree under the selection root.
+func FormatAccountOUPaths(parents map[string]OUBucket, hierarchy []OUHierarchyNode) map[string]string {
+	byID := make(map[string]OUHierarchyNode, len(hierarchy))
+	for _, n := range hierarchy {
+		id := strings.TrimSpace(n.ID)
+		if id == "" {
+			continue
+		}
+		byID[id] = n
+	}
+	out := make(map[string]string, len(parents))
+	for accountID, bucket := range parents {
+		path := formatOUPath(bucket, byID)
+		if path == "" {
+			continue
+		}
+		out[accountID] = path
+	}
+	return out
+}
+
+func formatOUPath(bucket OUBucket, byID map[string]OUHierarchyNode) string {
+	id := strings.TrimSpace(bucket.ID)
+	if id == "" {
+		return strings.TrimSpace(bucket.Name)
+	}
+	var parts []string
+	seen := make(map[string]struct{})
+	for id != "" {
+		if _, ok := seen[id]; ok {
+			break
+		}
+		seen[id] = struct{}{}
+		node, ok := byID[id]
+		if !ok {
+			name := id
+			// Missing ancestor: use the leaf OU name only for the selected bucket itself,
+			// not for a parent that is absent from the hierarchy (avoids repeating the leaf name).
+			if id == strings.TrimSpace(bucket.ID) {
+				if n := strings.TrimSpace(bucket.Name); n != "" {
+					name = n
+				}
+			}
+			parts = append(parts, name)
+			break
+		}
+		name := strings.TrimSpace(node.Name)
+		if name == "" {
+			name = node.ID
+		}
+		parts = append(parts, name)
+		id = strings.TrimSpace(node.ParentID)
+	}
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	return strings.Join(parts, " / ")
+}
