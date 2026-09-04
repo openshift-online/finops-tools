@@ -214,17 +214,24 @@ func describeNATGateways(ctx context.Context, client EC2API, region string) ([]N
 }
 
 func describeVPCs(ctx context.Context, client EC2API, region string) ([]VPC, error) {
-	resp, err := client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]VPC, 0, len(resp.Vpcs))
-	for _, vpc := range resp.Vpcs {
-		out = append(out, VPC{
-			VPCID:     aws.ToString(vpc.VpcId),
-			Region:    region,
-			IsDefault: aws.ToBool(vpc.IsDefault),
-		})
+	var out []VPC
+	var token *string
+	for {
+		resp, err := client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{NextToken: token})
+		if err != nil {
+			return nil, err
+		}
+		for _, vpc := range resp.Vpcs {
+			out = append(out, VPC{
+				VPCID:     aws.ToString(vpc.VpcId),
+				Region:    region,
+				IsDefault: aws.ToBool(vpc.IsDefault),
+			})
+		}
+		if resp.NextToken == nil || *resp.NextToken == "" {
+			break
+		}
+		token = resp.NextToken
 	}
 	return out, nil
 }
