@@ -117,3 +117,35 @@ func TestParseGroupByOU(t *testing.T) {
 		t.Fatalf("got %q err %v", s, err)
 	}
 }
+
+func TestFormatAccountOUPaths(t *testing.T) {
+	parents := map[string]OUBucket{
+		"111111111111": {ID: "ou-root-team0000", Name: "Team A"},
+		"222222222222": {ID: "ou-root-prod0000", Name: "Production"},
+	}
+	hierarchy := []OUHierarchyNode{
+		{ID: "r-xxxx", Name: "Root", Depth: 0},
+		{ID: "ou-root-prod0000", Name: "Production", ParentID: "r-xxxx", Depth: 1},
+		{ID: "ou-root-team0000", Name: "Team A", ParentID: "ou-root-prod0000", Depth: 2},
+	}
+	got := FormatAccountOUPaths(parents, hierarchy)
+	if got["111111111111"] != "Root / Production / Team A" {
+		t.Fatalf("team path = %q", got["111111111111"])
+	}
+	if got["222222222222"] != "Root / Production" {
+		t.Fatalf("prod path = %q", got["222222222222"])
+	}
+}
+
+func TestFormatAccountOUPathsMissingAncestorUsesID(t *testing.T) {
+	parents := map[string]OUBucket{
+		"111111111111": {ID: "ou-root-team0000", Name: "Team A"},
+	}
+	hierarchy := []OUHierarchyNode{
+		{ID: "ou-root-team0000", Name: "Team A", ParentID: "ou-missing-parent", Depth: 2},
+	}
+	got := FormatAccountOUPaths(parents, hierarchy)
+	if got["111111111111"] != "ou-missing-parent / Team A" {
+		t.Fatalf("path = %q", got["111111111111"])
+	}
+}

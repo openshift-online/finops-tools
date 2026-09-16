@@ -1,4 +1,4 @@
-// snapshot_aws.go ensures AWS credentials for each snapshot scan target account.
+// account_notify_aws.go ensures AWS credentials for account review inventory targets.
 package cmd
 
 import (
@@ -9,26 +9,26 @@ import (
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/openshift-online/finops-tools/cli/internal/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/account"
+	awsconfig "github.com/openshift-online/finops-tools/cli/internal/aws"
 	"github.com/openshift-online/finops-tools/cli/internal/awsauth"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	coreaccount "github.com/openshift-online/finops-tools/core/account"
-	"github.com/openshift-online/finops-tools/core/parallel"
-	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/openshift-online/finops-tools/core/cost"
+	"github.com/openshift-online/finops-tools/core/inventory"
+	"github.com/openshift-online/finops-tools/core/parallel"
 	"github.com/spf13/cobra"
 )
 
 var (
-	ensureSnapshotCredentials = ensureSnapshotCredentialsImpl
-	prepareSnapshotTargets    = prepareSnapshotTargetsImpl
-	assumeSnapshotLinked      = awsconfig.AssumeLinkedCredentials
-	resolveSnapshotPayerSession = awsconfig.ResolvePayerProfileSession
+	ensureNotifyCredentials   = ensureNotifyCredentialsImpl
+	prepareNotifyTargets      = prepareNotifyTargetsImpl
+	assumeNotifyLinked        = awsconfig.AssumeLinkedCredentials
+	resolveNotifyPayerSession = awsconfig.ResolvePayerProfileSession
 )
 
-func ensureSnapshotCredentialsImpl(
+func ensureNotifyCredentialsImpl(
 	cmd *cobra.Command,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
@@ -61,14 +61,17 @@ func ensureSnapshotCredentialsImpl(
 	return nil
 }
 
-func prepareSnapshotTargetsImpl(
+// prepareNotifyTargetsImpl builds inventory targets with payer or assumed-role credentials.
+// Linked accounts that fail assume-role are skipped (returned separately) so the rest of
+// the notify-owner run can still plan or send mail.
+func prepareNotifyTargetsImpl(
 	cmd *cobra.Command,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
 	workers int,
 	bar *progress.Bar,
-) ([]snapshot.AccountTarget, []snapshot.AccountWarning, error) {
+) ([]inventory.AccountTarget, []accountreviewSkipped, error) {
 	ctx := awsCommandContext(cmd)
 	if bar != nil {
 		defer bar.Finish()
@@ -79,8 +82,8 @@ func prepareSnapshotTargetsImpl(
 		skipMu   sync.Mutex
 	)
 	configCache := make(map[string]aws.Config)
-	var out []snapshot.AccountTarget
-	var skipped []snapshot.AccountWarning
+	var out []inventory.AccountTarget
+	var skipped []accountreviewSkipped
 
 	err := parallel.ForEach(ctx, workers, len(targets), func(ctx context.Context, i int) error {
 		target := targets[i]
@@ -89,19 +92,19 @@ func prepareSnapshotTargetsImpl(
 			return fmt.Errorf("account target %d: account ID is required", i+1)
 		}
 
-		var awsTarget snapshot.AccountTarget
+		var invTarget inventory.AccountTarget
 		if target.IsLinked() {
-			loader, loaderErr := linkedSnapshotConfigLoader(cmd, cfg, target, credentialsFile, configPath, flagRole)
+			loader, loaderErr := linkedNotifyConfigLoader(cmd, cfg, target, credentialsFile, configPath, flagRole)
 			if loaderErr != nil {
 				return loaderErr
 			}
 			loadedCfg, probeErr := loader(ctx)
 			if probeErr != nil {
 				skipMu.Lock()
-				skipped = append(skipped, snapshot.AccountWarning{
+				skipped = append(skipped, accountreviewSkipped{
 					AccountID:    accountID,
 					DisplayAlias: target.DisplayAlias,
-					Message:      snapshotAccountErrorMessage(probeErr),
+					Message:      notifyAccountErrorMessage(probeErr),
 				})
 				skipMu.Unlock()
 				if bar != nil {
@@ -109,29 +112,29 @@ func prepareSnapshotTargetsImpl(
 				}
 				return nil
 			}
-			awsTarget = snapshot.AccountTarget{
+			invTarget = inventory.AccountTarget{
 				AccountID:    accountID,
 				DisplayAlias: target.DisplayAlias,
 				AWSConfig:    loadedCfg,
 				ConfigLoader: loader,
 			}
 		} else {
-			payerCfg, loadErr := awsConfigForSnapshotTarget(ctx, cfg, target, credentialsFile, configCache, &configMu)
+			payerCfg, loadErr := awsConfigForNotifyTarget(ctx, cfg, target, credentialsFile, configCache, &configMu)
 			if loadErr != nil {
 				return loadErr
 			}
-			awsTarget = snapshot.AccountTarget{
+			invTarget = inventory.AccountTarget{
 				AccountID:    accountID,
 				DisplayAlias: target.DisplayAlias,
 				AWSConfig:    payerCfg,
 			}
 		}
 
-		if err := enrichSnapshotTargetDisplayName(ctx, &awsTarget, cfg, target); err != nil {
+		if err := enrichNotifyTargetDisplayName(ctx, &invTarget, cfg, target); err != nil {
 			return err
 		}
 		outMu.Lock()
-		out = append(out, awsTarget)
+		out = append(out, invTarget)
 		outMu.Unlock()
 		if bar != nil {
 			bar.Advance()
@@ -147,7 +150,14 @@ func prepareSnapshotTargetsImpl(
 	return out, skipped, nil
 }
 
-func snapshotAccountErrorMessage(err error) string {
+// accountreviewSkipped is a linked account that could not be assumed into for inventory.
+type accountreviewSkipped struct {
+	AccountID    string
+	DisplayAlias string
+	Message      string
+}
+
+func notifyAccountErrorMessage(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -170,7 +180,7 @@ func snapshotAccountErrorMessage(err error) string {
 	return msg
 }
 
-func awsConfigForSnapshotTarget(
+func awsConfigForNotifyTarget(
 	ctx context.Context,
 	cfg configstore.File,
 	target cost.AccountTarget,
@@ -195,7 +205,9 @@ func awsConfigForSnapshotTarget(
 	return awsCfg, nil
 }
 
-func linkedSnapshotConfigLoader(
+// linkedNotifyConfigLoader returns a lazy assume-role loader so inventory.Scan
+// (not this prepare step) performs the Organizations-linked session when it runs.
+func linkedNotifyConfigLoader(
 	cmd *cobra.Command,
 	cfg configstore.File,
 	target cost.AccountTarget,
@@ -211,7 +223,7 @@ func linkedSnapshotConfigLoader(
 	payerProfiles := account.AWSProfileNames(payerID, payerAlias, nil)
 
 	loader := func(ctx context.Context) (aws.Config, error) {
-		payerSess, err := resolveSnapshotPayerSession(ctx, awsconfig.EnsureLinkedOptions{
+		payerSess, err := resolveNotifyPayerSession(ctx, awsconfig.EnsureLinkedOptions{
 			PayerAccountID:    payerID,
 			PayerProfileNames: payerProfiles,
 			CredentialsPath:   credentialsFile,
@@ -219,7 +231,7 @@ func linkedSnapshotConfigLoader(
 		if err != nil {
 			return aws.Config{}, fmt.Errorf("%s: %w", payerID, err)
 		}
-		linkedSess, _, err := assumeSnapshotLinked(ctx, awsconfig.EnsureLinkedOptions{
+		linkedSess, _, err := assumeNotifyLinked(ctx, awsconfig.EnsureLinkedOptions{
 			PayerAccountID:    payerID,
 			LinkedAccountID:   accountID,
 			RoleARN:           roleARN,
@@ -239,9 +251,9 @@ func linkedSnapshotConfigLoader(
 	return loader, nil
 }
 
-func enrichSnapshotTargetDisplayName(
+func enrichNotifyTargetDisplayName(
 	ctx context.Context,
-	target *snapshot.AccountTarget,
+	target *inventory.AccountTarget,
 	store configstore.File,
 	source cost.AccountTarget,
 ) error {

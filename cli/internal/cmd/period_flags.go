@@ -48,6 +48,20 @@ func validatePeriodFlags(cmd *cobra.Command) error {
 	return nil
 }
 
+func applyExcludeRecentDaysDefault(cmd *cobra.Command, cfg configstore.File, dest *int) error {
+	if cmd.Flags().Changed("exclude-recent-days") {
+		return nil
+	}
+	if v, ok := cfg.Default(configstore.DefaultFQNCostExcludeRecentDays); ok {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			return fmt.Errorf("defaults.%s: invalid value %q", configstore.DefaultFQNCostExcludeRecentDays, v)
+		}
+		*dest = n
+	}
+	return nil
+}
+
 func applyCostPeriodDefaults(cmd *cobra.Command, cfg configstore.File) error {
 	if err := cfg.ValidateCostPeriodDefaults(); err != nil {
 		return err
