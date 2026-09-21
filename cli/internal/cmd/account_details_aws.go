@@ -1,10 +1,9 @@
-// account_notify_aws.go ensures AWS credentials for account review inventory targets.
+// account_details_aws.go ensures AWS credentials for account review inventory targets.
 package cmd
 
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 
@@ -22,13 +21,13 @@ import (
 )
 
 var (
-	ensureNotifyCredentials   = ensureNotifyCredentialsImpl
-	prepareNotifyTargets      = prepareNotifyTargetsImpl
-	assumeNotifyLinked        = awsconfig.AssumeLinkedCredentials
-	resolveNotifyPayerSession = awsconfig.ResolvePayerProfileSession
+	ensureAccountDetailsCredentials   = ensureAccountDetailsCredentialsImpl
+	prepareAccountDetailsTargets      = prepareAccountDetailsTargetsImpl
+	assumeAccountDetailsLinked        = awsconfig.AssumeLinkedCredentials
+	resolveAccountDetailsPayerSession = awsconfig.ResolvePayerProfileSession
 )
 
-func ensureNotifyCredentialsImpl(
+func ensureAccountDetailsCredentialsImpl(
 	cmd *cobra.Command,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
@@ -61,17 +60,18 @@ func ensureNotifyCredentialsImpl(
 	return nil
 }
 
-// prepareNotifyTargetsImpl builds inventory targets with payer or assumed-role credentials.
-// Linked accounts that fail assume-role are skipped (returned separately) so the rest of
-// the notify-owner run can still plan or send mail.
-func prepareNotifyTargetsImpl(
+// prepareAccountDetailsTargetsImpl builds inventory targets with payer or
+// assumed-role credentials. Linked assume-role is deferred to inventory.Scan
+// (via ConfigLoader) so a failed member session is recorded as InventoryError
+// on that account instead of skipping email.
+func prepareAccountDetailsTargetsImpl(
 	cmd *cobra.Command,
 	cfg configstore.File,
 	targets []cost.AccountTarget,
 	credentialsFile, configPath, flagRole string,
 	workers int,
 	bar *progress.Bar,
-) ([]inventory.AccountTarget, []accountreviewSkipped, error) {
+) ([]inventory.AccountTarget, error) {
 	ctx := awsCommandContext(cmd)
 	if bar != nil {
 		defer bar.Finish()
@@ -79,11 +79,9 @@ func prepareNotifyTargetsImpl(
 	var (
 		configMu sync.Mutex
 		outMu    sync.Mutex
-		skipMu   sync.Mutex
 	)
 	configCache := make(map[string]aws.Config)
 	var out []inventory.AccountTarget
-	var skipped []accountreviewSkipped
 
 	err := parallel.ForEach(ctx, workers, len(targets), func(ctx context.Context, i int) error {
 		target := targets[i]
@@ -94,32 +92,17 @@ func prepareNotifyTargetsImpl(
 
 		var invTarget inventory.AccountTarget
 		if target.IsLinked() {
-			loader, loaderErr := linkedNotifyConfigLoader(cmd, cfg, target, credentialsFile, configPath, flagRole)
+			loader, loaderErr := linkedAccountDetailsConfigLoader(cmd, cfg, target, credentialsFile, configPath, flagRole)
 			if loaderErr != nil {
 				return loaderErr
-			}
-			loadedCfg, probeErr := loader(ctx)
-			if probeErr != nil {
-				skipMu.Lock()
-				skipped = append(skipped, accountreviewSkipped{
-					AccountID:    accountID,
-					DisplayAlias: target.DisplayAlias,
-					Message:      notifyAccountErrorMessage(probeErr),
-				})
-				skipMu.Unlock()
-				if bar != nil {
-					bar.Advance()
-				}
-				return nil
 			}
 			invTarget = inventory.AccountTarget{
 				AccountID:    accountID,
 				DisplayAlias: target.DisplayAlias,
-				AWSConfig:    loadedCfg,
-				ConfigLoader: loader,
+				ConfigLoader: cachedConfigLoader(loader),
 			}
 		} else {
-			payerCfg, loadErr := awsConfigForNotifyTarget(ctx, cfg, target, credentialsFile, configCache, &configMu)
+			payerCfg, loadErr := awsConfigForAccountDetailsTarget(ctx, cfg, target, credentialsFile, configCache, &configMu)
 			if loadErr != nil {
 				return loadErr
 			}
@@ -130,7 +113,7 @@ func prepareNotifyTargetsImpl(
 			}
 		}
 
-		if err := enrichNotifyTargetDisplayName(ctx, &invTarget, cfg, target); err != nil {
+		if err := enrichAccountDetailsDisplayName(ctx, &invTarget, cfg, target); err != nil {
 			return err
 		}
 		outMu.Lock()
@@ -142,45 +125,12 @@ func prepareNotifyTargetsImpl(
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	sort.Slice(skipped, func(i, j int) bool {
-		return skipped[i].AccountID < skipped[j].AccountID
-	})
-	return out, skipped, nil
+	return out, nil
 }
 
-// accountreviewSkipped is a linked account that could not be assumed into for inventory.
-type accountreviewSkipped struct {
-	AccountID    string
-	DisplayAlias string
-	Message      string
-}
-
-func notifyAccountErrorMessage(err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := err.Error()
-	if idx := strings.Index(msg, ": "); idx >= 0 {
-		prefix := strings.TrimSpace(msg[:idx])
-		if len(prefix) == 12 {
-			tail := strings.TrimSpace(msg[idx+2:])
-			if tail != "" {
-				return tail
-			}
-		}
-	}
-	if idx := strings.LastIndex(msg, ": "); idx >= 0 {
-		tail := strings.TrimSpace(msg[idx+2:])
-		if tail != "" {
-			return tail
-		}
-	}
-	return msg
-}
-
-func awsConfigForNotifyTarget(
+func awsConfigForAccountDetailsTarget(
 	ctx context.Context,
 	cfg configstore.File,
 	target cost.AccountTarget,
@@ -205,9 +155,30 @@ func awsConfigForNotifyTarget(
 	return awsCfg, nil
 }
 
-// linkedNotifyConfigLoader returns a lazy assume-role loader so inventory.Scan
-// (not this prepare step) performs the Organizations-linked session when it runs.
-func linkedNotifyConfigLoader(
+// cachedConfigLoader runs load at most once so prepare and inventory.Scan share
+// a single assume-role if both need the session.
+func cachedConfigLoader(load func(context.Context) (aws.Config, error)) func(context.Context) (aws.Config, error) {
+	var (
+		mu   sync.Mutex
+		cfg  aws.Config
+		err  error
+		done bool
+	)
+	return func(ctx context.Context) (aws.Config, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return cfg, err
+		}
+		cfg, err = load(ctx)
+		done = true
+		return cfg, err
+	}
+}
+
+// linkedAccountDetailsConfigLoader returns a lazy assume-role loader so
+// inventory.Scan performs the Organizations-linked session when it runs.
+func linkedAccountDetailsConfigLoader(
 	cmd *cobra.Command,
 	cfg configstore.File,
 	target cost.AccountTarget,
@@ -223,7 +194,7 @@ func linkedNotifyConfigLoader(
 	payerProfiles := account.AWSProfileNames(payerID, payerAlias, nil)
 
 	loader := func(ctx context.Context) (aws.Config, error) {
-		payerSess, err := resolveNotifyPayerSession(ctx, awsconfig.EnsureLinkedOptions{
+		payerSess, err := resolveAccountDetailsPayerSession(ctx, awsconfig.EnsureLinkedOptions{
 			PayerAccountID:    payerID,
 			PayerProfileNames: payerProfiles,
 			CredentialsPath:   credentialsFile,
@@ -231,7 +202,7 @@ func linkedNotifyConfigLoader(
 		if err != nil {
 			return aws.Config{}, fmt.Errorf("%s: %w", payerID, err)
 		}
-		linkedSess, _, err := assumeNotifyLinked(ctx, awsconfig.EnsureLinkedOptions{
+		linkedSess, _, err := assumeAccountDetailsLinked(ctx, awsconfig.EnsureLinkedOptions{
 			PayerAccountID:    payerID,
 			LinkedAccountID:   accountID,
 			RoleARN:           roleARN,
@@ -251,7 +222,7 @@ func linkedNotifyConfigLoader(
 	return loader, nil
 }
 
-func enrichNotifyTargetDisplayName(
+func enrichAccountDetailsDisplayName(
 	ctx context.Context,
 	target *inventory.AccountTarget,
 	store configstore.File,
@@ -275,7 +246,7 @@ func enrichNotifyTargetDisplayName(
 		return err
 	}
 	target.DisplayName = ct.DisplayName
-	if target.DisplayName == "" {
+	if target.DisplayName == "" && target.ConfigLoader == nil {
 		name, err := coreaccount.AccountName(ctx, target.AWSConfig, target.AccountID)
 		if err == nil {
 			target.DisplayName = name

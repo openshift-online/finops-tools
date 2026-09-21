@@ -4,12 +4,16 @@ package progress
 import (
 	"fmt"
 	"io"
+	"sync"
+
+	"github.com/openshift-online/finops-tools/cli/internal/output"
 )
 
 // Writer emits step messages to w (typically os.Stderr).
 type Writer struct {
 	w     io.Writer
 	quiet bool
+	mu    sync.Mutex
 }
 
 // New returns a progress writer. When quiet is true, Step is a no-op.
@@ -22,5 +26,7 @@ func (p *Writer) Step(message string) {
 	if p == nil || p.quiet || p.w == nil {
 		return
 	}
-	_, _ = fmt.Fprintf(p.w, "→ %s\n", message)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, _ = fmt.Fprintf(p.w, "→ %s\n", output.SanitizeTerminal(message))
 }

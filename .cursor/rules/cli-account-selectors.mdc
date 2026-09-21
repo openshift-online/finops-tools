@@ -17,7 +17,7 @@ Keep **local alias** and **provider-native ID** as separate flags so future GCP/
 
 For single-account commands (`tag list/add/update`): require **exactly one** of `--account-id` or `--account-alias`.
 
-For multi-account commands (`get-cost`, `snapshot list`, `report create`): use `bindAWSTargetFlags` and **exactly one selection mode**:
+For multi-account commands (`get-cost`, `snapshot list`, `report create`, `account details`): use `bindAWSTargetFlags` and **exactly one selection mode**:
 `--account-id`/`--account-alias`, `--payer` alone (entire org), `--payer --ou`, or `--payer --tag`.
 
 ```go
@@ -26,7 +26,7 @@ bindAWSAccountSelectorFlags(tagListCmd, awsAccountSelectorFlagRefs{
     Payer: &accountTagsPayer, Alias: &accountTagsAlias, AccountID: &accountTagsAccountID,
 }, "...")
 
-// ✅ GOOD — get-cost / snapshot / report create
+// ✅ GOOD — get-cost / snapshot / report create / account details
 bindAWSTargetFlags(accountGetCostCmd, awsTargetFlagRefs{Account: &costGetAccount, ...})
 
 // ❌ BAD — ambiguous positional
@@ -44,6 +44,7 @@ finops tag update --account-id 111111111111 --tag-key organization --tag-value "
 finops account get-cost --account-alias rh-control
 finops account get-cost --payer rh-control
 finops account get-cost --payer rh-control --ou 'ou-abcd-12345678/*'
+finops account details --payer rh-control --ou 'ou-abcd-12345678/*'
 finops aws list-ous --payer rh-control
 ```
 
