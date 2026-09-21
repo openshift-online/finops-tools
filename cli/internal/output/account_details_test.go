@@ -136,7 +136,7 @@ func TestWriteAccountDetailsPrettyMultiAccountSeparators(t *testing.T) {
 	if overview < 0 || id1 < 0 || id2 < 0 || first < 0 || second < 0 {
 		t.Fatalf("missing overview or account banners:\n%s", out)
 	}
-	if !(overview < id1 && overview < id2 && id1 < first && id2 < first && first < second) {
+	if overview >= id1 || overview >= id2 || id1 >= first || id2 >= first || first >= second {
 		t.Fatalf("overview should list both IDs before the first account banner: overview=%d id1=%d id2=%d first=%d second=%d\n%s", overview, id1, id2, first, second, out)
 	}
 	if !strings.Contains(out[first:second], "═") {
