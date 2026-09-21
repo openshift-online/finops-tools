@@ -170,7 +170,7 @@ func listLambdaFunctions(ctx context.Context, client LambdaAPI, region string) (
 	for {
 		resp, err := client.ListFunctions(ctx, &lambda.ListFunctionsInput{Marker: marker})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, fn := range resp.Functions {
 			out = append(out, LambdaFunction{

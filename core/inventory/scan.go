@@ -301,7 +301,8 @@ func scanRegionalResources(
 
 	lambdas, err := listRegionalLambda(ctx, newLambdaClient(cfg), region)
 	record("lambda", err)
-	if err == nil {
+	// Keep partial Lambda results when paging failed after some functions listed.
+	if len(lambdas) > 0 {
 		mu.Lock()
 		inv.LambdaFunctions = append(inv.LambdaFunctions, lambdas...)
 		mu.Unlock()

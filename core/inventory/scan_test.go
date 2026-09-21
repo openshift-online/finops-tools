@@ -463,7 +463,8 @@ func TestAwsConfigForRegionOnlySetsRegion(t *testing.T) {
 }
 
 type fakeLambdaAPI struct {
-	pages [][]string
+	pages   [][]string
+	pageErr error
 }
 
 func (f *fakeLambdaAPI) ListFunctions(
@@ -475,6 +476,9 @@ func (f *fakeLambdaAPI) ListFunctions(
 	if params != nil && params.Marker != nil {
 		idx = 1
 	}
+	if f.pageErr != nil && idx > 0 {
+		return nil, f.pageErr
+	}
 	if idx >= len(f.pages) {
 		return &lambda.ListFunctionsOutput{}, nil
 	}
@@ -483,7 +487,7 @@ func (f *fakeLambdaAPI) ListFunctions(
 		n := name
 		out.Functions = append(out.Functions, lambdatypes.FunctionConfiguration{FunctionName: &n})
 	}
-	if idx+1 < len(f.pages) {
+	if idx+1 < len(f.pages) || f.pageErr != nil {
 		marker := "next"
 		out.NextMarker = &marker
 	}
@@ -503,6 +507,21 @@ func TestListLambdaFunctionsPaginatesPastFifty(t *testing.T) {
 	}
 	if len(got) != 52 {
 		t.Fatalf("got %d functions, want 52", len(got))
+	}
+}
+
+func TestListLambdaFunctionsKeepsPageWhenLaterPageFails(t *testing.T) {
+	t.Parallel()
+	fake := &fakeLambdaAPI{
+		pages:   [][]string{{"fn-0", "fn-1"}},
+		pageErr: fmt.Errorf("throttled"),
+	}
+	got, err := listLambdaFunctions(context.Background(), fake, "us-east-1")
+	if err == nil {
+		t.Fatal("expected paging error")
+	}
+	if len(got) != 2 || got[0].Name != "fn-0" || got[1].Name != "fn-1" {
+		t.Fatalf("got %+v, want first page", got)
 	}
 }
 
@@ -607,6 +626,43 @@ func TestScanRegionalResourcesKeepsPartialEC2OnError(t *testing.T) {
 		t.Fatalf("volumes = %+v", inv.UnattachedEBS)
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0].Message, "nat-gateways") {
+		t.Fatalf("warnings = %+v", warnings)
+	}
+}
+
+func TestScanRegionalResourcesKeepsPartialLambdaOnError(t *testing.T) {
+	origEC2 := listRegionalEC2
+	origRDS := listRegionalRDS
+	origLBs := listRegionalLBs
+	origLambda := listRegionalLambda
+	t.Cleanup(func() {
+		listRegionalEC2 = origEC2
+		listRegionalRDS = origRDS
+		listRegionalLBs = origLBs
+		listRegionalLambda = origLambda
+	})
+
+	listRegionalEC2 = func(context.Context, EC2API, string) ([]EC2Instance, []EBSVolume, []ElasticIP, []NATGateway, []VPC, error) {
+		return nil, nil, nil, nil, nil, nil
+	}
+	listRegionalRDS = func(context.Context, RDSAPI, string) ([]RDSInstance, []RDSCluster, error) {
+		return nil, nil, nil
+	}
+	listRegionalLBs = func(context.Context, ELBV2API, ELBAPI, string) ([]LoadBalancer, error) {
+		return nil, nil
+	}
+	listRegionalLambda = func(context.Context, LambdaAPI, string) ([]LambdaFunction, error) {
+		return []LambdaFunction{{Name: "fn-1", Region: "us-east-1"}}, fmt.Errorf("lambda paging failed")
+	}
+
+	inv := &AccountInventory{}
+	var mu sync.Mutex
+	var warnings []RegionWarning
+	scanRegionalResources(context.Background(), aws.Config{}, "us-east-1", "111111111111", inv, &mu, &warnings)
+	if len(inv.LambdaFunctions) != 1 || inv.LambdaFunctions[0].Name != "fn-1" {
+		t.Fatalf("lambda = %+v", inv.LambdaFunctions)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Message, "lambda paging failed") {
 		t.Fatalf("warnings = %+v", warnings)
 	}
 }
