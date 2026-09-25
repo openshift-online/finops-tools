@@ -133,6 +133,10 @@ func MergeResults(results []CostResult) (CostResult, error) {
 
 // MergeDaily combines per-account daily series by summing amounts per date.
 func MergeDaily(series [][]DailyCostItem) []DailyCostItem {
+	return mergeDaily(series, false)
+}
+
+func mergeDaily(series [][]DailyCostItem, keepZeroDays bool) []DailyCostItem {
 	if len(series) == 0 {
 		return nil
 	}
@@ -149,7 +153,7 @@ func MergeDaily(series [][]DailyCostItem) []DailyCostItem {
 
 	out := make([]DailyCostItem, 0, len(byDate))
 	for date, amt := range byDate {
-		if amt == 0 {
+		if amt == 0 && !keepZeroDays {
 			continue
 		}
 		out = append(out, DailyCostItem{Date: date, Amount: amt})
