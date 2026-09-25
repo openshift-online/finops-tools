@@ -12,7 +12,7 @@ import (
 )
 
 func TestGeneratorForKnownTemplates(t *testing.T) {
-	for _, name := range []string{TemplateCosts, TemplateSavingsPlans, TemplateCostAnomalies, TemplateHCPHierarchy} {
+	for _, name := range []string{TemplateCosts, TemplateSavingsPlans, TemplateCostAnomalies, TemplateHCPHierarchy, TemplateCostPace} {
 		if _, err := GeneratorFor(name); err != nil {
 			t.Fatalf("GeneratorFor(%q): %v", name, err)
 		}

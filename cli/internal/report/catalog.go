@@ -14,6 +14,8 @@ const (
 	TemplateSavingsPlans = "savings-plans"
 	// TemplateCostAnomalies is the AWS Cost Anomaly Detection report template.
 	TemplateCostAnomalies = "cost-anomalies"
+	// TemplateCostPace compares monthly spend pace and projects the month total.
+	TemplateCostPace = "cost-pace"
 	// FormatHTML is the HTML output format.
 	FormatHTML = "html"
 )
@@ -28,6 +30,11 @@ type TemplateInfo struct {
 // Templates returns all registered report templates.
 func Templates() []TemplateInfo {
 	return []TemplateInfo{
+		{
+			Name:        TemplateCostPace,
+			Description: "AWS net amortized month-to-date spend, equal-period comparison, and projected month total",
+			Formats:     []string{FormatHTML},
+		},
 		{
 			Name:        TemplateCosts,
 			Description: "AWS net amortized cost: total, per linked account, per service, and daily trend",

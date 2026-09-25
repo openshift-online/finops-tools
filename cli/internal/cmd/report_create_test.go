@@ -7,6 +7,13 @@ import (
 )
 
 func TestParseReportTemplate(t *testing.T) {
+	pace, err := reportpkg.ParseTemplate("cost-pace")
+	if err != nil || pace != reportpkg.TemplateCostPace {
+		t.Fatalf("cost-pace: got %q %v", pace, err)
+	}
+	if reportpkg.AccountTargetModeFor(pace) != reportpkg.AccountTargetsRequired {
+		t.Fatal("cost-pace must use the shared AWS account selection")
+	}
 	name, err := reportpkg.ParseTemplate("costs")
 	if err != nil || name != reportpkg.TemplateCosts {
 		t.Fatalf("got %q %v", name, err)

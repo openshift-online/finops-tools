@@ -1,0 +1,48 @@
+{{ define "title" }}Cost Pace — {{ .AccountSummary }}{{ end }}
+
+{{ define "content" }}
+<header>
+  <h1>Cost Pace — {{ .Month }}</h1>
+  <p class="meta">
+    <strong>Account:</strong> {{ .AccountSummary }}<br>
+    <strong>Metric:</strong> AWS net amortized cost<br>
+    <strong>Data through:</strong> {{ .AsOf }} (UTC, inclusive)<br>
+    <strong>Generated:</strong> {{ .GeneratedAt }}
+  </p>
+</header>
+
+<section>
+  <h2>Month-to-date snapshot</h2>
+  <p class="meta">{{ .CurrentPeriod }} · {{ .Report.DaysElapsed }} of {{ .Report.DaysInMonth }} calendar days</p>
+  <p class="total-amount">{{ .CurrentMTD }}</p>
+  <p>Daily average: <strong>{{ .DailyAverage }}</strong></p>
+</section>
+
+<section>
+  <h2>Same-period comparison</h2>
+  <p><strong>{{ .Direction }} · {{ .PacePercent }}</strong> compared with the previous month.</p>
+  <p class="meta">Both periods cover the first {{ .Report.ComparisonDays }} days of their month.
+    {{ if lt .Report.ComparisonDays .Report.DaysElapsed }}The previous month is shorter, so this comparison excludes the extra days in the current month. The snapshot and projection still use every reported day.{{ end }}
+  </p>
+  <table>
+    <thead><tr><th scope="col">Period</th><th scope="col">Dates (inclusive)</th><th scope="col">Net amortized spend</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Current month</th><td>{{ .CurrentComparisonPeriod }}</td><td class="amount">{{ .CurrentComparable }}</td></tr>
+      <tr><th scope="row">Previous month</th><td>{{ .PreviousComparisonPeriod }}</td><td class="amount">{{ .PreviousComparable }}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Estimated full-month spend</h2>
+  <p class="total-amount">{{ .ProjectedTotal }}</p>
+  <p>{{ .ProjectedChangePercent }} compared with the previous full month.</p>
+  <p>Previous full month ({{ .PreviousPeriod }}): <strong>{{ .PreviousFullMonth }}</strong></p>
+  <p class="meta">Projection = month-to-date spend ÷ {{ .Report.DaysElapsed }} elapsed days × {{ .Report.DaysInMonth }} days in this month.
+    It assumes the observed daily average continues; it is not an AWS forecast.
+    AWS may revise reported costs. Percentages are N/A when the previous baseline is zero or negative.
+  </p>
+</section>
+{{ end }}
+
+{{ define "cost-pace" }}{{ template "layout" . }}{{ end }}

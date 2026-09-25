@@ -41,6 +41,7 @@ Example:
   finops report create costs --ou ou-abcd-12345678 --payer rh-control -o ou-costs.html
   finops report create costs --payer rh-control -o all-members.html
   finops report create costs --payer rh-control --tag env=prod -o prod.html
+  finops report create cost-pace --account-alias rh-control --exclude-recent-days 2 -o cost-pace.html
   finops report create hcp-hierarchy --snowflake-alias rhsandbox -o hcp-hierarchy.html`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -88,7 +89,7 @@ func init() {
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
-	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
+	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs and cost-pace templates; ")
 	addPeriodFlags(reportCreateCmd)
 }
 
