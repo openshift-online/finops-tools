@@ -718,10 +718,42 @@ The **costs** template includes:
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 | `--output` / `-o` | Write HTML to a file instead of stdout |
 | `--quiet` | Suppress progress messages on stderr (HTML still goes to stdout or `--output`) |
-| `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential; **costs** template only) |
+| `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential; **costs** and **cost-pace** templates) |
 | `--days`, `--months`, `--from`, `--to`, `--exclude-recent-days` | Same period options as `finops account get-cost` |
 
 Progress lines (tag resolution, credential checks, Cost Explorer queries) are printed to **stderr** so you can redirect output safely, e.g. `finops account get-cost ... --format json > costs.json`.
+
+#### Cost pace
+
+Compare month-to-date **net amortized AWS spend** with the same number of days
+in the previous month, and estimate the full-month total using the observed
+daily average. The HTML report shows the actual date windows, selected account
+scope, previous full-month cost, and both percentage changes.
+
+```bash
+finops report create cost-pace --account-alias rh-control --exclude-recent-days 2 -o cost-pace.html
+# Historical snapshot through March 31 (compares March 1–28 with February 1–28):
+finops report create cost-pace --account-alias rh-control --from 2026-03-01 --to 2026-03-31 -o march-pace.html
+```
+
+The last included UTC date determines the reporting month. Without an explicit
+`--to`, today is excluded; `--exclude-recent-days` (including its config default)
+moves the cutoff further back to allow for AWS reporting lag. At the start of a
+month this may produce a report for the previous month. `--to` is inclusive and
+uses the existing requirement to supply `--from`.
+
+Cost pace always fetches the entire previous month and the reporting month
+through the cutoff. The start implied by `--days`, `--months`, or `--from` does
+not narrow these calendar-month windows. When the previous month is shorter,
+both comparison windows stop at its last day; the snapshot and projection still
+use all elapsed days of the reporting month.
+
+Missing daily data produces an error instead of being treated as zero. Reported
+zero-cost days and credits are included. Percentage changes are N/A for a zero
+or negative previous baseline. The estimate is `MTD ÷ elapsed days × days in month`,
+not an AWS forecast; reported costs may still be revised. No Docker setup is
+needed: build with `make build`, then run `./bin/finops report create cost-pace`
+with your account selection flags.
 
 Use `--quiet` to suppress progress messages.
 

@@ -60,6 +60,7 @@ func GeneratorFor(name string) (Generator, error) {
 }
 
 var generators = map[string]Generator{
+	TemplateCostPace:      costPaceGenerator{},
 	TemplateCosts:         costsGenerator{},
 	TemplateSavingsPlans:  savingsPlansGenerator{},
 	TemplateCostAnomalies: costAnomaliesGenerator{},
