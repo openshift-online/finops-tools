@@ -15,6 +15,7 @@ import (
 
 func init() {
 	reportpkg.SetSnowflakeMartOpener(openSnowflakeQuerier)
+	reportpkg.SetSnowflakeTelesenseOpener(openSnowflakeTelesenseQuerier)
 }
 
 // HCM FinOps mapping mart location used by the hcp-hierarchy and
@@ -25,12 +26,13 @@ const (
 )
 
 // Telesense vCPU-hour usage mart location used by the executive-summary
-// report's second Snowflake connection (spec section 3.2): "TELESENSE_DB",
-// "OPENSHIFT_MARTS". Lives in a separate Snowflake account from
-// hcmFinOpsDatabase/hcmFinOpsSchema -- never joined via SQL, only in
-// application memory (spec sections 2 and 11.1). The opener wrapper that
-// calls openSnowflakeQuerierFor with these values is added alongside the
-// executive-summary generator that consumes it.
+// report's second Snowflake connection (spec section 3.2). Lives in a
+// separate Snowflake account from hcmFinOpsDatabase/hcmFinOpsSchema -- never
+// joined via SQL, only in application memory (spec sections 2 and 11.1).
+const (
+	telesenseDatabase = "TELESENSE_DB"
+	telesenseSchema   = "OPENSHIFT_MARTS"
+)
 
 // sqlQuerier adapts *sql.DB to satisfy hcphierarchy.SnowflakeQueryer.
 // *sql.Rows satisfies hcphierarchy.SnowflakeRows (Next/Scan/Close/Err).
@@ -54,15 +56,26 @@ func openSnowflakeQuerier(ctx context.Context, cfgPath, snowflakeAlias string) (
 	return openSnowflakeQuerierFor(ctx, cfgPath, snowflakeAlias, hcmFinOpsDatabase, hcmFinOpsSchema)
 }
 
+// openSnowflakeTelesenseQuerier returns a SnowflakeQueryer for the
+// executive-summary report's second connection, connected to
+// TELESENSE_DB.OPENSHIFT_MARTS. The return type is hcphierarchy.SnowflakeQueryer
+// because core/telesense.SnowflakeQueryer has an identical method set over
+// the same core/sqlrows.Rows alias, so callers (the executive-summary
+// generator) can pass the result straight to telesense.Build without an
+// adapter.
+func openSnowflakeTelesenseQuerier(ctx context.Context, cfgPath, snowflakeAlias string) (hcphierarchy.SnowflakeQueryer, error) {
+	return openSnowflakeQuerierFor(ctx, cfgPath, snowflakeAlias, telesenseDatabase, telesenseSchema)
+}
+
 // openSnowflakeQuerierFor returns a SnowflakeQueryer for the given Snowflake
 // account alias, connected to db.schema. It loads the finops config,
 // resolves the alias (explicit, else the configured default, else the sole
 // registered account), ensures a valid OAuth token (refreshing or
-// re-authenticating as needed), and opens the connection. openSnowflakeQuerier
-// delegates to this for the hcp-hierarchy/mapping connection; a Telesense
-// opener wrapper calling this with TELESENSE_DB/OPENSHIFT_MARTS is added
-// alongside the executive-summary generator that consumes it -- never
-// attempt a cross-database SQL join between the two (spec sections 2, 11.1).
+// re-authenticating as needed), and opens the connection.
+// openSnowflakeQuerier delegates to this for the hcp-hierarchy/mapping
+// connection; openSnowflakeTelesenseQuerier delegates to this for the
+// executive-summary report's second (Telesense) connection -- never attempt
+// a cross-database SQL join between the two (spec sections 2, 11.1).
 func openSnowflakeQuerierFor(ctx context.Context, cfgPath, snowflakeAlias, db, schema string) (hcphierarchy.SnowflakeQueryer, error) {
 	cfg, err := configstore.Load(cfgPath)
 	if err != nil {

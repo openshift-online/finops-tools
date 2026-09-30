@@ -32,6 +32,18 @@ type GenerateInput struct {
 	SnowflakeProdAlias string
 	Workers            int
 	SelectionRootID    string
+
+	// MappingCSVPath is the path to the executive-summary report's required
+	// external account-taxonomy mapping CSV (golang-executive-summary-spec.md
+	// section 3.4). Empty for reports that don't use it.
+	MappingCSVPath string
+	// InfraAccountIDs is the executive-summary report's shared-infrastructure
+	// AWS account ID list (spec 6.3's DEFAULT_INFRA_ACCOUNTS), supplied via
+	// configuration/flags rather than hardcoded in source (spec 4.2).
+	InfraAccountIDs []string
+	// NoAnomalies skips the executive-summary report's ML and statistical
+	// anomaly detection/fetch (spec 7.4), e.g. to speed up iteration.
+	NoAnomalies bool
 }
 
 // SnowflakeMartOpener opens a Snowflake connection for mart-backed reports.
@@ -62,6 +74,14 @@ func SetSnowflakeMartOpener(fn SnowflakeMartOpener) {
 // introduction and its first real caller.
 type SnowflakeTelesenseOpener func(ctx context.Context, cfgPath, snowflakeAlias string) (corehcp.SnowflakeQueryer, error)
 
+var snowflakeTelesenseOpener SnowflakeTelesenseOpener
+
+// SetSnowflakeTelesenseOpener registers the CLI Snowflake opener for the
+// Telesense/prod connection (executive-summary report only).
+func SetSnowflakeTelesenseOpener(fn SnowflakeTelesenseOpener) {
+	snowflakeTelesenseOpener = fn
+}
+
 // Generator builds and renders one report template.
 type Generator interface {
 	Validate(in GenerateInput) error
@@ -72,6 +92,9 @@ type Generator interface {
 func GeneratorFor(name string) (Generator, error) {
 	if name == TemplateHCPHierarchy {
 		return newHCPHierarchyGenerator(snowflakeMartOpener), nil
+	}
+	if name == TemplateExecutiveSummary {
+		return newExecutiveSummaryGenerator(snowflakeMartOpener, snowflakeTelesenseOpener), nil
 	}
 	g, ok := generators[name]
 	if !ok {
@@ -94,6 +117,10 @@ const (
 	AccountTargetsRequired AccountTargetMode = iota
 	// AccountTargetsSnowflake uses --snowflake-alias, not AWS targets.
 	AccountTargetsSnowflake
+	// AccountTargetsRequiredAndSnowflake needs both AWS account targets
+	// (e.g. --account-alias rh-control,osd-staging-1,osd-staging-2) and
+	// Snowflake (executive-summary only, which joins both in memory).
+	AccountTargetsRequiredAndSnowflake
 )
 
 // AccountTargetModeFor returns how a template uses account targeting flags.
@@ -101,6 +128,8 @@ func AccountTargetModeFor(templateName string) AccountTargetMode {
 	switch templateName {
 	case TemplateHCPHierarchy:
 		return AccountTargetsSnowflake
+	case TemplateExecutiveSummary:
+		return AccountTargetsRequiredAndSnowflake
 	default:
 		return AccountTargetsRequired
 	}

@@ -91,6 +91,24 @@ func TotalSavings(savings []SPMonthlySavings) (netSavings, onDemandEquiv float64
 	return netSavings, onDemandEquiv
 }
 
+// CombineCumulativeCounts sums a cumulative cluster count (e.g. one payer's
+// CumulativeCounts output, keyed by month) across payers, per month -- the
+// All Payers tab's PayerKPIInputs.ClusterCumulativeByMonth (spec 3.3, 6.11).
+// A payer missing a given month contributes 0 for that month rather than
+// excluding it (unlike CombinePercentageAcrossPayers' average, cluster
+// counts are additive across payers/environments, not averaged).
+func CombineCumulativeCounts(perPayer []map[string]int, months []string) map[string]int {
+	out := make(map[string]int, len(months))
+	for _, month := range months {
+		var sum int
+		for _, cumulative := range perPayer {
+			sum += cumulative[month]
+		}
+		out[month] = sum
+	}
+	return out
+}
+
 // AveragePercentage returns the simple arithmetic mean of Percentage across
 // metrics, or nil if metrics is empty -- the window-level average consumed
 // by PayerKPIInputs.SPCoverageAvg / SPUtilizationAvg.

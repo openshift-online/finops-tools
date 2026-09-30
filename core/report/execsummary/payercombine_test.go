@@ -98,6 +98,40 @@ func TestTotalSavings_Empty(t *testing.T) {
 	}
 }
 
+func TestCombineCumulativeCounts_SumsAcrossPayers(t *testing.T) {
+	payer1 := map[string]int{"2026-04": 10, "2026-05": 12}
+	payer2 := map[string]int{"2026-04": 3, "2026-05": 5}
+	payer3 := map[string]int{"2026-04": 0, "2026-05": 1}
+
+	got := CombineCumulativeCounts([]map[string]int{payer1, payer2, payer3}, []string{"2026-04", "2026-05"})
+	if got["2026-04"] != 13 {
+		t.Errorf("2026-04 = %d, want 13 (10+3+0)", got["2026-04"])
+	}
+	if got["2026-05"] != 18 {
+		t.Errorf("2026-05 = %d, want 18 (12+5+1)", got["2026-05"])
+	}
+}
+
+func TestCombineCumulativeCounts_MissingMonthContributesZero(t *testing.T) {
+	payer1 := map[string]int{"2026-04": 10}
+	payer2 := map[string]int{} // no data at all for this payer
+
+	got := CombineCumulativeCounts([]map[string]int{payer1, payer2}, []string{"2026-04", "2026-05"})
+	if got["2026-04"] != 10 {
+		t.Errorf("2026-04 = %d, want 10", got["2026-04"])
+	}
+	if got["2026-05"] != 0 {
+		t.Errorf("2026-05 = %d, want 0", got["2026-05"])
+	}
+}
+
+func TestCombineCumulativeCounts_EmptyPerPayer(t *testing.T) {
+	got := CombineCumulativeCounts(nil, []string{"2026-04"})
+	if got["2026-04"] != 0 {
+		t.Errorf("2026-04 = %d, want 0", got["2026-04"])
+	}
+}
+
 func TestAveragePercentage(t *testing.T) {
 	metrics := []SPMonthlyMetric{{Percentage: 60}, {Percentage: 80}, {Percentage: 100}}
 	got := AveragePercentage(metrics)
