@@ -30,12 +30,10 @@ func listRDSResources(ctx context.Context, client RDSAPI, region string) ([]RDSI
 	instances, err := describeDBInstances(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "instances: "+err.Error())
-		instances = nil
 	}
 	clusters, err = describeDBClusters(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "clusters: "+err.Error())
-		clusters = nil
 	}
 	if len(errs) > 0 {
 		return instances, clusters, fmt.Errorf("%s", strings.Join(errs, "; "))
@@ -49,7 +47,7 @@ func describeDBInstances(ctx context.Context, client RDSAPI, region string) ([]R
 	for {
 		resp, err := client.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{Marker: marker})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, db := range resp.DBInstances {
 			// Cluster members are listed under RDSClusters so Aurora/RDS Multi-AZ
@@ -80,7 +78,7 @@ func describeDBClusters(ctx context.Context, client RDSAPI, region string) ([]RD
 	for {
 		resp, err := client.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{Marker: marker})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, cluster := range resp.DBClusters {
 			out = append(out, RDSCluster{

@@ -130,3 +130,79 @@ func TestListEC2ResourcesKeepsLaterResultsWhenInstancesFail(t *testing.T) {
 		t.Fatalf("nats = %+v", nats)
 	}
 }
+
+type pagingEC2Instances struct {
+	fakeEC2
+	pages   [][]ec2types.Instance
+	pageErr error
+	calls   int
+}
+
+func (f *pagingEC2Instances) DescribeInstances(
+	_ context.Context,
+	_ *ec2.DescribeInstancesInput,
+	_ ...func(*ec2.Options),
+) (*ec2.DescribeInstancesOutput, error) {
+	idx := f.calls
+	f.calls++
+	if idx >= len(f.pages) {
+		if f.pageErr != nil {
+			return nil, f.pageErr
+		}
+		return &ec2.DescribeInstancesOutput{}, nil
+	}
+	out := &ec2.DescribeInstancesOutput{
+		Reservations: []ec2types.Reservation{{Instances: f.pages[idx]}},
+	}
+	if idx+1 < len(f.pages) || f.pageErr != nil {
+		token := "next"
+		out.NextToken = &token
+	}
+	return out, nil
+}
+
+func TestDescribeInstancesKeepsPageWhenLaterPageFails(t *testing.T) {
+	t.Parallel()
+	fake := &pagingEC2Instances{
+		pages: [][]ec2types.Instance{{{
+			InstanceId:   aws.String("i-1"),
+			InstanceType: ec2types.InstanceTypeT3Micro,
+			State:        &ec2types.InstanceState{Name: ec2types.InstanceStateNameRunning},
+		}}},
+		pageErr: fmt.Errorf("throttled"),
+	}
+	got, err := describeInstances(context.Background(), fake, "us-east-1")
+	if err == nil || !strings.Contains(err.Error(), "throttled") {
+		t.Fatalf("error = %v, want throttled", err)
+	}
+	if len(got) != 1 || got[0].InstanceID != "i-1" {
+		t.Fatalf("got %+v, want first page", got)
+	}
+}
+
+func TestListEC2ResourcesKeepsPartialInstancesOnPagingError(t *testing.T) {
+	t.Parallel()
+	fake := &pagingEC2Instances{
+		pages: [][]ec2types.Instance{{{
+			InstanceId:   aws.String("i-1"),
+			InstanceType: ec2types.InstanceTypeT3Micro,
+			State:        &ec2types.InstanceState{Name: ec2types.InstanceStateNameRunning},
+		}}},
+		pageErr: fmt.Errorf("throttled"),
+	}
+	fake.volumes = []ec2types.Volume{{
+		VolumeId: aws.String("vol-1"),
+		Size:     aws.Int32(8),
+		State:    ec2types.VolumeStateAvailable,
+	}}
+	instances, volumes, _, _, _, err := listEC2Resources(context.Background(), fake, "us-east-1")
+	if err == nil || !strings.Contains(err.Error(), "instances") {
+		t.Fatalf("error = %v, want instances", err)
+	}
+	if len(instances) != 1 || instances[0].InstanceID != "i-1" {
+		t.Fatalf("instances = %+v, want first page kept", instances)
+	}
+	if len(volumes) != 1 || volumes[0].VolumeID != "vol-1" {
+		t.Fatalf("volumes = %+v", volumes)
+	}
+}

@@ -235,8 +235,10 @@ var (
 // scanRegionalResources lists EC2, RDS, ELB, and Lambda in one region.
 // A failure for one service is recorded as a RegionWarning; other services in
 // that region are still collected unless the region context is already done.
-// Context cancel/deadline errors are not recorded here — the caller adds a
-// single timeout warning.
+// Context cancel/deadline errors are suppressed only when the enclosing region
+// context is done — the caller then adds a single timeout warning. HTTP-client
+// timeouts can surface as DeadlineExceeded while the region context is still
+// active; those must still be recorded.
 func scanRegionalResources(
 	ctx context.Context,
 	cfg aws.Config,
@@ -246,7 +248,7 @@ func scanRegionalResources(
 	warnings *[]RegionWarning,
 ) {
 	record := func(service string, err error) {
-		if err == nil || isContextAbort(err) {
+		if err == nil || shouldSuppressServiceWarning(ctx, err) {
 			return
 		}
 		mu.Lock()
@@ -313,18 +315,19 @@ func scanGlobalResources(ctx context.Context, cfg aws.Config, inv *AccountInvent
 	if ctx.Err() != nil {
 		return
 	}
-	if zones, err := listGlobalRoute53(ctx, newRoute53Client(cfg)); err != nil {
-		if !isContextAbort(err) {
-			inv.Warnings = append(inv.Warnings, "route53: "+err.Error())
-		}
-	} else {
+	zones, err := listGlobalRoute53(ctx, newRoute53Client(cfg))
+	if err != nil && !shouldSuppressServiceWarning(ctx, err) {
+		inv.Warnings = append(inv.Warnings, "route53: "+err.Error())
+	}
+	// Keep zones listed before a mid-pagination failure.
+	if len(zones) > 0 {
 		inv.HostedZones = zones
 	}
 	if ctx.Err() != nil {
 		return
 	}
 	buckets, err := listGlobalS3(ctx, newS3Client(cfg))
-	if err != nil && !isContextAbort(err) {
+	if err != nil && !shouldSuppressServiceWarning(ctx, err) {
 		inv.Warnings = append(inv.Warnings, "s3: "+err.Error())
 	}
 	// Keep buckets whose names we listed even when some GetBucketLocation calls failed.
@@ -335,6 +338,14 @@ func scanGlobalResources(ctx context.Context, cfg aws.Config, inv *AccountInvent
 
 func isContextAbort(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// shouldSuppressServiceWarning is true only for cancel/deadline errors that
+// belong to the enclosing scan context. That lets the caller emit one timeout
+// warning instead of per-service noise. HTTP request timeouts can also be
+// DeadlineExceeded while ctx is still active — those must not be suppressed.
+func shouldSuppressServiceWarning(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && isContextAbort(err)
 }
 
 func sortInventory(inv *AccountInventory) {

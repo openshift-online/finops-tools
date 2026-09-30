@@ -691,3 +691,105 @@ func TestScanGlobalResourcesKeepsBucketsWhenLocationFails(t *testing.T) {
 		t.Fatalf("warnings = %+v", inv.Warnings)
 	}
 }
+
+func TestScanGlobalResourcesKeepsZonesWhenLaterPageFails(t *testing.T) {
+	origR53 := listGlobalRoute53
+	origS3 := listGlobalS3
+	t.Cleanup(func() {
+		listGlobalRoute53 = origR53
+		listGlobalS3 = origS3
+	})
+
+	listGlobalRoute53 = func(context.Context, Route53API) ([]HostedZone, error) {
+		return []HostedZone{{Name: "kept.example.", ZoneID: "/hostedzone/Z1"}}, fmt.Errorf("throttled")
+	}
+	listGlobalS3 = func(context.Context, S3API) ([]S3Bucket, error) {
+		return nil, nil
+	}
+
+	inv := &AccountInventory{}
+	scanGlobalResources(context.Background(), aws.Config{}, inv)
+	if len(inv.HostedZones) != 1 || inv.HostedZones[0].Name != "kept.example." {
+		t.Fatalf("zones = %+v", inv.HostedZones)
+	}
+	if len(inv.Warnings) != 1 || !strings.Contains(inv.Warnings[0], "route53:") {
+		t.Fatalf("warnings = %+v", inv.Warnings)
+	}
+}
+
+func TestScanGlobalResourcesRecordsHTTPDeadlineWhileScanCtxAlive(t *testing.T) {
+	origR53 := listGlobalRoute53
+	origS3 := listGlobalS3
+	t.Cleanup(func() {
+		listGlobalRoute53 = origR53
+		listGlobalS3 = origS3
+	})
+
+	listGlobalRoute53 = func(context.Context, Route53API) ([]HostedZone, error) {
+		// Simulate HTTP-client timeout: DeadlineExceeded while enclosing scan ctx is still active.
+		return nil, context.DeadlineExceeded
+	}
+	listGlobalS3 = func(context.Context, S3API) ([]S3Bucket, error) {
+		return nil, nil
+	}
+
+	inv := &AccountInventory{}
+	scanGlobalResources(context.Background(), aws.Config{}, inv)
+	if len(inv.Warnings) != 1 || !strings.Contains(inv.Warnings[0], "route53:") {
+		t.Fatalf("warnings = %+v, want route53 HTTP timeout warning", inv.Warnings)
+	}
+}
+
+func TestScanRegionalResourcesRecordsHTTPDeadlineWhileScanCtxAlive(t *testing.T) {
+	origEC2 := listRegionalEC2
+	origRDS := listRegionalRDS
+	origLBs := listRegionalLBs
+	origLambda := listRegionalLambda
+	t.Cleanup(func() {
+		listRegionalEC2 = origEC2
+		listRegionalRDS = origRDS
+		listRegionalLBs = origLBs
+		listRegionalLambda = origLambda
+	})
+
+	listRegionalEC2 = func(context.Context, EC2API, string) ([]EC2Instance, []EBSVolume, []ElasticIP, []NATGateway, []VPC, error) {
+		return nil, nil, nil, nil, nil, context.DeadlineExceeded
+	}
+	listRegionalRDS = func(context.Context, RDSAPI, string) ([]RDSInstance, []RDSCluster, error) {
+		return nil, nil, nil
+	}
+	listRegionalLBs = func(context.Context, ELBV2API, ELBAPI, string) ([]LoadBalancer, error) {
+		return nil, nil
+	}
+	listRegionalLambda = func(context.Context, LambdaAPI, string) ([]LambdaFunction, error) {
+		return nil, nil
+	}
+
+	inv := &AccountInventory{}
+	var mu sync.Mutex
+	var warnings []RegionWarning
+	scanRegionalResources(context.Background(), aws.Config{}, "us-east-1", "111111111111", inv, &mu, &warnings)
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Message, "ec2:") {
+		t.Fatalf("warnings = %+v, want ec2 HTTP timeout warning", warnings)
+	}
+}
+
+func TestShouldSuppressServiceWarning(t *testing.T) {
+	t.Parallel()
+	alive := context.Background()
+	if shouldSuppressServiceWarning(alive, context.DeadlineExceeded) {
+		t.Fatal("must not suppress HTTP-style deadline while scan ctx is alive")
+	}
+	if shouldSuppressServiceWarning(alive, fmt.Errorf("access denied")) {
+		t.Fatal("must not suppress non-context errors")
+	}
+
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !shouldSuppressServiceWarning(done, context.Canceled) {
+		t.Fatal("must suppress when enclosing ctx is done")
+	}
+	if shouldSuppressServiceWarning(done, fmt.Errorf("access denied")) {
+		t.Fatal("must not suppress non-context errors even when ctx is done")
+	}
+}

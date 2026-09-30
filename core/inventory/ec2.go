@@ -96,27 +96,22 @@ func listEC2Resources(ctx context.Context, client EC2API, region string) (
 	instances, err = describeInstances(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "instances: "+err.Error())
-		instances = nil
 	}
 	unattached, err = describeUnattachedVolumes(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "volumes: "+err.Error())
-		unattached = nil
 	}
 	eips, err = describeUnassociatedEIPs(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "addresses: "+err.Error())
-		eips = nil
 	}
 	nats, err = describeNATGateways(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "nat-gateways: "+err.Error())
-		nats = nil
 	}
 	vpcs, err = describeVPCs(ctx, client, region)
 	if err != nil {
 		errs = append(errs, "vpcs: "+err.Error())
-		vpcs = nil
 	}
 
 	if len(errs) > 0 {
@@ -131,7 +126,7 @@ func describeInstances(ctx context.Context, client EC2API, region string) ([]EC2
 	for {
 		resp, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{NextToken: token})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, res := range resp.Reservations {
 			for _, inst := range res.Instances {
@@ -164,7 +159,7 @@ func describeUnattachedVolumes(ctx context.Context, client EC2API, region string
 			NextToken: token,
 		})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, vol := range resp.Volumes {
 			out = append(out, EBSVolume{
@@ -206,7 +201,7 @@ func describeNATGateways(ctx context.Context, client EC2API, region string) ([]N
 	for {
 		resp, err := client.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{NextToken: token})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, gw := range resp.NatGateways {
 			if gw.State == ec2types.NatGatewayStateDeleted {
@@ -232,7 +227,7 @@ func describeVPCs(ctx context.Context, client EC2API, region string) ([]VPC, err
 	for {
 		resp, err := client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{NextToken: token})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, vpc := range resp.Vpcs {
 			out = append(out, VPC{
