@@ -17,7 +17,7 @@ type mockRows struct {
 	err   error
 }
 
-func (m *mockRows) Next() bool  { m.index++; return m.index <= len(m.data) }
+func (m *mockRows) Next() bool   { m.index++; return m.index <= len(m.data) }
 func (m *mockRows) Close() error { return nil }
 func (m *mockRows) Err() error   { return m.err }
 func (m *mockRows) Scan(dest ...any) error {
@@ -44,6 +44,13 @@ func (m *mockRows) Scan(dest ...any) error {
 			} else if s, ok := row[i].(string); ok {
 				v := s
 				*p = &v
+			}
+		case *int64:
+			switch v := row[i].(type) {
+			case int64:
+				*p = v
+			case int:
+				*p = int64(v)
 			}
 		}
 	}
