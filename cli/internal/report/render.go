@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/openshift-online/finops-tools/cli/internal/format"
-	corereport "github.com/openshift-online/finops-tools/core/report"
 	"github.com/openshift-online/finops-tools/core/cost"
+	corereport "github.com/openshift-online/finops-tools/core/report"
 )
 
 const costsTemplate = "costs"
@@ -32,19 +32,19 @@ func costsTemplateCompiled() (*template.Template, error) {
 
 // CostsReportView is the template context for the costs HTML report.
 type CostsReportView struct {
-	GeneratedAt     string
-	AccountSummary  string
-	StartDate       string
-	EndDate         string
-	Currency        string
-	Metric          string
-	Total           float64
-	TotalFormatted  string
-	ByAccount       []BreakdownRowView
-	ByService       []BreakdownRowView
-	ByOU            []BreakdownRowView
-	Daily           []cost.DailyCostItem
-	DailyChartSVG   template.HTML
+	GeneratedAt    string
+	AccountSummary string
+	StartDate      string
+	EndDate        string
+	Currency       string
+	Metric         string
+	Total          float64
+	TotalFormatted string
+	ByAccount      []BreakdownRowView
+	ByService      []BreakdownRowView
+	ByOU           []BreakdownRowView
+	Daily          []cost.DailyCostItem
+	DailyChartSVG  template.HTML
 }
 
 // BreakdownRowView is one breakdown table row for templates.
