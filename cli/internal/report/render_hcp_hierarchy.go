@@ -47,6 +47,7 @@ type HCPHierarchyRowView struct {
 	SCStatusClass       string
 	HierarchyComplete   bool
 	BillingModel        string
+	Environment         string
 }
 
 // HCPHierarchyReportView is the template context for hcp-hierarchy.html.
@@ -86,6 +87,7 @@ func NewHCPHierarchyReportView(r corehcp.Report) HCPHierarchyReportView {
 			SCStatusClass:       tierStatusClass(row.SCStatus),
 			HierarchyComplete:   row.HierarchyComplete,
 			BillingModel:        displayOrDash(row.BillingModel),
+			Environment:         displayOrDash(row.Environment),
 		})
 	}
 

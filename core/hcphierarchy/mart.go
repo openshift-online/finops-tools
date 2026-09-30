@@ -16,7 +16,7 @@ import (
 	"github.com/openshift-online/finops-tools/core/sqlrows"
 )
 
-const defaultMartView = "HCMFINOPS_DB.MARTS.OCM_CLOUDABILITY_MAPPING"
+const defaultMartView = "HCMFINOPS_DB.MARTS.OCM_MAPPING"
 
 // SnowflakeQueryer executes a SQL query and returns iterable rows.
 // *sql.DB satisfies this interface via a thin adapter; inject a mock in tests.
@@ -59,6 +59,7 @@ type HierarchyRow struct {
 	BillingModel       string
 	ServiceLevel       string
 	SubscriptionStatus string
+	Environment        string // Production, Stage, or Integration
 }
 
 // Report holds the fully resolved hierarchy returned by Build().
@@ -129,6 +130,7 @@ func Build(ctx context.Context, sf SnowflakeQueryer, martView string) (Report, e
 			mcName, mcFleetID, mcAccountID, mcRegion, mcStatus          *string
 			scName, scFleetID, scAccountID, scRegion, scStatus          *string
 			fleetSector, billingModel, serviceLevel, subscriptionStatus *string
+			environment                                                 *string
 		)
 		if err := rows.Scan(
 			&customerOCMID, &customerClusterID, &customerClusterName,
@@ -138,6 +140,7 @@ func Build(ctx context.Context, sf SnowflakeQueryer, martView string) (Report, e
 			&mcName, &mcFleetID, &mcAccountID, &mcRegion, &mcStatus,
 			&scName, &scFleetID, &scAccountID, &scRegion, &scStatus,
 			&fleetSector, &billingModel, &serviceLevel, &subscriptionStatus,
+			&environment,
 		); err != nil {
 			return Report{}, fmt.Errorf("scan hierarchy row: %w", err)
 		}
@@ -166,6 +169,7 @@ func Build(ctx context.Context, sf SnowflakeQueryer, martView string) (Report, e
 			BillingModel:         stringOrEmpty(billingModel),
 			ServiceLevel:         stringOrEmpty(serviceLevel),
 			SubscriptionStatus:   stringOrEmpty(subscriptionStatus),
+			Environment:          stringOrEmpty(environment),
 		}
 		if hierarchyComplete != nil {
 			r.HierarchyComplete = *hierarchyComplete
@@ -215,7 +219,8 @@ SELECT
     w.HCP_SECTOR                    AS fleet_sector,
     w.BILLING_MODEL                 AS billing_model,
     w.SERVICE_LEVEL,
-    w.SUBSCRIPTION_STATUS
+    w.SUBSCRIPTION_STATUS,
+    w.ENVIRONMENT
 FROM %s w
 LEFT JOIN %s mc ON w.HCP_MC_FLEET_ID = mc.MC_FLEET_ID
 LEFT JOIN %s sc ON w.HCP_SC_FLEET_ID = sc.SC_FLEET_ID

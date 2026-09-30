@@ -6,7 +6,7 @@ func TestValidateQualifiedIdentifier_AcceptsValid(t *testing.T) {
 	for _, name := range []string{
 		"TABLE",
 		"_private",
-		"HCMFINOPS_DB.MARTS.OCM_CLOUDABILITY_MAPPING",
+		"HCMFINOPS_DB.MARTS.OCM_MAPPING",
 		"MY_DB.SCHEMA.TABLE",
 	} {
 		if err := ValidateQualifiedIdentifier(name, 3); err != nil {
