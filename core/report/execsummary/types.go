@@ -91,7 +91,7 @@ type AnomalyRecord struct {
 	CurrentCost float64
 	MeanCost    float64
 	// ZScore is the number of standard deviations above the historical mean.
-	ZScore      float64
+	ZScore float64
 }
 
 // PayerKPIs holds the computed key performance indicators for one payer or the
