@@ -296,4 +296,88 @@ func TestComputeRegionMonthMetrics_MCAndSCCostsCombineInSameRegion(t *testing.T)
 	if got[0].InfraCost != 50 {
 		t.Errorf("InfraCost = %v, want 50 (30 MC + 20 SC)", got[0].InfraCost)
 	}
+	if got[0].MCCost != 30 {
+		t.Errorf("MCCost = %v, want 30", got[0].MCCost)
+	}
+	if got[0].SCCost != 20 {
+		t.Errorf("SCCost = %v, want 20", got[0].SCCost)
+	}
+}
+
+func TestComputeRegionMonthMetrics_ExtIntVCPUSplitAndClusterCounts(t *testing.T) {
+	clusters := []ClusterRegionInput{
+		{ClusterID: "ext1", CustomerRegion: "us-east-1", Classification: "external"},
+		{ClusterID: "ext2", CustomerRegion: "us-east-1", Classification: "external"},
+		{ClusterID: "int1", CustomerRegion: "us-east-1", Classification: "internal"},
+	}
+	vcpu := []ClusterMonthVCPU{
+		{ClusterID: "ext1", Month: "2026-05", VCPUHours: 100},
+		{ClusterID: "ext2", Month: "2026-05", VCPUHours: 200},
+		{ClusterID: "int1", Month: "2026-05", VCPUHours: 50},
+	}
+	got := ComputeRegionMonthMetrics(clusters, vcpu, nil, nil, nil)
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+	r := got[0]
+	if r.ExtVCPUHours != 300 {
+		t.Errorf("ExtVCPUHours = %v, want 300", r.ExtVCPUHours)
+	}
+	if r.IntVCPUHours != 50 {
+		t.Errorf("IntVCPUHours = %v, want 50", r.IntVCPUHours)
+	}
+	if r.VCPUHours != 350 {
+		t.Errorf("VCPUHours = %v, want 350", r.VCPUHours)
+	}
+	if r.ClusterCount != 3 {
+		t.Errorf("ClusterCount = %v, want 3", r.ClusterCount)
+	}
+	if r.ExtClusterCount != 2 {
+		t.Errorf("ExtClusterCount = %v, want 2", r.ExtClusterCount)
+	}
+}
+
+func TestComputeRegionMonthMetrics_PerVCPUDerivedMetrics(t *testing.T) {
+	clusters := []ClusterRegionInput{
+		{ClusterID: "c1", CustomerRegion: "us-east-1", MCAccountID: "111111111111", MCRegion: "us-east-1", Classification: "external"},
+	}
+	vcpu := []ClusterMonthVCPU{
+		{ClusterID: "c1", Month: "2026-05", VCPUHours: 1000},
+	}
+	costs := []CostRecord{
+		{Month: "2026-05", AccountID: "111111111111", Cost: 20},
+	}
+	got := ComputeRegionMonthMetrics(clusters, vcpu, costs, nil, nil)
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+	r := got[0]
+	wantRevenue := Revenue(1000, "external")
+	if r.CostPerVCPU != 20.0/1000 {
+		t.Errorf("CostPerVCPU = %v, want %v", r.CostPerVCPU, 20.0/1000)
+	}
+	if r.RevenuePerVCPU != wantRevenue/1000 {
+		t.Errorf("RevenuePerVCPU = %v, want %v", r.RevenuePerVCPU, wantRevenue/1000)
+	}
+	wantMargin := (wantRevenue - 20) / 1000
+	if r.MarginPerVCPU != wantMargin {
+		t.Errorf("MarginPerVCPU = %v, want %v", r.MarginPerVCPU, wantMargin)
+	}
+}
+
+func TestComputeRegionMonthMetrics_PerVCPUMetricsZeroWhenNoExternalVCPU(t *testing.T) {
+	clusters := []ClusterRegionInput{
+		{ClusterID: "c1", CustomerRegion: "us-east-1", Classification: "internal"},
+	}
+	vcpu := []ClusterMonthVCPU{
+		{ClusterID: "c1", Month: "2026-05", VCPUHours: 500},
+	}
+	got := ComputeRegionMonthMetrics(clusters, vcpu, nil, nil, nil)
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+	r := got[0]
+	if r.CostPerVCPU != 0 || r.RevenuePerVCPU != 0 || r.MarginPerVCPU != 0 {
+		t.Errorf("per-vCPU metrics = %+v, want all 0 when ExtVCPUHours is 0", r)
+	}
 }

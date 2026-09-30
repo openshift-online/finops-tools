@@ -97,3 +97,66 @@ func TestClusterMoMDelta_NegativeDelta(t *testing.T) {
 		t.Errorf("got = %v, want -10", got)
 	}
 }
+
+func TestSortProductTypes_CanonicalOrderFirst(t *testing.T) {
+	got := SortProductTypes([]string{"OSD Trial", "Zebra Product", "OSD", "ROSA Classic", "ROSA HCP"})
+	want := []string{"ROSA HCP", "ROSA Classic", "OSD", "OSD Trial", "Zebra Product"}
+	if len(got) != len(want) {
+		t.Fatalf("got = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSortProductTypes_UnlistedProductsAlphabeticalAfterCanonical(t *testing.T) {
+	got := SortProductTypes([]string{"Zebra", "Alpha", "OSD"})
+	want := []string{"OSD", "Alpha", "Zebra"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestBuildClusterGrowthPoints_CumulativeAndDeltaPerProduct(t *testing.T) {
+	rows := []ClusterGrowthInput{
+		{Month: "2025-12", ProductType: "ROSA HCP", NewClusters: 10}, // before window
+		{Month: "2026-01", ProductType: "ROSA HCP", NewClusters: 5},
+		{Month: "2026-02", ProductType: "ROSA HCP", NewClusters: 3},
+		{Month: "2026-01", ProductType: "OSD", NewClusters: 2},
+	}
+	months := []string{"2026-01", "2026-02"}
+	got := BuildClusterGrowthPoints(rows, months)
+
+	if len(got) != 4 { // 2 products x 2 months
+		t.Fatalf("len(got) = %d, want 4: %+v", len(got), got)
+	}
+	// ROSA HCP sorts before OSD per canonical order.
+	if got[0].ProductType != "ROSA HCP" || got[0].Month != "2026-01" {
+		t.Fatalf("got[0] = %+v, want ROSA HCP/2026-01 first", got[0])
+	}
+	if got[0].Cumulative != 15 { // 10 history + 5
+		t.Errorf("got[0].Cumulative = %d, want 15", got[0].Cumulative)
+	}
+	if got[0].NewClusters != 5 {
+		t.Errorf("got[0].NewClusters = %d, want 5", got[0].NewClusters)
+	}
+	if got[1].Month != "2026-02" || got[1].Cumulative != 18 {
+		t.Errorf("got[1] = %+v, want 2026-02/cumulative 18", got[1])
+	}
+	if got[1].NewClusters != 3 {
+		t.Errorf("got[1].NewClusters = %d, want 3", got[1].NewClusters)
+	}
+
+	osd0 := got[2]
+	if osd0.ProductType != "OSD" || osd0.Month != "2026-01" || osd0.Cumulative != 2 {
+		t.Errorf("got[2] = %+v, want OSD/2026-01/cumulative 2", osd0)
+	}
+	osd1 := got[3]
+	if osd1.Month != "2026-02" || osd1.Cumulative != 2 || osd1.NewClusters != 0 {
+		t.Errorf("got[3] = %+v, want OSD/2026-02/cumulative 2/new 0 (carried forward)", osd1)
+	}
+}

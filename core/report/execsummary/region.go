@@ -64,12 +64,16 @@ func Revenue(vcpuHours float64, classification string) float64 {
 
 // RegionMonthMetrics holds spec 6.3/6.4 per-(region, month) output: the
 // two-part regional cost (direct MC/SC infra cost plus proportionally
-// allocated shared-network cost) and net revenue.
+// allocated shared-network cost), net revenue, and the additional
+// breakdowns the Regional Performance Heatmap (spec 8.4) attaches to every
+// populated cell.
 type RegionMonthMetrics struct {
 	Region string
 	Month  string
-	// InfraCost is direct MC + SC account cost attributed to this region
-	// (spec 6.3 part 1).
+	// MCCost and SCCost are direct Management/Service Cluster account cost
+	// attributed to this region (spec 6.3 part 1); InfraCost is their sum.
+	MCCost    float64
+	SCCost    float64
 	InfraCost float64
 	// NetworkCost is the shared-infrastructure-account cost allocated to
 	// this region proportionally by its share of that month's total
@@ -82,9 +86,22 @@ type RegionMonthMetrics struct {
 	Revenue float64
 	// NetRevenue is Revenue - TotalCost (spec 6.4).
 	NetRevenue float64
-	// VCPUHours is this region's total vCPU-hours in this month, exposed so
-	// callers (e.g. the HCP Cost Efficiency tab) don't need to recompute it.
+	// VCPUHours is ExtVCPUHours + IntVCPUHours.
 	VCPUHours float64
+	// ExtVCPUHours and IntVCPUHours split VCPUHours by cluster
+	// classification (spec 8.4 ext_vcpu/int_vcpu cell attributes).
+	ExtVCPUHours float64
+	IntVCPUHours float64
+	// ClusterCount and ExtClusterCount are the number of distinct clusters
+	// (total, and external-only) attributed to this region in this month.
+	ClusterCount    int
+	ExtClusterCount int
+	// CostPerVCPU, RevenuePerVCPU, and MarginPerVCPU are TotalCost/Revenue/
+	// (Revenue-TotalCost) divided by ExtVCPUHours (spec 8.5 formulas); 0
+	// when ExtVCPUHours is 0.
+	CostPerVCPU    float64
+	RevenuePerVCPU float64
+	MarginPerVCPU  float64
 }
 
 // ComputeRegionMonthMetrics implements spec sections 6.1, 6.3, and 6.4:
@@ -137,9 +154,13 @@ func ComputeRegionMonthMetrics(
 	}
 
 	type accum struct {
-		infraCost float64
-		vcpuHours float64
-		revenue   float64
+		mcCost      float64
+		scCost      float64
+		extVCPU     float64
+		intVCPU     float64
+		revenue     float64
+		clusters    map[string]bool
+		extClusters map[string]bool
 	}
 	byMonthRegion := make(map[string]map[string]*accum)
 	totalInfraAccountCostByMonth := make(map[string]float64)
@@ -153,7 +174,7 @@ func ComputeRegionMonthMetrics(
 		}
 		a, ok := regions[region]
 		if !ok {
-			a = &accum{}
+			a = &accum{clusters: make(map[string]bool), extClusters: make(map[string]bool)}
 			regions[region] = a
 		}
 		return a
@@ -169,10 +190,10 @@ func ComputeRegionMonthMetrics(
 			continue
 		}
 		if region, ok := mcAccountRegion[cr.AccountID]; ok {
-			get(cr.Month, region).infraCost += cr.Cost
+			get(cr.Month, region).mcCost += cr.Cost
 		}
 		if region, ok := scAccountRegion[cr.AccountID]; ok {
-			get(cr.Month, region).infraCost += cr.Cost
+			get(cr.Month, region).scCost += cr.Cost
 		}
 	}
 
@@ -187,7 +208,13 @@ func ComputeRegionMonthMetrics(
 			continue // unknown cluster: counts toward the total, not toward any region
 		}
 		a := get(v.Month, c.Region())
-		a.vcpuHours += v.VCPUHours
+		a.clusters[c.ClusterID] = true
+		if IsExternal(c.Classification) {
+			a.extVCPU += v.VCPUHours
+			a.extClusters[c.ClusterID] = true
+		} else {
+			a.intVCPU += v.VCPUHours
+		}
 		a.revenue += Revenue(v.VCPUHours, c.Classification)
 	}
 
@@ -196,23 +223,40 @@ func ComputeRegionMonthMetrics(
 		totalInfra := totalInfraAccountCostByMonth[month]
 		totalVCPU := totalVCPUHoursByMonth[month]
 		for region, a := range regions {
+			vcpuHours := a.extVCPU + a.intVCPU
+			infraCost := a.mcCost + a.scCost
 			var networkCost float64
 			if totalVCPU != 0 {
-				networkCost = totalInfra * a.vcpuHours / totalVCPU
+				networkCost = totalInfra * vcpuHours / totalVCPU
 			}
-			totalCost := a.infraCost + networkCost
-			if a.vcpuHours == 0 && totalCost == 0 {
+			totalCost := infraCost + networkCost
+			if vcpuHours == 0 && totalCost == 0 {
 				continue // spec 6.4: exclude cells with no activity at all
 			}
+			var costPerVCPU, revenuePerVCPU, marginPerVCPU float64
+			if a.extVCPU != 0 {
+				costPerVCPU = totalCost / a.extVCPU
+				revenuePerVCPU = a.revenue / a.extVCPU
+				marginPerVCPU = (a.revenue - totalCost) / a.extVCPU
+			}
 			out = append(out, RegionMonthMetrics{
-				Region:      region,
-				Month:       month,
-				InfraCost:   a.infraCost,
-				NetworkCost: networkCost,
-				TotalCost:   totalCost,
-				Revenue:     a.revenue,
-				NetRevenue:  a.revenue - totalCost,
-				VCPUHours:   a.vcpuHours,
+				Region:          region,
+				Month:           month,
+				MCCost:          a.mcCost,
+				SCCost:          a.scCost,
+				InfraCost:       infraCost,
+				NetworkCost:     networkCost,
+				TotalCost:       totalCost,
+				Revenue:         a.revenue,
+				NetRevenue:      a.revenue - totalCost,
+				VCPUHours:       vcpuHours,
+				ExtVCPUHours:    a.extVCPU,
+				IntVCPUHours:    a.intVCPU,
+				ClusterCount:    len(a.clusters),
+				ExtClusterCount: len(a.extClusters),
+				CostPerVCPU:     costPerVCPU,
+				RevenuePerVCPU:  revenuePerVCPU,
+				MarginPerVCPU:   marginPerVCPU,
 			})
 		}
 	}
