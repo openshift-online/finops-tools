@@ -14,18 +14,19 @@ import (
 )
 
 var (
-	reportGenerateAccount         string
-	reportGenerateAccountAliases  string
-	reportGenerateFormat          string
-	reportGenerateOU              string
-	reportGenerateOutput          string
-	reportGeneratePayer           string
-	reportGenerateQuiet           bool
-	reportGenerateTag             string
-	reportGenerateSkipOrgCache    bool
-	reportGenerateRefreshOrgCache bool
-	reportCreateSnowflakeAlias    string
-	reportGenerateWorkers         int
+	reportGenerateAccount          string
+	reportGenerateAccountAliases   string
+	reportGenerateFormat           string
+	reportGenerateOU               string
+	reportGenerateOutput           string
+	reportGeneratePayer            string
+	reportGenerateQuiet            bool
+	reportGenerateTag              string
+	reportGenerateSkipOrgCache     bool
+	reportGenerateRefreshOrgCache  bool
+	reportCreateSnowflakeAlias     string
+	reportCreateSnowflakeProdAlias string
+	reportGenerateWorkers          int
 )
 
 var reportCreateCmd = &cobra.Command{
@@ -89,6 +90,7 @@ func init() {
 	})
 	reportCreateCmd.Flags().StringVar(&reportGenerateFormat, "format", reportpkg.FormatHTML, "Output format (supported: html)")
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
+	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeProdAlias, "snowflake-prod-alias", "", "Snowflake account alias for the Telesense/prod connection (executive-summary template only)")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
@@ -155,15 +157,16 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	in := reportpkg.GenerateInput{
-		Format:          format,
-		Targets:         targets,
-		Range:           dateRange,
-		Progress:        status,
-		Now:             time.Now().UTC(),
-		ConfigPath:      cfgPath,
-		SnowflakeAlias:  snowflakeAlias,
-		Workers:         reportGenerateWorkers,
-		SelectionRootID: sel.SelectionRootID,
+		Format:             format,
+		Targets:            targets,
+		Range:              dateRange,
+		Progress:           status,
+		Now:                time.Now().UTC(),
+		ConfigPath:         cfgPath,
+		SnowflakeAlias:     snowflakeAlias,
+		SnowflakeProdAlias: strings.TrimSpace(reportCreateSnowflakeProdAlias),
+		Workers:            reportGenerateWorkers,
+		SelectionRootID:    sel.SelectionRootID,
 	}
 	if err := gen.Validate(in); err != nil {
 		return err
