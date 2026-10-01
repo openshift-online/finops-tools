@@ -26,7 +26,7 @@ type CostAnomaliesAPI interface {
 
 // RootCause is one root-cause attribution for an anomaly.
 type RootCause struct {
-	Account      string  // linked account ID
+	Account      string // linked account ID
 	AccountName  string
 	Region       string
 	Service      string
@@ -36,17 +36,17 @@ type RootCause struct {
 
 // Anomaly is one detected cost anomaly from AWS Cost Anomaly Detection.
 type Anomaly struct {
-	ID             string
-	StartDate      string  // YYYY-MM-DD
-	EndDate        string  // YYYY-MM-DD; empty if still open
-	Service        string  // DimensionValue (service or account dimension)
-	CurrentScore   float64 // anomaly score at time of report
-	MaxScore       float64
-	TotalImpact    float64 // actual − expected spend (dollars)
-	ActualSpend    float64
-	ExpectedSpend  float64
-	ImpactPct      float64 // (TotalImpact / ExpectedSpend) × 100
-	RootCauses     []RootCause
+	ID            string
+	StartDate     string  // YYYY-MM-DD
+	EndDate       string  // YYYY-MM-DD; empty if still open
+	Service       string  // DimensionValue (service or account dimension)
+	CurrentScore  float64 // anomaly score at time of report
+	MaxScore      float64
+	TotalImpact   float64 // actual − expected spend (dollars)
+	ActualSpend   float64
+	ExpectedSpend float64
+	ImpactPct     float64 // (TotalImpact / ExpectedSpend) × 100
+	RootCauses    []RootCause
 }
 
 // Report holds all anomalies in the requested date range.
@@ -66,6 +66,10 @@ func Build(ctx context.Context, accounts []cost.AccountTarget, dr cost.DateRange
 	return buildWith(ctx, defaultCEClientFactory, accounts, dr)
 }
 
+// timeNow is overridable in tests so clamp behavior doesn't depend on the
+// wall clock at test-run time.
+var timeNow = time.Now
+
 type ceClientFactory func(cfg aws.Config) CostAnomaliesAPI
 
 func defaultCEClientFactory(cfg aws.Config) CostAnomaliesAPI {
@@ -80,11 +84,33 @@ func defaultCEClientFactory(cfg aws.Config) CostAnomaliesAPI {
 	return apilog.WrapCostAnomalies(inner)
 }
 
+// maxAnomalyLookbackDays is AWS Cost Anomaly Detection's hard limit on how far
+// back GetAnomalies can query. It is enforced server-side (not documented up
+// front): requesting an earlier StartDate fails with a ValidationException
+// like "Earliest supported detectionDate for GetRecentAnomalies is
+// <90 days before today>". Callers such as the multi-month executive-summary
+// report may legitimately want a wider overall report window than 90 days;
+// clamp here so every caller is protected rather than duplicating this limit
+// at each call site.
+const maxAnomalyLookbackDays = 90
+
+// clampAnomalyLookback narrows dr.Start to the AWS-supported window when the
+// caller's requested range starts further back than maxAnomalyLookbackDays
+// before now. dr.End is left untouched.
+func clampAnomalyLookback(dr cost.DateRange, now time.Time) cost.DateRange {
+	earliest := now.AddDate(0, 0, -maxAnomalyLookbackDays)
+	if dr.Start.Before(earliest) {
+		dr.Start = earliest
+	}
+	return dr
+}
+
 // buildWith is the testable core: accepts any CostAnomaliesAPI factory.
 func buildWith(ctx context.Context, newClient ceClientFactory, accounts []cost.AccountTarget, dr cost.DateRange) (Report, error) {
 	if len(accounts) == 0 {
 		return Report{}, fmt.Errorf("at least one account required")
 	}
+	dr = clampAnomalyLookback(dr, timeNow().UTC())
 
 	ceClients := make(map[string]CostAnomaliesAPI)
 	seenAnomalies := make(map[string]struct{})
