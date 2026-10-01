@@ -60,6 +60,20 @@ func execSummaryAnomalySeverity(impact float64) BadgeView {
 	}
 }
 
+// payerDisplayLabel converts the internal lowercase payer tag (used
+// throughout core/report/execsummary as a stable machine-readable join/group
+// key, e.g. "production") into its human-readable label ("Production") for
+// table display. Falls back to the raw tag when it doesn't match a known
+// payer, so unexpected values still render instead of disappearing.
+func payerDisplayLabel(tag string) string {
+	for _, pd := range execSummaryPayerDefs {
+		if string(pd.ID) == tag {
+			return pd.Label
+		}
+	}
+	return tag
+}
+
 // buildAnomalyRows implements spec 7.4: a single combined table of AWS ML
 // anomalies (top 10 by total impact, descending) followed by statistical
 // anomalies (top 10 of the spec 6.9-capped 15, already sorted by |z-score|
@@ -74,7 +88,7 @@ func buildAnomalyRows(p execsum.PayerReport) ([]AnomalyRowView, bool) {
 	rows := make([]AnomalyRowView, 0, len(ml)+anomalyDisplayLimit)
 	for _, a := range ml {
 		rows = append(rows, AnomalyRowView{
-			Payer:           a.Payer,
+			Payer:           payerDisplayLabel(a.Payer),
 			Service:         a.Service,
 			Month:           a.StartDate,
 			ImpactFormatted: format.FormatDollarCompact(a.TotalImpact),
@@ -95,7 +109,7 @@ func buildAnomalyRows(p execsum.PayerReport) ([]AnomalyRowView, bool) {
 			directionClass = "kpi-good"
 		}
 		rows = append(rows, AnomalyRowView{
-			Payer:           a.Payer,
+			Payer:           payerDisplayLabel(a.Payer),
 			Service:         a.ServiceName,
 			Month:           a.Month,
 			ImpactFormatted: format.FormatDollarCompact(absFloat(a.CurrentCost - a.MeanCost)),
