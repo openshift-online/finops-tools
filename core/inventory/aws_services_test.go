@@ -12,6 +12,8 @@ import (
 	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
+	r53types "github.com/aws/aws-sdk-go-v2/service/route53/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -89,6 +91,7 @@ type fakeS3 struct {
 	buckets       []s3types.Bucket
 	pageSize      int
 	listErr       error
+	listErrAfter  int // succeed this many ListBuckets calls, then return listErr
 	locations     map[string]s3types.BucketLocationConstraint
 	locationErrs  map[string]error
 	locationCalls []string
@@ -96,7 +99,7 @@ type fakeS3 struct {
 }
 
 func (f *fakeS3) ListBuckets(_ context.Context, params *s3.ListBucketsInput, _ ...func(*s3.Options)) (*s3.ListBucketsOutput, error) {
-	if f.listErr != nil {
+	if f.listErr != nil && (f.listErrAfter <= 0 || f.listCalls >= f.listErrAfter) {
 		return nil, f.listErr
 	}
 	f.listCalls++
@@ -236,5 +239,133 @@ func TestListS3BucketsPaginates(t *testing.T) {
 	}
 	if got[0].Name != "a" || got[1].Name != "b" || got[2].Name != "c" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestListS3BucketsKeepsPageWhenLaterPageFails(t *testing.T) {
+	t.Parallel()
+	fake := &fakeS3{
+		buckets: []s3types.Bucket{
+			{Name: aws.String("a"), BucketRegion: aws.String("us-east-1")},
+			{Name: aws.String("b"), BucketRegion: aws.String("us-west-2")},
+		},
+		pageSize:      1,
+		listErrAfter:  1,
+		listErr:       fmt.Errorf("throttled"),
+	}
+	got, err := listS3Buckets(context.Background(), fake)
+	if err == nil || !strings.Contains(err.Error(), "throttled") {
+		t.Fatalf("error = %v, want throttled", err)
+	}
+	if len(got) != 1 || got[0].Name != "a" {
+		t.Fatalf("got %+v, want first page", got)
+	}
+}
+
+type fakeRoute53 struct {
+	pages   [][]string
+	pageErr error
+	calls   int
+}
+
+func (f *fakeRoute53) ListHostedZones(
+	_ context.Context,
+	_ *route53.ListHostedZonesInput,
+	_ ...func(*route53.Options),
+) (*route53.ListHostedZonesOutput, error) {
+	idx := f.calls
+	f.calls++
+	if idx >= len(f.pages) {
+		if f.pageErr != nil {
+			return nil, f.pageErr
+		}
+		return &route53.ListHostedZonesOutput{}, nil
+	}
+	out := &route53.ListHostedZonesOutput{}
+	for i, name := range f.pages[idx] {
+		n := name
+		id := fmt.Sprintf("/hostedzone/Z%d", idx*100+i)
+		out.HostedZones = append(out.HostedZones, r53types.HostedZone{
+			Id:   &id,
+			Name: &n,
+		})
+	}
+	if idx+1 < len(f.pages) || f.pageErr != nil {
+		out.IsTruncated = true
+		marker := "next"
+		out.NextMarker = &marker
+	}
+	return out, nil
+}
+
+func (f *fakeRoute53) ListResourceRecordSets(
+	context.Context,
+	*route53.ListResourceRecordSetsInput,
+	...func(*route53.Options),
+) (*route53.ListResourceRecordSetsOutput, error) {
+	return &route53.ListResourceRecordSetsOutput{}, nil
+}
+
+func TestListHostedZonesKeepsPageWhenLaterPageFails(t *testing.T) {
+	t.Parallel()
+	fake := &fakeRoute53{
+		pages:   [][]string{{"a.example.", "b.example."}},
+		pageErr: fmt.Errorf("throttled"),
+	}
+	got, err := listHostedZones(context.Background(), fake)
+	if err == nil || !strings.Contains(err.Error(), "throttled") {
+		t.Fatalf("error = %v, want throttled", err)
+	}
+	if len(got) != 2 || got[0].Name != "a.example." || got[1].Name != "b.example." {
+		t.Fatalf("got %+v, want first page", got)
+	}
+}
+
+type pagingELBv2 struct {
+	pages   [][]string
+	pageErr error
+	calls   int
+}
+
+func (f *pagingELBv2) DescribeLoadBalancers(
+	_ context.Context,
+	_ *elasticloadbalancingv2.DescribeLoadBalancersInput,
+	_ ...func(*elasticloadbalancingv2.Options),
+) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error) {
+	idx := f.calls
+	f.calls++
+	if idx >= len(f.pages) {
+		if f.pageErr != nil {
+			return nil, f.pageErr
+		}
+		return &elasticloadbalancingv2.DescribeLoadBalancersOutput{}, nil
+	}
+	out := &elasticloadbalancingv2.DescribeLoadBalancersOutput{}
+	for _, name := range f.pages[idx] {
+		n := name
+		out.LoadBalancers = append(out.LoadBalancers, elbv2types.LoadBalancer{
+			LoadBalancerName: &n,
+			Type:             elbv2types.LoadBalancerTypeEnumApplication,
+		})
+	}
+	if idx+1 < len(f.pages) || f.pageErr != nil {
+		marker := "next"
+		out.NextMarker = &marker
+	}
+	return out, nil
+}
+
+func TestListELBv2KeepsPageWhenLaterPageFails(t *testing.T) {
+	t.Parallel()
+	fake := &pagingELBv2{
+		pages:   [][]string{{"alb-1"}},
+		pageErr: fmt.Errorf("throttled"),
+	}
+	got, err := listELBv2LoadBalancers(context.Background(), fake, "us-east-1")
+	if err == nil || !strings.Contains(err.Error(), "throttled") {
+		t.Fatalf("error = %v, want throttled", err)
+	}
+	if len(got) != 1 || got[0].Name != "alb-1" {
+		t.Fatalf("got %+v, want first page", got)
 	}
 }

@@ -61,7 +61,7 @@ func listHostedZones(ctx context.Context, client Route53API) ([]HostedZone, erro
 	for {
 		resp, err := client.ListHostedZones(ctx, &route53.ListHostedZonesInput{Marker: marker})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, zone := range resp.HostedZones {
 			recordCount := aws.ToInt64(zone.ResourceRecordSetCount)
@@ -89,17 +89,19 @@ func listLoadBalancers(ctx context.Context, v2 ELBV2API, classic ELBAPI, region 
 	)
 
 	v2LBs, err := listELBv2LoadBalancers(ctx, v2, region)
+	if len(v2LBs) > 0 {
+		out = append(out, v2LBs...)
+	}
 	if err != nil {
 		errs = append(errs, "elbv2: "+err.Error())
-	} else {
-		out = append(out, v2LBs...)
 	}
 
 	classicLBs, err := listClassicLoadBalancers(ctx, classic, region)
+	if len(classicLBs) > 0 {
+		out = append(out, classicLBs...)
+	}
 	if err != nil {
 		errs = append(errs, "classic: "+err.Error())
-	} else {
-		out = append(out, classicLBs...)
 	}
 
 	if len(errs) > 0 {
@@ -114,7 +116,7 @@ func listELBv2LoadBalancers(ctx context.Context, v2 ELBV2API, region string) ([]
 	for {
 		resp, err := v2.DescribeLoadBalancers(ctx, &elasticloadbalancingv2.DescribeLoadBalancersInput{Marker: marker})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, lb := range resp.LoadBalancers {
 			state := ""
@@ -146,7 +148,7 @@ func listClassicLoadBalancers(ctx context.Context, classic ELBAPI, region string
 		}
 		resp, err := classic.DescribeLoadBalancers(ctx, input)
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, lb := range resp.LoadBalancerDescriptions {
 			out = append(out, LoadBalancer{
@@ -170,7 +172,7 @@ func listLambdaFunctions(ctx context.Context, client LambdaAPI, region string) (
 	for {
 		resp, err := client.ListFunctions(ctx, &lambda.ListFunctionsInput{Marker: marker})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, fn := range resp.Functions {
 			out = append(out, LambdaFunction{
@@ -201,7 +203,7 @@ func listS3Buckets(ctx context.Context, client S3API) ([]S3Bucket, error) {
 			MaxBuckets:        aws.Int32(pageSize),
 		})
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, bucket := range resp.Buckets {
 			name := aws.ToString(bucket.Name)

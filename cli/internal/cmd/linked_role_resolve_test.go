@@ -8,17 +8,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestSnapshotAndNotifyOwnerShareLinkedRoleFlag(t *testing.T) {
+func TestSnapshotAndAccountDetailsShareLinkedRoleFlag(t *testing.T) {
 	snap := snapshotListCmd.Flags().Lookup("role")
-	notify := accountNotifyOwnerCmd.Flags().Lookup("role")
-	if snap == nil || notify == nil {
+	details := accountDetailsCmd.Flags().Lookup("role")
+	if snap == nil || details == nil {
 		t.Fatal("missing --role flag")
 	}
 	if snap.Usage != linkedRoleFlagHelp {
 		t.Fatalf("snapshot --role help = %q", snap.Usage)
 	}
-	if notify.Usage != linkedRoleFlagHelp {
-		t.Fatalf("notify-owner --role help = %q", notify.Usage)
+	if details.Usage != linkedRoleFlagHelp {
+		t.Fatalf("account details --role help = %q", details.Usage)
 	}
 }
 

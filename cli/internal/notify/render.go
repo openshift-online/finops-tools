@@ -16,22 +16,68 @@ const responseDeadlineWeeks = 2
 
 const actionRequiredSubjectPrefix = "⚠️ Action required: "
 
-const actionRequiredIntro = `We are reviewing AWS accounts that may no longer be needed. Based on the information below, please reply to this email and tell us whether you want to:`
+const actionRequiredIntroSuffix = " Based on the information below, please reply to this email and tell us whether you want to:"
 
 const actionRequiredOptions = `- Keep the account
 - Delete the account
 - Request modifications (describe what you need)`
 
-func actionRequiredDeadlineText(accountCount int) string {
+const generatedBy = "Red Hat Hybrid Platform FinOps"
+
+// incompleteInventoryNote is shown in owner emails when InventoryError is set.
+// Raw scan errors stay off the body so owners are not asked to interpret AWS API failures.
+const incompleteInventoryNote = "Inventory collection was incomplete. Missing resources are not confirmed unused."
+
+const (
+	htmlTableStyle  = `width:100%;border-collapse:collapse;font-size:.9rem`
+	htmlCellStyle   = `text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
+	htmlAmountStyle = `text-align:right;white-space:nowrap;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
+	htmlMetaStyle   = `color:#656d76;font-size:.9rem`
+	htmlActionStyle = `background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem`
+	htmlCardStyle   = `background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem`
+	htmlH4Style     = `margin:.75rem 0 .35rem;font-size:.9rem;font-weight:600;color:#656d76`
+)
+
+func actionRequiredIntro(details []accountreview.AccountDetails) string {
+	switch len(details) {
+	case 1:
+		d := details[0]
+		return fmt.Sprintf(
+			"We are reviewing AWS account %s (%s), which may no longer be needed.%s",
+			d.AccountName, d.AccountID, actionRequiredIntroSuffix,
+		)
+	default:
+		if len(details) > 1 {
+			return fmt.Sprintf(
+				"We are reviewing the %d AWS accounts below, which may no longer be needed.%s",
+				len(details), actionRequiredIntroSuffix,
+			)
+		}
+		return "We are reviewing AWS accounts that may no longer be needed." + actionRequiredIntroSuffix
+	}
+}
+
+func actionRequiredDeadlineText(accountCount int, generated time.Time) string {
 	phrase := "this AWS account"
 	if accountCount > 1 {
 		phrase = "these AWS accounts"
 	}
 	return fmt.Sprintf(
-		"If we do not hear from you within %d weeks, we will proceed with deleting %s.",
-		responseDeadlineWeeks,
+		"If we do not hear from you by %s, we will proceed with deleting %s.",
+		replyByDate(generated).Format("2 January 2006"),
 		phrase,
 	)
+}
+
+func replyByDate(generated time.Time) time.Time {
+	return generated.UTC().AddDate(0, 0, responseDeadlineWeeks*7)
+}
+
+func groupReviewSubject(n int) string {
+	if n == 1 {
+		return actionRequiredSubjectPrefix + "AWS account review: 1 AWS account"
+	}
+	return actionRequiredSubjectPrefix + fmt.Sprintf("AWS account review: %d AWS accounts", n)
 }
 
 type Message struct {
@@ -47,147 +93,155 @@ type Message struct {
 }
 
 // RenderAccountEmail renders a single-account notification.
-func RenderAccountEmail(report accountreview.AccountReport) Message {
-	subject := actionRequiredSubjectPrefix + fmt.Sprintf("AWS account review: %s (%s)", report.AccountName, report.AccountID)
+func RenderAccountEmail(d accountreview.AccountDetails) Message {
+	subject := actionRequiredSubjectPrefix + fmt.Sprintf("AWS account review: %s (%s)", d.AccountName, d.AccountID)
 	return Message{
-		To:         report.OwnerEmail,
-		IntendedTo: report.OwnerEmail,
+		To:         d.OwnerEmail,
+		IntendedTo: d.OwnerEmail,
 		Subject:    subject,
-		TextBody:   renderTextBody([]accountreview.AccountReport{report}),
-		HTMLBody:   renderHTMLBody([]accountreview.AccountReport{report}),
+		TextBody:   renderTextBody([]accountreview.AccountDetails{d}),
+		HTMLBody:   renderHTMLBody([]accountreview.AccountDetails{d}),
 	}
 }
 
 // RenderOwnerGroupEmail renders a multi-account notification for one owner.
-func RenderOwnerGroupEmail(group accountreview.OwnerGroup) Message {
-	subject := actionRequiredSubjectPrefix + fmt.Sprintf("AWS account review: %d account(s)", len(group.Reports))
+func RenderOwnerGroupEmail(ownerEmail string, details []accountreview.AccountDetails) Message {
 	return Message{
-		To:         group.OwnerEmail,
-		IntendedTo: group.OwnerEmail,
-		Subject:    subject,
-		TextBody:   renderTextBody(group.Reports),
-		HTMLBody:   renderHTMLBody(group.Reports),
+		To:         ownerEmail,
+		IntendedTo: ownerEmail,
+		Subject:    groupReviewSubject(len(details)),
+		TextBody:   renderTextBody(details),
+		HTMLBody:   renderHTMLBody(details),
 	}
 }
 
-func renderTextBody(reports []accountreview.AccountReport) string {
+func renderTextBody(details []accountreview.AccountDetails) string {
 	var b strings.Builder
-	writeActionRequiredText(&b, len(reports))
-	for i, r := range reports {
+	generated := generatedAt(details)
+	writeActionRequiredText(&b, details, generated)
+	if len(details) > 1 {
+		b.WriteString("\n")
+		writeOverviewText(&b, details)
+		b.WriteString(strings.Repeat("=", 48))
+		b.WriteString("\n")
+	}
+	for i, d := range details {
 		if i > 0 {
 			b.WriteString("\n\n")
 			b.WriteString(strings.Repeat("=", 48))
 			b.WriteString("\n\n")
 		} else {
-			b.WriteString("\n\n")
+			b.WriteString("\n")
 		}
-		writeAccountText(&b, r)
+		writeAccountText(&b, d)
 	}
-	b.WriteString("\n\nGenerated by finops-tools\n")
+	fmt.Fprintf(&b, "\n\nGenerated %s\n%s\n", generated.Format("2006-01-02 15:04 UTC"), generatedBy)
 	return b.String()
 }
 
-func writeAccountText(b *strings.Builder, r accountreview.AccountReport) {
-	fmt.Fprintf(b, "Account: %s (%s)\n", r.AccountName, r.AccountID)
-	if r.DisplayAlias != "" {
-		fmt.Fprintf(b, "Alias: %s\n", r.DisplayAlias)
+func writeOverviewText(b *strings.Builder, details []accountreview.AccountDetails) {
+	b.WriteString("Accounts in this review\n")
+	for _, d := range details {
+		last, total := "-", "-"
+		if l, t, ok := costSummaryAmounts(d); ok {
+			last, total = l, t
+		}
+		fmt.Fprintf(b, "  %s (%s)  last listed month: %s  period total: %s\n", d.AccountName, d.AccountID, last, total)
 	}
-	if r.OUPath != "" {
-		fmt.Fprintf(b, "OU: %s\n", r.OUPath)
+	b.WriteByte('\n')
+}
+
+func writeAccountText(b *strings.Builder, d accountreview.AccountDetails) {
+	fmt.Fprintf(b, "Account: %s (%s)\n", d.AccountName, d.AccountID)
+	if line := costSummaryLine(d); line != "" {
+		fmt.Fprintf(b, "%s\n", line)
 	}
-	if len(r.Tags) > 0 {
+	if d.DisplayAlias != "" {
+		fmt.Fprintf(b, "Alias: %s\n", d.DisplayAlias)
+	}
+	if d.OUPath != "" {
+		fmt.Fprintf(b, "OU: %s\n", d.OUPath)
+	}
+	if d.OwnerError != "" {
+		fmt.Fprintf(b, "Owner: %s\n", d.OwnerError)
+	}
+	if len(d.Tags) > 0 {
 		b.WriteString("Tags:\n")
-		for _, t := range r.Tags {
+		for _, t := range d.Tags {
 			fmt.Fprintf(b, "  %s: %s\n", t.Key, t.Value)
 		}
 	}
 
 	b.WriteString("\nMonthly costs (net amortized):\n")
-	if r.MonthlyCosts.Error != "" {
-		fmt.Fprintf(b, "  (unavailable: %s)\n", r.MonthlyCosts.Error)
-	} else if len(r.MonthlyCosts.Months) == 0 {
+	mc := d.MonthlyCosts
+	if mc.Error != "" {
+		fmt.Fprintf(b, "  (unavailable: %s)\n", mc.Error)
+	} else if len(mc.Months) == 0 {
 		b.WriteString("  (no data)\n")
 	} else {
-		for _, m := range r.MonthlyCosts.Months {
-			fmt.Fprintf(b, "  %s: %s\n", m.Month, format.FormatMoney(m.Amount, r.MonthlyCosts.Currency))
+		for _, m := range mc.Months {
+			fmt.Fprintf(b, "  %s: %s\n", m.Month, format.FormatMoney(m.Amount, mc.Currency))
 		}
-		fmt.Fprintf(b, "  Total: %s\n", format.FormatMoney(r.MonthlyCosts.Total, r.MonthlyCosts.Currency))
+		fmt.Fprintf(b, "  Total: %s\n", format.FormatMoney(mc.Total, mc.Currency))
 	}
 
-	if r.MonthlyCosts.Error == "" && len(r.MonthlyCosts.TopServices) > 0 {
+	if mc.Error == "" && len(mc.TopServices) > 0 {
 		b.WriteString("\nTop services (last complete month):\n")
-		for _, svc := range r.MonthlyCosts.TopServices {
-			fmt.Fprintf(b, "  %s: %s\n", svc.Service, format.FormatMoney(svc.Amount, r.MonthlyCosts.Currency))
+		for _, svc := range mc.TopServices {
+			fmt.Fprintf(b, "  %s: %s\n", svc.Service, format.FormatMoney(svc.Amount, mc.Currency))
 		}
-	} else if r.MonthlyCosts.Error == "" && r.MonthlyCosts.TopServicesError != "" {
-		fmt.Fprintf(b, "\nTop services (last complete month):\n  (unavailable: %s)\n", r.MonthlyCosts.TopServicesError)
+	} else if mc.Error == "" && mc.TopServicesError != "" {
+		fmt.Fprintf(b, "\nTop services (last complete month):\n  (unavailable: %s)\n", mc.TopServicesError)
 	}
 
-	writeInventoryText(b, r)
-	if r.InventoryError != "" {
-		fmt.Fprintf(b, "\nInventory warnings: %s\n", r.InventoryError)
-	}
+	writeInventoryText(b, d)
 }
 
-func writeInventoryText(b *strings.Builder, r accountreview.AccountReport) {
-	inv := r.Inventory
+func writeInventoryText(b *strings.Builder, d accountreview.AccountDetails) {
 	b.WriteString("\nResources:\n")
-	fmt.Fprintf(b, "  EC2 instances: %d\n", len(inv.EC2Instances))
-	for _, inst := range inv.EC2Instances {
-		name := inst.Name
-		if name == "" {
-			name = "-"
+	tables := d.NonemptyInventoryTables()
+	counts := d.NonzeroInventoryCounts()
+	for _, table := range tables {
+		fmt.Fprintf(b, "  %s: %d\n", table.Title, table.Count)
+		for _, row := range table.Rows {
+			b.WriteString("    ")
+			b.WriteString(strings.Join(row, "  "))
+			b.WriteByte('\n')
 		}
-		fmt.Fprintf(b, "    %s  %s  %s  %s  %s\n", inst.InstanceID, name, inst.Type, inst.State, inst.Region)
 	}
-
-	fmt.Fprintf(b, "  RDS instances: %d\n", len(inv.RDSInstances))
-	for _, db := range inv.RDSInstances {
-		fmt.Fprintf(b, "    %s  %s  %s  %s  %s\n", db.InstanceID, db.Engine, db.Class, db.Status, db.Region)
+	for _, c := range counts {
+		fmt.Fprintf(b, "  %s: %d\n", c.Title, c.Count)
 	}
-
-	fmt.Fprintf(b, "  RDS clusters: %d\n", len(inv.RDSClusters))
-	for _, c := range inv.RDSClusters {
-		fmt.Fprintf(b, "    %s  %s  %s  %s\n", c.ClusterID, c.Engine, c.Status, c.Region)
+	if line := d.NoneFoundLine(); line != "" {
+		fmt.Fprintf(b, "  %s\n", line)
 	}
-
-	fmt.Fprintf(b, "  Route53 hosted zones: %d\n", len(inv.HostedZones))
-	for _, z := range inv.HostedZones {
-		kind := "public"
-		if z.PrivateZone {
-			kind = "private"
-		}
-		fmt.Fprintf(b, "    %s  %s  %d records\n", z.Name, kind, z.RecordCount)
+	if note := incompleteInventoryLine(d); note != "" {
+		fmt.Fprintf(b, "  %s\n", note)
 	}
-
-	fmt.Fprintf(b, "  Unattached EBS volumes: %d\n", len(inv.UnattachedEBS))
-	fmt.Fprintf(b, "  Unassociated Elastic IPs: %d\n", len(inv.ElasticIPs))
-	fmt.Fprintf(b, "  Load balancers: %d\n", len(inv.LoadBalancers))
-	fmt.Fprintf(b, "  NAT gateways: %d\n", len(inv.NATGateways))
-	fmt.Fprintf(b, "  S3 buckets: %d\n", len(inv.S3Buckets))
-	fmt.Fprintf(b, "  Lambda functions: %d\n", len(inv.LambdaFunctions))
-	fmt.Fprintf(b, "  VPCs: %d\n", len(inv.VPCs))
 }
 
-func writeActionRequiredText(b *strings.Builder, accountCount int) {
+func writeActionRequiredText(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time) {
 	b.WriteString("Action required\n\n")
-	b.WriteString(actionRequiredIntro)
+	b.WriteString(actionRequiredIntro(details))
 	b.WriteString("\n\n")
 	b.WriteString(actionRequiredOptions)
 	b.WriteString("\n\n")
-	b.WriteString(actionRequiredDeadlineText(accountCount))
+	b.WriteString(actionRequiredDeadlineText(len(details), generated))
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("=", 48))
 	b.WriteString("\n")
 }
 
-func renderHTMLBody(reports []accountreview.AccountReport) string {
+func renderHTMLBody(details []accountreview.AccountDetails) string {
 	var b strings.Builder
+	generated := generatedAt(details)
 	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;line-height:1.5;color:#1f2328;background:#f6f8fa;margin:0;padding:1.5rem}
 .container{max-width:900px;margin:0 auto}
 section{background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem}
 h1{margin:0 0 .5rem;font-size:1.5rem}h2{margin:0 0 .75rem;font-size:1.1rem;color:#0969da}
+h3{margin:1rem 0 .5rem;font-size:1rem;color:#1f2328}
+h4{margin:.75rem 0 .35rem;font-size:.9rem;font-weight:600;color:#656d76}
 table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d0d7de}
 th{color:#656d76}.amount{text-align:right;white-space:nowrap}.meta{color:#656d76;font-size:.9rem}
 .action{background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem}
@@ -195,133 +249,227 @@ th{color:#656d76}.amount{text-align:right;white-space:nowrap}.meta{color:#656d76
 .action ul{margin:.5rem 0 0 1.25rem;padding:0}
 footer{margin-top:1rem;color:#656d76;font-size:.85rem;text-align:center}
 </style></head><body><div class="container">`)
-	fmt.Fprintf(&b, `<header><h1>AWS account review</h1><p class="meta">Generated %s</p></header>`, generatedAt(reports).Format("2006-01-02 15:04 UTC"))
-	writeActionRequiredHTML(&b, len(reports))
-
-	for _, r := range reports {
-		writeAccountHTML(&b, r)
+	fmt.Fprintf(&b, `<header><h1>AWS account review</h1><p class="meta" style="%s">Generated %s</p></header>`, htmlMetaStyle, generated.Format("2006-01-02 15:04 UTC"))
+	writeActionRequiredHTML(&b, details, generated)
+	if len(details) > 1 {
+		writeOverviewHTML(&b, details)
 	}
-	b.WriteString(`<footer>Generated by finops-tools</footer></div></body></html>`)
+	for _, d := range details {
+		writeAccountHTML(&b, d)
+	}
+	fmt.Fprintf(&b, `<footer style="%s;text-align:center">%s</footer></div></body></html>`, htmlMetaStyle, htmlEscape(generatedBy))
 	return b.String()
 }
 
-func writeAccountHTML(b *strings.Builder, r accountreview.AccountReport) {
-	fmt.Fprintf(b, `<section><h2>%s (%s)</h2>`, htmlEscape(r.AccountName), htmlEscape(r.AccountID))
-	if r.DisplayAlias != "" {
-		fmt.Fprintf(b, `<p class="meta">Alias: %s</p>`, htmlEscape(r.DisplayAlias))
+func writeOverviewHTML(b *strings.Builder, details []accountreview.AccountDetails) {
+	fmt.Fprintf(b, `<section style="%s"><h3>Accounts in this review</h3>`, htmlCardStyle)
+	writeHTMLTableOpen(b)
+	b.WriteString(`<thead><tr>`)
+	writeHTMLHeaderCell(b, "Account", false)
+	writeHTMLHeaderCell(b, "ID", false)
+	writeHTMLHeaderCell(b, "Last listed month", true)
+	writeHTMLHeaderCell(b, "Period total", true)
+	b.WriteString(`</tr></thead><tbody>`)
+	for _, d := range details {
+		last, total := "-", "-"
+		if l, t, ok := costSummaryAmounts(d); ok {
+			last, total = l, t
+		}
+		b.WriteString(`<tr>`)
+		writeHTMLCell(b, d.AccountName, false)
+		writeHTMLCell(b, d.AccountID, false)
+		writeHTMLCell(b, last, true)
+		writeHTMLCell(b, total, true)
+		b.WriteString(`</tr>`)
 	}
-	if r.OUPath != "" {
-		fmt.Fprintf(b, `<p class="meta">OU: %s</p>`, htmlEscape(r.OUPath))
+	b.WriteString(`</tbody></table></section>`)
+}
+
+func writeAccountHTML(b *strings.Builder, d accountreview.AccountDetails) {
+	fmt.Fprintf(b, `<section style="%s"><h2>%s (%s)</h2>`, htmlCardStyle, htmlEscape(d.AccountName), htmlEscape(d.AccountID))
+	if line := costSummaryLine(d); line != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(line))
+	}
+	if d.DisplayAlias != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">Alias: %s</p>`, htmlMetaStyle, htmlEscape(d.DisplayAlias))
+	}
+	if d.OUPath != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">OU: %s</p>`, htmlMetaStyle, htmlEscape(d.OUPath))
+	}
+	if d.OwnerError != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">Owner: %s</p>`, htmlMetaStyle, htmlEscape(d.OwnerError))
 	}
 
-	if len(r.Tags) > 0 {
-		b.WriteString(`<table><thead><tr><th>Tag</th><th>Value</th></tr></thead><tbody>`)
-		for _, t := range r.Tags {
-			fmt.Fprintf(b, `<tr><td>%s</td><td>%s</td></tr>`, htmlEscape(t.Key), htmlEscape(t.Value))
+	if len(d.Tags) > 0 {
+		b.WriteString(`<h3>Tags</h3>`)
+		writeHTMLTableOpen(b)
+		b.WriteString(`<thead><tr>`)
+		writeHTMLHeaderCell(b, "Tag", false)
+		writeHTMLHeaderCell(b, "Value", false)
+		b.WriteString(`</tr></thead><tbody>`)
+		for _, t := range d.Tags {
+			b.WriteString(`<tr>`)
+			writeHTMLCell(b, t.Key, false)
+			writeHTMLCell(b, t.Value, false)
+			b.WriteString(`</tr>`)
 		}
 		b.WriteString(`</tbody></table>`)
 	}
 
-	b.WriteString(`<h2>Monthly costs</h2>`)
-	if r.MonthlyCosts.Error != "" {
-		fmt.Fprintf(b, `<p class="meta">Unavailable: %s</p>`, htmlEscape(r.MonthlyCosts.Error))
+	b.WriteString(`<h3>Monthly costs (net amortized)</h3>`)
+	mc := d.MonthlyCosts
+	if mc.Error != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">Unavailable: %s</p>`, htmlMetaStyle, htmlEscape(mc.Error))
+	} else if len(mc.Months) == 0 {
+		fmt.Fprintf(b, `<p class="meta" style="%s">(no data)</p>`, htmlMetaStyle)
 	} else {
-		b.WriteString(`<table><thead><tr><th>Month</th><th class="amount">Amount</th></tr></thead><tbody>`)
-		for _, m := range r.MonthlyCosts.Months {
-			fmt.Fprintf(b, `<tr><td>%s</td><td class="amount">%s</td></tr>`, htmlEscape(m.Month), htmlEscape(format.FormatMoney(m.Amount, r.MonthlyCosts.Currency)))
+		writeHTMLTableOpen(b)
+		b.WriteString(`<thead><tr>`)
+		writeHTMLHeaderCell(b, "Month", false)
+		writeHTMLHeaderCell(b, "Amount", true)
+		b.WriteString(`</tr></thead><tbody>`)
+		for _, m := range mc.Months {
+			b.WriteString(`<tr>`)
+			writeHTMLCell(b, m.Month, false)
+			writeHTMLCell(b, format.FormatMoney(m.Amount, mc.Currency), true)
+			b.WriteString(`</tr>`)
 		}
-		if len(r.MonthlyCosts.Months) > 0 {
-			fmt.Fprintf(b, `<tr><th>Total</th><td class="amount">%s</td></tr>`, htmlEscape(format.FormatMoney(r.MonthlyCosts.Total, r.MonthlyCosts.Currency)))
+		if len(mc.Months) > 0 {
+			b.WriteString(`<tr>`)
+			writeHTMLHeaderCell(b, "Total", false)
+			writeHTMLCell(b, format.FormatMoney(mc.Total, mc.Currency), true)
+			b.WriteString(`</tr>`)
 		}
 		b.WriteString(`</tbody></table>`)
 	}
 
-	if r.MonthlyCosts.Error == "" && len(r.MonthlyCosts.TopServices) > 0 {
-		b.WriteString(`<h2>Top services (last complete month)</h2><table><thead><tr><th>Service</th><th class="amount">Amount</th></tr></thead><tbody>`)
-		for _, svc := range r.MonthlyCosts.TopServices {
-			fmt.Fprintf(b, `<tr><td>%s</td><td class="amount">%s</td></tr>`, htmlEscape(svc.Service), htmlEscape(format.FormatMoney(svc.Amount, r.MonthlyCosts.Currency)))
+	if mc.Error == "" && len(mc.TopServices) > 0 {
+		b.WriteString(`<h3>Top services (last complete month)</h3>`)
+		writeHTMLTableOpen(b)
+		b.WriteString(`<thead><tr>`)
+		writeHTMLHeaderCell(b, "Service", false)
+		writeHTMLHeaderCell(b, "Amount", true)
+		b.WriteString(`</tr></thead><tbody>`)
+		for _, svc := range mc.TopServices {
+			b.WriteString(`<tr>`)
+			writeHTMLCell(b, svc.Service, false)
+			writeHTMLCell(b, format.FormatMoney(svc.Amount, mc.Currency), true)
+			b.WriteString(`</tr>`)
 		}
 		b.WriteString(`</tbody></table>`)
-	} else if r.MonthlyCosts.Error == "" && r.MonthlyCosts.TopServicesError != "" {
-		fmt.Fprintf(b, `<h2>Top services (last complete month)</h2><p class="meta">Unavailable: %s</p>`, htmlEscape(r.MonthlyCosts.TopServicesError))
+	} else if mc.Error == "" && mc.TopServicesError != "" {
+		fmt.Fprintf(b, `<h3>Top services (last complete month)</h3><p class="meta" style="%s">Unavailable: %s</p>`, htmlMetaStyle, htmlEscape(mc.TopServicesError))
 	}
 
-	writeInventoryHTML(b, r)
-	if r.InventoryError != "" {
-		fmt.Fprintf(b, `<p class="meta">Inventory warnings: %s</p>`, htmlEscape(r.InventoryError))
-	}
+	writeInventoryHTML(b, d)
 	b.WriteString(`</section>`)
 }
 
-func writeInventoryHTML(b *strings.Builder, r accountreview.AccountReport) {
-	inv := r.Inventory
-	b.WriteString(`<h2>Resources</h2>`)
-
-	writeResourceTable(b, "EC2 instances", []string{"ID", "Name", "Type", "State", "Region"}, len(inv.EC2Instances), func(i int) []string {
-		inst := inv.EC2Instances[i]
-		name := inst.Name
-		if name == "" {
-			name = "-"
+func writeInventoryHTML(b *strings.Builder, d accountreview.AccountDetails) {
+	b.WriteString(`<h3>Resources</h3>`)
+	tables := d.NonemptyInventoryTables()
+	counts := d.NonzeroInventoryCounts()
+	for _, table := range tables {
+		writeResourceTable(b, table)
+	}
+	if len(counts) > 0 {
+		fmt.Fprintf(b, `<p class="meta" style="%s">`, htmlMetaStyle)
+		for i, c := range counts {
+			if i > 0 {
+				b.WriteString(" · ")
+			}
+			fmt.Fprintf(b, `%s: %d`, htmlEscape(c.Title), c.Count)
 		}
-		return []string{inst.InstanceID, name, inst.Type, inst.State, inst.Region}
-	})
-
-	writeResourceTable(b, "RDS instances", []string{"ID", "Engine", "Class", "Status", "Region"}, len(inv.RDSInstances), func(i int) []string {
-		db := inv.RDSInstances[i]
-		return []string{db.InstanceID, db.Engine, db.Class, db.Status, db.Region}
-	})
-
-	writeResourceTable(b, "RDS clusters", []string{"ID", "Engine", "Status", "Region"}, len(inv.RDSClusters), func(i int) []string {
-		c := inv.RDSClusters[i]
-		return []string{c.ClusterID, c.Engine, c.Status, c.Region}
-	})
-
-	writeResourceTable(b, "Route53 hosted zones", []string{"Name", "Type", "Records"}, len(inv.HostedZones), func(i int) []string {
-		z := inv.HostedZones[i]
-		kind := "public"
-		if z.PrivateZone {
-			kind = "private"
-		}
-		return []string{z.Name, kind, fmt.Sprintf("%d", z.RecordCount)}
-	})
-
-	fmt.Fprintf(b, `<p class="meta">Unattached EBS: %d · Unassociated EIPs: %d · Load balancers: %d · NAT gateways: %d · S3 buckets: %d · Lambda: %d · VPCs: %d</p>`,
-		len(inv.UnattachedEBS), len(inv.ElasticIPs), len(inv.LoadBalancers), len(inv.NATGateways), len(inv.S3Buckets), len(inv.LambdaFunctions), len(inv.VPCs))
+		b.WriteString(`</p>`)
+	}
+	if line := d.NoneFoundLine(); line != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(line))
+	}
+	if note := incompleteInventoryLine(d); note != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(note))
+	}
 }
 
-func generatedAt(reports []accountreview.AccountReport) time.Time {
-	if len(reports) > 0 && !reports[0].GeneratedAt.IsZero() {
-		return reports[0].GeneratedAt.UTC()
+func generatedAt(details []accountreview.AccountDetails) time.Time {
+	if len(details) > 0 && !details[0].GeneratedAt.IsZero() {
+		return details[0].GeneratedAt.UTC()
 	}
 	return time.Now().UTC()
 }
 
-func writeResourceTable(b *strings.Builder, title string, headers []string, count int, row func(int) []string) {
-	fmt.Fprintf(b, `<h2>%s (%d)</h2>`, htmlEscape(title), count)
-	if count == 0 {
+func writeResourceTable(b *strings.Builder, table accountreview.ResourceTable) {
+	fmt.Fprintf(b, `<h4 style="%s">%s (%d)</h4>`, htmlH4Style, htmlEscape(table.Title), table.Count)
+	if table.Count == 0 {
 		return
 	}
-	b.WriteString(`<table><thead><tr>`)
-	for _, h := range headers {
-		fmt.Fprintf(b, `<th>%s</th>`, htmlEscape(h))
+	writeHTMLTableOpen(b)
+	b.WriteString(`<thead><tr>`)
+	for _, h := range table.Headers {
+		writeHTMLHeaderCell(b, h, false)
 	}
 	b.WriteString(`</tr></thead><tbody>`)
-	for i := 0; i < count; i++ {
+	for _, row := range table.Rows {
 		b.WriteString(`<tr>`)
-		for _, cell := range row(i) {
-			fmt.Fprintf(b, `<td>%s</td>`, htmlEscape(cell))
+		for _, cell := range row {
+			writeHTMLCell(b, cell, false)
 		}
 		b.WriteString(`</tr>`)
 	}
 	b.WriteString(`</tbody></table>`)
 }
 
-func writeActionRequiredHTML(b *strings.Builder, accountCount int) {
-	b.WriteString(`<section class="action"><h2>Action required</h2><p>`)
-	b.WriteString(htmlEscape(actionRequiredIntro))
+func writeActionRequiredHTML(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time) {
+	fmt.Fprintf(b, `<section class="action" style="%s"><h2>Action required</h2><p>`, htmlActionStyle)
+	b.WriteString(htmlEscape(actionRequiredIntro(details)))
 	b.WriteString(`</p><ul><li>Keep the account</li><li>Delete the account</li><li>Request modifications (describe what you need)</li></ul><p><strong>`)
-	b.WriteString(htmlEscape(actionRequiredDeadlineText(accountCount)))
+	b.WriteString(htmlEscape(actionRequiredDeadlineText(len(details), generated)))
 	b.WriteString(`</strong></p></section>`)
+}
+
+func writeHTMLTableOpen(b *strings.Builder) {
+	fmt.Fprintf(b, `<table style="%s">`, htmlTableStyle)
+}
+
+func writeHTMLHeaderCell(b *strings.Builder, text string, amount bool) {
+	style := htmlCellStyle + `;color:#656d76`
+	if amount {
+		style = htmlAmountStyle + `;color:#656d76`
+	}
+	fmt.Fprintf(b, `<th style="%s">%s</th>`, style, htmlEscape(text))
+}
+
+func writeHTMLCell(b *strings.Builder, text string, amount bool) {
+	style := htmlCellStyle
+	class := ""
+	if amount {
+		style = htmlAmountStyle
+		class = ` class="amount"`
+	}
+	fmt.Fprintf(b, `<td%s style="%s">%s</td>`, class, style, htmlEscape(text))
+}
+
+func incompleteInventoryLine(d accountreview.AccountDetails) string {
+	if strings.TrimSpace(d.InventoryError) == "" {
+		return ""
+	}
+	return incompleteInventoryNote
+}
+
+func costSummaryLine(d accountreview.AccountDetails) string {
+	last, total, ok := costSummaryAmounts(d)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("Last listed month: %s · Period total: %s", last, total)
+}
+
+func costSummaryAmounts(d accountreview.AccountDetails) (last, total string, ok bool) {
+	mc := d.MonthlyCosts
+	if mc.Error != "" || len(mc.Months) == 0 {
+		return "", "", false
+	}
+	m := mc.Months[len(mc.Months)-1]
+	return format.FormatMoney(m.Amount, mc.Currency), format.FormatMoney(mc.Total, mc.Currency), true
 }
 
 func htmlEscape(s string) string {

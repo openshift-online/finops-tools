@@ -52,7 +52,7 @@ func resolveLinkedRoleARN(cmd *cobra.Command, configPath, linkedAccountID, flagR
 }
 
 // resolveTargetLinkedRoleARN returns the IAM role ARN for a linked-account scan target.
-// Snapshot list and notify-owner share this so --role vs alias-role cannot drift.
+// Snapshot list and account details share this so --role vs alias-role cannot drift.
 // Priority: explicit --role, then the alias's stored role, then config / built-in default.
 func resolveTargetLinkedRoleARN(cmd *cobra.Command, cfg configstore.File, configPath, accountID, displayAlias, flagRole string) (string, error) {
 	if cmd.Flags().Changed("role") {

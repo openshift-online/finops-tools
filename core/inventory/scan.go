@@ -2,17 +2,27 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
 const defaultRegionConcurrency = 5
+
+const inventoryHTTPTimeout = 15 * time.Second
+
+var (
+	regionScanTimeout = 45 * time.Second
+	globalScanTimeout = 90 * time.Second
+)
 
 // Scan discovers resources across accounts and regions.
 // Per-account failures (for example listing regions or loading credentials) are
@@ -24,10 +34,12 @@ func Scan(ctx context.Context, q Query) (Result, error) {
 	}
 
 	accounts := make([]AccountInventory, len(q.Targets))
+	var completed atomic.Int32
 	err := parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
 		target := q.Targets[i]
-		reportScanProgress(q.OnProgress, target, i+1, len(q.Targets))
 		inv, err := q.scanner.scanAccount(ctx, q, target)
+		n := int(completed.Add(1))
+		reportAccountScanned(q.OnProgress, target, n, len(q.Targets))
 		if err != nil {
 			if ctx.Err() != nil {
 				return err
@@ -49,17 +61,47 @@ func Scan(ctx context.Context, q Query) (Result, error) {
 	return Result{Accounts: accounts}, nil
 }
 
-func reportScanProgress(onProgress func(string), target AccountTarget, index, total int) {
-	if onProgress == nil || !parallel.ShouldReportProgress(index, total) {
+func reportAccountScanned(onProgress func(string), target AccountTarget, completed, total int) {
+	if onProgress == nil {
 		return
 	}
+	label := scanProgressLabel(target)
+	if total <= 1 {
+		onProgress(fmt.Sprintf("Scanned inventory for %s", label))
+		return
+	}
+	if total > 20 && !parallel.ShouldReportProgress(completed, total) {
+		return
+	}
+	onProgress(fmt.Sprintf("Scanned inventory for %s [%d/%d]…", label, completed, total))
+}
+
+func reportRegionProgress(onProgress func(string), label, region string, done, total int) {
+	if onProgress == nil || total <= 0 || !shouldReportRegionProgress(done, total) {
+		return
+	}
+	onProgress(fmt.Sprintf("Scanning inventory for %s: %d/%d regions (last: %s)…", label, done, total, region))
+}
+
+func shouldReportRegionProgress(done, total int) bool {
+	if done == 1 || done == total {
+		return true
+	}
+	if total <= 10 {
+		return true
+	}
+	return done%5 == 0
+}
+
+func scanProgressLabel(target AccountTarget) string {
 	label := strings.TrimSpace(target.AccountID)
 	if name := strings.TrimSpace(target.DisplayName); name != "" && name != label {
-		label = fmt.Sprintf("%s (%s)", name, label)
-	} else if alias := strings.TrimSpace(target.DisplayAlias); alias != "" && alias != label {
-		label = fmt.Sprintf("%s (%s)", alias, label)
+		return fmt.Sprintf("%s (%s)", name, label)
 	}
-	onProgress(fmt.Sprintf("Scanning inventory for %s [%d/%d]…", label, index, total))
+	if alias := strings.TrimSpace(target.DisplayAlias); alias != "" && alias != label {
+		return fmt.Sprintf("%s (%s)", alias, label)
+	}
+	return label
 }
 
 func (q Query) withDefaults() Query {
@@ -82,26 +124,48 @@ type accountScanner interface {
 type defaultAccountScanner struct{}
 
 func (defaultAccountScanner) scanAccount(ctx context.Context, q Query, target AccountTarget) (AccountInventory, error) {
+	label := scanProgressLabel(target)
+	if target.ConfigLoader != nil && q.OnProgress != nil {
+		q.OnProgress(fmt.Sprintf("Loading credentials for %s…", label))
+	}
 	cfg, err := loadTargetConfig(ctx, target)
 	if err != nil {
 		return AccountInventory{}, err
 	}
+	cfg = withInventoryAPILimits(cfg)
 
 	regions, err := q.regionLister.ListEnabledRegions(ctx, cfg, q.Regions)
 	if err != nil {
 		return AccountInventory{}, fmt.Errorf("list regions: %w", err)
 	}
+	if q.OnProgress != nil {
+		q.OnProgress(fmt.Sprintf("Scanning inventory for %s (%d regions)…", label, len(regions)))
+	}
 
 	inv := AccountInventory{AccountID: strings.TrimSpace(target.AccountID)}
 	var (
-		mu       sync.Mutex
-		warnings []RegionWarning
+		mu         sync.Mutex
+		warnings   []RegionWarning
+		regionDone atomic.Int32
 	)
 
 	err = parallel.ForEach(ctx, defaultRegionConcurrency, len(regions), func(ctx context.Context, ri int) error {
 		region := regions[ri]
+		regionCtx, cancel := context.WithTimeout(ctx, regionScanTimeout)
 		regionCfg := awsConfigForRegion(cfg, region)
-		scanRegionalResources(ctx, regionCfg, region, target.AccountID, &inv, &mu, &warnings)
+		scanRegionalResources(regionCtx, regionCfg, region, target.AccountID, &inv, &mu, &warnings)
+		timedOut := errors.Is(regionCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		if timedOut {
+			mu.Lock()
+			warnings = append(warnings, RegionWarning{
+				AccountID: target.AccountID,
+				Region:    region,
+				Message:   fmt.Sprintf("scan timed out after %s", regionScanTimeout),
+			})
+			mu.Unlock()
+		}
+		reportRegionProgress(q.OnProgress, label, region, int(regionDone.Add(1)), len(regions))
 		return nil
 	})
 	if err != nil {
@@ -110,8 +174,16 @@ func (defaultAccountScanner) scanAccount(ctx context.Context, q Query, target Ac
 
 	// Route53 and S3 are global; scan once with us-east-1 config.
 	// Failures go to Warnings instead of aborting the account scan.
+	if q.OnProgress != nil {
+		q.OnProgress(fmt.Sprintf("Scanning inventory for %s: Route53 and S3…", label))
+	}
 	globalCfg := awsConfigForRegion(cfg, "us-east-1")
-	scanGlobalResources(ctx, globalCfg, &inv)
+	globalCtx, cancel := context.WithTimeout(ctx, globalScanTimeout)
+	scanGlobalResources(globalCtx, globalCfg, &inv)
+	if errors.Is(globalCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		inv.Warnings = append(inv.Warnings, fmt.Sprintf("route53/s3 scan timed out after %s", globalScanTimeout))
+	}
+	cancel()
 
 	sortInventory(&inv)
 	inv.SkippedRegions = sortRegionWarnings(warnings)
@@ -131,6 +203,26 @@ func awsConfigForRegion(cfg aws.Config, region string) aws.Config {
 	return out
 }
 
+func withInventoryAPILimits(cfg aws.Config) aws.Config {
+	out := cfg.Copy()
+	out.RetryMaxAttempts = 2
+	out.HTTPClient = httpClientWithTimeout(out.HTTPClient, inventoryHTTPTimeout)
+	return out
+}
+
+// httpClientWithTimeout applies a per-request timeout without replacing a
+// caller or SDK transport (custom CA, HTTP/2, proxies). Unknown client types
+// are left unchanged; hung calls still bound by region/global context timeouts.
+func httpClientWithTimeout(client aws.HTTPClient, timeout time.Duration) aws.HTTPClient {
+	if client == nil {
+		return awshttp.NewBuildableClient().WithTimeout(timeout)
+	}
+	if buildable, ok := client.(*awshttp.BuildableClient); ok {
+		return buildable.WithTimeout(timeout)
+	}
+	return client
+}
+
 var (
 	listRegionalEC2    = listEC2Resources
 	listRegionalRDS    = listRDSResources
@@ -142,7 +234,11 @@ var (
 
 // scanRegionalResources lists EC2, RDS, ELB, and Lambda in one region.
 // A failure for one service is recorded as a RegionWarning; other services in
-// that region are still collected.
+// that region are still collected unless the region context is already done.
+// Context cancel/deadline errors are suppressed only when the enclosing region
+// context is done — the caller then adds a single timeout warning. HTTP-client
+// timeouts can surface as DeadlineExceeded while the region context is still
+// active; those must still be recorded.
 func scanRegionalResources(
 	ctx context.Context,
 	cfg aws.Config,
@@ -152,7 +248,7 @@ func scanRegionalResources(
 	warnings *[]RegionWarning,
 ) {
 	record := func(service string, err error) {
-		if err == nil {
+		if err == nil || shouldSuppressServiceWarning(ctx, err) {
 			return
 		}
 		mu.Lock()
@@ -165,9 +261,7 @@ func scanRegionalResources(
 	}
 
 	ec2Inst, volumes, eips, nats, vpcs, err := listRegionalEC2(ctx, newEC2Client(cfg), region)
-	if err != nil {
-		record("ec2", err)
-	}
+	record("ec2", err)
 	// Keep partial EC2 results when only some Describes failed.
 	if len(ec2Inst) > 0 || len(volumes) > 0 || len(eips) > 0 || len(nats) > 0 || len(vpcs) > 0 {
 		mu.Lock()
@@ -178,11 +272,12 @@ func scanRegionalResources(
 		inv.VPCs = append(inv.VPCs, vpcs...)
 		mu.Unlock()
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	rdsInst, rdsClusters, err := listRegionalRDS(ctx, newRDSClient(cfg), region)
-	if err != nil {
-		record("rds", err)
-	}
+	record("rds", err)
 	// Keep partial RDS results when only instances or only clusters failed.
 	if len(rdsInst) > 0 || len(rdsClusters) > 0 {
 		mu.Lock()
@@ -190,22 +285,26 @@ func scanRegionalResources(
 		inv.RDSClusters = append(inv.RDSClusters, rdsClusters...)
 		mu.Unlock()
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	lbs, err := listRegionalLBs(ctx, newELBV2Client(cfg), newELBClient(cfg), region)
-	if err != nil {
-		record("elb", err)
-	}
+	record("elb", err)
 	// Keep partial ELB results when only classic or only v2 failed.
 	if len(lbs) > 0 {
 		mu.Lock()
 		inv.LoadBalancers = append(inv.LoadBalancers, lbs...)
 		mu.Unlock()
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	lambdas, err := listRegionalLambda(ctx, newLambdaClient(cfg), region)
-	if err != nil {
-		record("lambda", err)
-	} else {
+	record("lambda", err)
+	// Keep partial Lambda results when paging failed after some functions listed.
+	if len(lambdas) > 0 {
 		mu.Lock()
 		inv.LambdaFunctions = append(inv.LambdaFunctions, lambdas...)
 		mu.Unlock()
@@ -213,19 +312,40 @@ func scanRegionalResources(
 }
 
 func scanGlobalResources(ctx context.Context, cfg aws.Config, inv *AccountInventory) {
-	if zones, err := listGlobalRoute53(ctx, newRoute53Client(cfg)); err != nil {
+	if ctx.Err() != nil {
+		return
+	}
+	zones, err := listGlobalRoute53(ctx, newRoute53Client(cfg))
+	if err != nil && !shouldSuppressServiceWarning(ctx, err) {
 		inv.Warnings = append(inv.Warnings, "route53: "+err.Error())
-	} else {
+	}
+	// Keep zones listed before a mid-pagination failure.
+	if len(zones) > 0 {
 		inv.HostedZones = zones
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	buckets, err := listGlobalS3(ctx, newS3Client(cfg))
-	if err != nil {
+	if err != nil && !shouldSuppressServiceWarning(ctx, err) {
 		inv.Warnings = append(inv.Warnings, "s3: "+err.Error())
 	}
 	// Keep buckets whose names we listed even when some GetBucketLocation calls failed.
 	if len(buckets) > 0 {
 		inv.S3Buckets = buckets
 	}
+}
+
+func isContextAbort(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// shouldSuppressServiceWarning is true only for cancel/deadline errors that
+// belong to the enclosing scan context. That lets the caller emit one timeout
+// warning instead of per-service noise. HTTP request timeouts can also be
+// DeadlineExceeded while ctx is still active — those must not be suppressed.
+func shouldSuppressServiceWarning(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && isContextAbort(err)
 }
 
 func sortInventory(inv *AccountInventory) {

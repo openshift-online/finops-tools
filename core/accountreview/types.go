@@ -53,7 +53,8 @@ const (
 	StatusOwnerNotFound DeliveryStatus = "owner_not_found"
 	// StatusInvalidOwner means the owner tag is present but is not a usable email.
 	StatusInvalidOwner DeliveryStatus = "invalid_owner"
-	// StatusSkipped means the account was not reviewed (no matches, or assume-role failed).
+	// StatusSkipped means no accounts matched the selection. Assume-role failures
+	// are recorded as InventoryError and still included in review and owner email.
 	StatusSkipped DeliveryStatus = "skipped"
 )
 

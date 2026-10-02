@@ -89,3 +89,20 @@ func TestGroupReportsByOwner(t *testing.T) {
 		t.Fatalf("failures = %d, want 1", len(failures))
 	}
 }
+
+func TestGroupReportsIncludesIncompleteInventory(t *testing.T) {
+	reports := []AccountReport{
+		{
+			AccountID:      "111111111111",
+			OwnerEmail:     "a@redhat.com",
+			InventoryError: "assume-role denied",
+		},
+	}
+	groups, failures := GroupReports(reports, GroupByAccount)
+	if len(failures) != 0 {
+		t.Fatalf("failures = %+v, want none", failures)
+	}
+	if len(groups) != 1 || groups[0].Reports[0].InventoryError != "assume-role denied" {
+		t.Fatalf("groups = %+v", groups)
+	}
+}

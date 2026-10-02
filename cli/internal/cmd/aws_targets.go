@@ -1,4 +1,5 @@
-// aws_targets.go registers shared AWS account target flags for get-cost, snapshot list, and report create.
+// aws_targets.go registers shared AWS account target flags for get-cost,
+// snapshot list, report create, and account details.
 package cmd
 
 import (

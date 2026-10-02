@@ -196,7 +196,8 @@ func buildAccountReport(
 }
 
 // inventoryScanError joins regional API failures and account-level warnings
-// (Route53/S3, credential/region-list errors) into one email-facing string.
+// (Route53/S3, credential/region-list errors) into one operator-facing string.
+// Owner emails replace this with a generic incomplete-inventory note.
 func inventoryScanError(inv inventory.AccountInventory) string {
 	var parts []string
 	for _, w := range inv.SkippedRegions {

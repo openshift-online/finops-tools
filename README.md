@@ -370,7 +370,7 @@ finops config default set --name aws.linked_role --value OrganizationAccountAcce
 finops config default set --name cost.exclude_recent_days --value 2
 ```
 
-Cost query period defaults (`cost.days`, `cost.months`, `cost.from`, `cost.to`, `cost.exclude_recent_days`) apply to `finops account get-cost` and `finops report create` when the matching CLI flag is omitted. Set only one of `cost.days`, `cost.months`, or `cost.from` (optional `cost.to` with `cost.from`).
+Cost query period defaults (`cost.days`, `cost.months`, `cost.from`, `cost.to`, `cost.exclude_recent_days`) apply to `finops account get-cost` and `finops report create` when the matching CLI flag is omitted. Set only one of `cost.days`, `cost.months`, or `cost.from` (optional `cost.to` with `cost.from`). `defaults.cost.exclude_recent_days` also applies to `finops account details`.
 
 Register a **payer** account by **12-digit account ID** (login + save in config):
 
@@ -615,11 +615,13 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 
 `pretty-print` uses colors and Unicode bars when stdout is a TTY. Set `NO_COLOR=1` to disable; `FORCE_COLOR=1` forces colors when piping to a capable viewer.
 
-### Account owner notification (AWS)
+### Account details (AWS)
 
-Gather **monthly cost trends** and **resource inventory** (EC2, RDS, Route53, S3, Lambda, load balancers, and more) for delete/keep decisions, then notify the account owner. The owner email is derived from the Organizations `owner` tag, appending `@redhat.com` when the tag value has no `@` sign.
+Gather **monthly cost trends** and **resource inventory** (EC2, RDS, Route53, S3, Lambda, load balancers, and more) for one or more accounts. The same details are printed to stdout and used in owner notification emails.
 
-Email is sent through **Gmail** using gcloud Application Default Credentials. By default the command only builds reports and prints a delivery plan. To send mail, pass `--send` with either `--yes` (owner addresses) or `--redirect-prefix` (test delivery to `PREFIX+<owner>@redhat.com`).
+The owner email is derived from the Organizations `owner` tag, appending `@redhat.com` when the tag value has no `@` sign.
+
+By default the command prints details and does not send email. To email owners via **Gmail**, pass `--send` with either `--yes` (owner addresses) or `--redirect-prefix` (test delivery to `PREFIX+<owner>@redhat.com`). `--group-by` only affects how emails are batched; stdout is always one record per account. When sending, a delivery summary is written to stderr (pretty-print) so JSON/CSV stdout stays a pure details payload.
 
 A Cost Explorer, inventory, or owner-tag failure on one account is recorded for that account and does not stop the rest of the run.
 
@@ -635,26 +637,40 @@ gcloud auth application-default login \
 # Verify finops can send Gmail with your existing ADC
 finops config gmail login
 
-# Plan only (no email sent)
-finops account notify-owner --account-alias my-linked
+# Print account details (pretty-print)
+finops account details --account-alias my-linked
 
-# Test send to your inbox via plus-addressing
-finops account notify-owner --payer rh-control --account-id 111111111111 --send --redirect-prefix finops
+# Machine-readable details
+finops account details --payer rh-control --ou 'ou-abcd-12345678/*' --format json -o review.json
+
+# Test send to your inbox via plus-addressing (details still go to stdout)
+finops account details --payer rh-control --account-id 111111111111 --send --redirect-prefix finops
 
 # Production send to owner addresses
-finops account notify-owner --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes
+finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--send` | Send emails via Gmail (default: plan only, no send) |
+| `--format` | Details output format: `pretty-print` (default), `json`, or `csv` |
+| `--output` / `-o` | Write details to this file instead of stdout |
+| `--send` | Send owner notification emails via Gmail after printing details |
 | `--yes` | With `--send`, deliver to resolved owner emails |
 | `--redirect-prefix` | With `--send`, deliver to `PREFIX+<owner>@redhat.com` (test mode) |
-| `--group-by` | `account` (default) or `owner` — one email per account or per owner |
+| `--group-by` | `account` (default) or `owner` — one email per account or per owner (send only) |
 | `--months` | Calendar months of cost history to include (default: `6`) |
 | `--exclude-recent-days` | Omit the last N UTC days from the cost end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |
-| `--format` | Delivery summary format: `pretty-print` (default) or `json` |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
+| `--quiet` | Suppress progress messages on stderr |
+| `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential) |
+
+`--format json` on this command is account details (not a delivery summary). Delivery status with `--send` is printed on stderr.
+
+JSON and CSV keep raw numbers (no thousands separators). CSV columns are `account_id`, `account_name`, `owner_email`, `section`, `id`, `name`, `attr1`, `attr2`, `attr3`, `amount`, `currency`, with one row per fact (`account`, `tag`, `month`, `top_service`, `ec2`, `rds`, `rds_cluster`, `route53`, `count`, `owner_error`, `inventory_error`).
+
+When `inventory_error` is set, the scan was incomplete: JSON omits zero `resource_counts` fields, and CSV omits zero `count` rows. Check `inventory_error` before treating missing resources as confirmed unused. Pretty-print and owner email do the same (no “None found” line after a partial scan). Assume-role failures are recorded as inventory errors and still included in owner email with a generic incomplete-scan note.
+
+`--group-by` and `--redirect-prefix` require `--send`.
 
 Gmail API quota/billing defaults to the `hcmfinops` GCP project (via API client options, not by changing ADC). Override with `FINOPS_GMAIL_QUOTA_PROJECT`.
 

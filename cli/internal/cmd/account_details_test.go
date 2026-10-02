@@ -2,67 +2,36 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
-	"github.com/openshift-online/finops-tools/cli/internal/output"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/openshift-online/finops-tools/core/accountreview"
 	"github.com/spf13/cobra"
 )
 
-func TestParseNotifySummaryFormat(t *testing.T) {
+func TestValidateAccountDetailsSendFlags(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		in      string
-		want    output.Format
-		wantErr bool
-	}{
-		{in: "pretty-print", want: output.FormatPrettyPrint},
-		{in: "json", want: output.FormatJSON},
-		{in: "JSON", want: output.FormatJSON},
-		{in: "", want: output.FormatPrettyPrint},
-		{in: "csv", wantErr: true},
-		{in: "CSV", wantErr: true},
-		{in: "yaml", wantErr: true},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.in, func(t *testing.T) {
-			t.Parallel()
-			got, err := parseNotifySummaryFormat(tc.in)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestValidateNotifyOwnerSendFlags(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name     string
-		send     bool
-		yes      bool
-		prefix   string
-		wantFail bool
+		name       string
+		send       bool
+		yes        bool
+		prefix     string
+		groupBySet bool
+		wantFail   bool
 	}{
 		{name: "plan only", send: false, yes: false, prefix: ""},
 		{name: "send owners", send: true, yes: true, prefix: ""},
 		{name: "send redirect", send: true, yes: false, prefix: "finops"},
 		{name: "send missing mode", send: true, yes: false, prefix: "", wantFail: true},
 		{name: "yes without send", send: false, yes: true, prefix: "", wantFail: true},
+		{name: "redirect without send", send: false, yes: false, prefix: "finops", wantFail: true},
+		{name: "group-by without send", send: false, groupBySet: true, wantFail: true},
+		{name: "group-by with send", send: true, yes: true, groupBySet: true},
 		{name: "yes and redirect", send: true, yes: true, prefix: "finops", wantFail: true},
 		{name: "crlf prefix", send: true, yes: false, prefix: "finops\r\nBcc:x", wantFail: true},
 	}
@@ -70,7 +39,7 @@ func TestValidateNotifyOwnerSendFlags(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateNotifyOwnerSendFlags(tc.send, tc.yes, tc.prefix)
+			err := validateAccountDetailsSendFlags(tc.send, tc.yes, tc.prefix, tc.groupBySet)
 			if tc.wantFail && err == nil {
 				t.Fatal("expected error")
 			}
@@ -81,7 +50,7 @@ func TestValidateNotifyOwnerSendFlags(t *testing.T) {
 	}
 }
 
-func TestNotifyOwnerAfterSummary(t *testing.T) {
+func TestAccountDetailsAfterSummary(t *testing.T) {
 	t.Parallel()
 
 	writeErr := errors.New("write failed")
@@ -114,7 +83,7 @@ func TestNotifyOwnerAfterSummary(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := notifyOwnerAfterSummary(tc.summaryErr, tc.results)
+			err := accountDetailsAfterSummary(tc.summaryErr, tc.results)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("error = %v, want %v", err, tc.wantErr)
@@ -134,15 +103,15 @@ func TestNotifyOwnerAfterSummary(t *testing.T) {
 	}
 }
 
-func TestWriteNotifyDeliverySummaryCounts(t *testing.T) {
+func TestWriteAccountDetailsDeliverySummaryCounts(t *testing.T) {
 	var buf strings.Builder
-	err := writeNotifyDeliverySummary(&buf, output.FormatPrettyPrint, []accountreview.DeliveryResult{
+	err := writeAccountDetailsDeliverySummary(&buf, []accountreview.DeliveryResult{
 		{OwnerEmail: "a@redhat.com", Status: accountreview.StatusPlanned, Reason: "not sent"},
 		{AccountID: "111111111111", Status: accountreview.StatusOwnerNotFound, Reason: "owner tag not found"},
 		{AccountID: "222222222222", Status: accountreview.StatusSkipped, Reason: "role assumption failed"},
 	})
 	if err != nil {
-		t.Fatalf("writeNotifyDeliverySummary() error = %v", err)
+		t.Fatalf("writeAccountDetailsDeliverySummary() error = %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "Planned") || !strings.Contains(out, "Failed") || !strings.Contains(out, "Skipped") {
@@ -150,20 +119,94 @@ func TestWriteNotifyDeliverySummaryCounts(t *testing.T) {
 	}
 }
 
-func TestRunAccountNotifyOwnerRequiresSelection(t *testing.T) {
+func TestRunAccountDetailsRequiresSelection(t *testing.T) {
 	t.Cleanup(func() {
-		notifyOwnerSend = false
-		notifyOwnerYes = false
-		notifyOwnerRedirectPrefix = ""
-		notifyOwnerAccount = ""
-		notifyOwnerPayer = ""
+		detailsSend = false
+		detailsYes = false
+		detailsRedirectPrefix = ""
+		detailsAccount = ""
+		detailsPayer = ""
+		detailsOutput = ""
 	})
 
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	err := runAccountNotifyOwner(cmd, nil)
+	err := runAccountDetails(cmd, nil)
 	if err == nil {
 		t.Fatal("expected error without account selection")
+	}
+}
+
+func TestAccountDetailsHasNoNotifyOwnerAlias(t *testing.T) {
+	if len(accountDetailsCmd.Aliases) != 0 {
+		t.Fatalf("aliases = %v, want none", accountDetailsCmd.Aliases)
+	}
+	cmd, args, err := accountCmd.Find([]string{"notify-owner"})
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if cmd == accountDetailsCmd || cmd.Name() == "notify-owner" {
+		t.Fatalf("notify-owner should not resolve, got %q args=%v", cmd.Name(), args)
+	}
+}
+
+func TestAccountDetailsFormatFlagAllowsCSV(t *testing.T) {
+	flag := accountDetailsCmd.Flags().Lookup("format")
+	if flag == nil {
+		t.Fatal("missing --format")
+	}
+	if !strings.Contains(flag.Usage, "csv") {
+		t.Fatalf("format help = %q", flag.Usage)
+	}
+	if accountDetailsCmd.Flags().Lookup("output") == nil {
+		t.Fatal("missing --output")
+	}
+}
+
+func TestAccountReviewBuildHookDefaultsToCore(t *testing.T) {
+	if accountReviewBuild == nil {
+		t.Fatal("accountReviewBuild is nil")
+	}
+}
+
+func TestCachedConfigLoaderCallsOnce(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	load := cachedConfigLoader(func(context.Context) (aws.Config, error) {
+		calls.Add(1)
+		return aws.Config{Region: "us-east-1"}, nil
+	})
+	cfg1, err := load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg2, err := load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d, want 1", calls.Load())
+	}
+	if cfg1.Region != "us-east-1" || cfg2.Region != "us-east-1" {
+		t.Fatalf("cfg = %+v / %+v", cfg1, cfg2)
+	}
+}
+
+func TestCachedConfigLoaderCachesError(t *testing.T) {
+	t.Parallel()
+	want := errors.New("assume-role denied")
+	var calls atomic.Int32
+	load := cachedConfigLoader(func(context.Context) (aws.Config, error) {
+		calls.Add(1)
+		return aws.Config{}, want
+	})
+	_, err1 := load(context.Background())
+	_, err2 := load(context.Background())
+	if !errors.Is(err1, want) || !errors.Is(err2, want) {
+		t.Fatalf("err1=%v err2=%v", err1, err2)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d, want 1", calls.Load())
 	}
 }

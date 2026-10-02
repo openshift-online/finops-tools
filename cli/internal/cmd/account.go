@@ -8,7 +8,7 @@ import (
 var accountCmd = &cobra.Command{
 	Use:   "account",
 	Short: "Account billing and cost",
-	Long:  "Fetch cost and usage for registered or targeted cloud accounts.",
+	Long:  "Fetch cost, usage, and account review details for registered or targeted cloud accounts.",
 }
 
 func init() {

@@ -50,6 +50,8 @@ func writeNotifySummaryPretty(w io.Writer, summary NotifySummary) error {
 	table := tablewriter.NewWriter(w)
 	table.SetAutoWrapText(false)
 	table.SetBorder(false)
+	// Title()/ToUpper would turn SGR "\033[1m" into "\033[1M" (CSI Delete Line) and erase headers.
+	table.SetAutoFormatHeaders(false)
 	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 	table.SetAlignment(tablewriter.ALIGN_LEFT)
 	table.SetTablePadding("\t")
@@ -60,15 +62,19 @@ func writeNotifySummaryPretty(w io.Writer, summary NotifySummary) error {
 		cell(s, s.bold, "REASON"),
 	})
 	for _, r := range summary.Results {
-		account := r.AccountID
+		account := SanitizeTerminal(r.AccountID)
 		if len(r.AccountIDs) > 0 {
-			account = strings.Join(r.AccountIDs, ", ")
+			ids := make([]string, len(r.AccountIDs))
+			for i, id := range r.AccountIDs {
+				ids[i] = SanitizeTerminal(id)
+			}
+			account = strings.Join(ids, ", ")
 		}
-		reason := r.Reason
+		reason := SanitizeTerminal(r.Reason)
 		if reason == "" {
 			reason = s.dim("-")
 		}
-		owner := r.OwnerEmail
+		owner := SanitizeTerminal(r.OwnerEmail)
 		if owner == "" {
 			owner = s.dim("-")
 		}
