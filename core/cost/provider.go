@@ -103,6 +103,9 @@ type CostQuery struct {
 	Progress FetchProgress
 	// Workers bounds concurrent Cost Explorer queries for multi-account fetches (0 = default).
 	Workers int
+	// RequireDailyCoverage makes FetchDaily reject missing dates and retain
+	// explicitly reported zero-cost days, before combining account/batch data.
+	RequireDailyCoverage bool
 }
 
 // AccountTarget identifies an AWS account whose costs are fetched.
@@ -351,7 +354,7 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 				return nil, "", fmt.Errorf("cannot merge accounts with different currencies (%s vs %s)", currency, cur)
 			}
 		}
-		return MergeDaily(series), currency, nil
+		return mergeDaily(series, q.RequireDailyCoverage), currency, nil
 	case ProviderGCP:
 		return nil, "", fmt.Errorf("%w: gcp", errProviderNotImplemented)
 	default:
