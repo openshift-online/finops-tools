@@ -597,9 +597,10 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--account-id` | One or more comma-separated **12-digit AWS account IDs** (provider-native IDs; unregistered members require `--payer`) |
 | `--account-alias` | One or more comma-separated configured aliases (e.g. `rh-control`, or a linked alias such as `quay`) |
 | `--ou` | One or more comma-separated AWS OU (`ou-xxxx-yyyyy`) or org-root (`r-xxxx`) IDs; requires `--payer`. Optional scope suffix per ID: bare or `/**` = full subtree (default), `/` = accounts directly in that parent only, `/*` = parent + immediate child OUs only |
-| `--payer` | Registered payer alias. Alone selects all active org members; also required with `--ou` / `--tag`, or with unregistered `--account-id` IDs |
+| `--payer` | Registered payer alias. Alone selects org members (ACTIVE only unless `--include-closed-accounts`); also required with `--ou` / `--tag`, or with unregistered `--account-id` IDs |
 | `--tag` | Select org accounts by Organizations tag: `KEY` or `KEY=VALUE` (requires `--payer`) |
-| `--skip-org-cache` | Bypass cached organization account/tag data (always fetch live from AWS) |
+| `--include-closed-accounts` | `finops account get-cost` only. With `--ou` or `--payer` alone, also select `SUSPENDED` and `PENDING_CLOSURE` members (default: ACTIVE only). Ignored with a warning for `--tag` (already all statuses) and `--account-id`/`--account-alias` |
+| `--skip-org-cache` | Bypass cached organization account/tag data for `--tag` selection (always fetch live from AWS) |
 | `--refresh-org-cache` | Ignore cached organization data and refresh the cache from AWS (mutually exclusive with `--skip-org-cache`) |
 | `--days` | Last N calendar days (mutually exclusive with `--months` and `--from`/`--to`) |
 | `--months` | Last N calendar months from the 1st of the month (mutually exclusive with `--days` and `--from`/`--to`) |
@@ -653,6 +654,7 @@ finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner
 | Flag | Description |
 |------|-------------|
 | `--format` | Details output format: `pretty-print` (default), `json`, or `csv` |
+| `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (`--ou`/`--payer` are ACTIVE members only; `--include-closed-accounts` is get-cost only) |
 | `--output` / `-o` | Write details to this file instead of stdout |
 | `--send` | Send owner notification emails via Gmail after printing details |
 | `--yes` | With `--send`, deliver to resolved owner emails |
@@ -693,7 +695,7 @@ finops snapshot list --account-id 333333333333 --payer rhc --older-than-days 90 
 | `--types` | Snapshot types to scan: `ebs`, `rds`, or comma-separated (default: `ebs,rds`) |
 | `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
 | `--min-size-gib` | Skip snapshots smaller than this size in GiB (default: `0`) |
-| `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` |
+| `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (`--ou`/`--payer` are ACTIVE members only; `--include-closed-accounts` is get-cost only) |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr |
@@ -728,8 +730,8 @@ The **costs** template includes:
 |------|-------------|
 | `template` | Positional argument: report template name (run `finops report list` for options) |
 | `--format` | Output format (default: `html`) |
-| `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (exactly one mode) |
-| `--skip-org-cache` | Bypass cached organization account/tag data |
+| `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (exactly one mode; `--ou`/`--payer` are ACTIVE members only; `--include-closed-accounts` is get-cost only) |
+| `--skip-org-cache` | Bypass cached organization account/tag data for `--tag` selection |
 | `--refresh-org-cache` | Refresh organization cache from AWS |
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 | `--output` / `-o` | Write HTML to a file instead of stdout |
@@ -741,7 +743,7 @@ Progress lines (tag resolution, credential checks, Cost Explorer queries) are pr
 
 Use `--quiet` to suppress progress messages.
 
-Tag-based account selection caches organization account and tag listings via the shared finops cache service (`cli/internal/cache`) under `cache/org/<payer-account-id>.json` next to your config (default TTL: 1 hour). Use `--refresh-org-cache` to force a refresh or `--skip-org-cache` to always query AWS live.
+Tag-based account selection caches organization account and tag listings via the shared finops cache service (`cli/internal/cache`) under `cache/org/<payer-account-id>.json` next to your config (default TTL: 1 hour). Use `--refresh-org-cache` to force a refresh or `--skip-org-cache` to always query AWS live. These cache flags apply to `--tag` selection only.
 
 When many linked accounts under the same payer are queried together (typical for `--payer` alone, `--tag`, or `--ou`), `finops account get-cost` uses **bulk Cost Explorer queries** grouped by linked account instead of one API call per account (usually a single CE call for up to 100 linked accounts; use `--workers` to parallelize batched CE calls when there are more than 100 accounts). `finops snapshot list` and `finops report create costs` use `--workers` (default `25`, max `1000`) to parallelize per-account scans, assume-role setup, and batched CE queries when selections are large.
 

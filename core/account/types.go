@@ -38,7 +38,13 @@ type ListAccountsInOUOptions struct {
 	// Deprecated: prefer MaxDepth pointing at 0; when true, overrides MaxDepth.
 	DirectOnly bool
 	// Status filters accounts by Organizations status (default ACTIVE).
+	// Ignored when AllStatuses is true.
 	Status string
+	// IncludeClosed also lists SUSPENDED and PENDING_CLOSURE accounts when Status is empty
+	// (default ACTIVE only).
+	IncludeClosed bool
+	// AllStatuses lists every Organizations status (used by tag scans and OU rollup mapping).
+	AllStatuses bool
 }
 
 // AccountOUBucket is the OU rollup bucket for an account under a selection root.

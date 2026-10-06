@@ -16,14 +16,15 @@ import (
 )
 
 type costTargetSelector struct {
-	AccountIDs      []string
-	Aliases         []string
-	OUs             []configstore.OUSelector
-	PayerAlias      string
-	TagKey          string
-	TagValue        string
-	OrgCacheSkip    bool
-	OrgCacheRefresh bool
+	AccountIDs            []string
+	Aliases               []string
+	OUs                   []configstore.OUSelector
+	PayerAlias            string
+	TagKey                string
+	TagValue              string
+	OrgCacheSkip          bool
+	OrgCacheRefresh       bool
+	IncludeClosedAccounts bool
 	// SelectionRootID is set after OU/org resolution for --group-by ou rollup.
 	SelectionRootID string
 }
@@ -67,12 +68,13 @@ var buildOUAccountMapping = coreaccount.BuildOUAccountMapping
 
 func parseCostTargetSelector(
 	accountFlag, aliasFlag, ouFlag, payerFlag, tagFlag string,
-	orgCacheSkip, orgCacheRefresh bool,
+	orgCacheSkip, orgCacheRefresh, includeClosedAccounts bool,
 ) (costTargetSelector, error) {
 	sel := costTargetSelector{
-		PayerAlias:      strings.TrimSpace(payerFlag),
-		OrgCacheSkip:    orgCacheSkip,
-		OrgCacheRefresh: orgCacheRefresh,
+		PayerAlias:            strings.TrimSpace(payerFlag),
+		OrgCacheSkip:          orgCacheSkip,
+		OrgCacheRefresh:       orgCacheRefresh,
+		IncludeClosedAccounts: includeClosedAccounts,
 	}
 	var err error
 
@@ -210,6 +212,8 @@ func resolveCostTargets(
 		return nil, err
 	}
 
+	warnIfIncludeClosedAccountsIgnored(cmd, *sel, mode)
+
 	ctx := awsCommandContext(cmd)
 	switch mode {
 	case costTargetModeTag:
@@ -225,8 +229,28 @@ func resolveCostTargets(
 	}
 }
 
+func warnIfIncludeClosedAccountsIgnored(cmd *cobra.Command, sel costTargetSelector, mode costTargetSelectionMode) {
+	if !sel.IncludeClosedAccounts {
+		return
+	}
+	var msg string
+	switch mode {
+	case costTargetModeExplicit:
+		msg = "warning: --include-closed-accounts has no effect with --account-id/--account-alias (accounts are selected explicitly regardless of Organizations status)\n"
+	case costTargetModeTag:
+		msg = "warning: --include-closed-accounts has no effect with --tag (tag selection already includes all Organizations statuses)\n"
+	default:
+		return
+	}
+	_, _ = fmt.Fprint(cmd.ErrOrStderr(), msg)
+}
+
 func resolveCostTargetsExplicit(cfg configstore.File, sel costTargetSelector) ([]cost.AccountTarget, error) {
 	return configstore.ResolveCostTargets(cfg, sel.AccountIDs, sel.Aliases, sel.PayerAlias)
+}
+
+func organizationMemberListOptions(includeClosed bool) coreaccount.ListAccountsInOUOptions {
+	return coreaccount.ListAccountsInOUOptions{IncludeClosed: includeClosed}
 }
 
 func resolveCostTargetsWithOU(
@@ -252,14 +276,19 @@ func resolveCostTargetsWithOU(
 	memberIDs := make([]string, 0)
 	seenMembers := make(map[string]struct{})
 	namesByID := make(map[string]string)
+	listOpts := organizationMemberListOptions(sel.IncludeClosedAccounts)
 	for _, ouSel := range sel.OUs {
 		accounts, err := listAccountsUnderParent(ctx, payerCfg, ouSel.ID, coreaccount.ListAccountsInOUOptions{
-			MaxDepth: ouSel.MaxDepth,
+			MaxDepth:      ouSel.MaxDepth,
+			IncludeClosed: listOpts.IncludeClosed,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("OU %s: %w", ouSel.ID, err)
 		}
 		if len(accounts) == 0 {
+			if sel.IncludeClosedAccounts {
+				return nil, fmt.Errorf("no accounts found in OU %s", ouSel.ID)
+			}
 			return nil, fmt.Errorf("no active accounts found in OU %s", ouSel.ID)
 		}
 		for _, acct := range accounts {
@@ -319,7 +348,7 @@ func resolveCostTargetsAllLinked(
 	sel.SelectionRootID = rootID
 
 	costStep(status, "Resolving organization member accounts…")
-	members, err := listOrganizationMemberAccounts(ctx, awsCfg, payerID)
+	members, err := listOrganizationMemberAccounts(ctx, awsCfg, payerID, organizationMemberListOptions(sel.IncludeClosedAccounts))
 	if err != nil {
 		return nil, fmt.Errorf("list organization member accounts: %w", err)
 	}

@@ -471,7 +471,7 @@ func TestListOrganizationMemberAccountsWithClient(t *testing.T) {
 		},
 	}
 
-	accounts, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012")
+	accounts, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012", ListAccountsInOUOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +482,38 @@ func TestListOrganizationMemberAccountsWithClient(t *testing.T) {
 	for _, acct := range accounts {
 		ids[acct.ID] = struct{}{}
 	}
+	if _, ok := ids["333333333333"]; ok {
+		t.Fatalf("suspended member included by default: %+v", accounts)
+	}
 	for _, want := range []string{"111111111111", "222222222222"} {
+		if _, ok := ids[want]; !ok {
+			t.Fatalf("missing account %s in %+v", want, accounts)
+		}
+	}
+}
+
+func TestListOrganizationMemberAccountsWithClientIncludeClosed(t *testing.T) {
+	client := fakeOrganizationsWithStatus{
+		accounts: map[string]struct {
+			name   string
+			status types.AccountStatus
+		}{
+			"123456789012": {name: "Payer", status: types.AccountStatusActive},
+			"111111111111": {name: "Member One", status: types.AccountStatusActive},
+			"333333333333": {name: "Suspended", status: types.AccountStatusSuspended},
+			"666666666666": {name: "Pending Closure", status: types.AccountStatusPendingClosure},
+		},
+	}
+
+	accounts, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012", ListAccountsInOUOptions{IncludeClosed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]struct{}{}
+	for _, acct := range accounts {
+		ids[acct.ID] = struct{}{}
+	}
+	for _, want := range []string{"111111111111", "333333333333", "666666666666"} {
 		if _, ok := ids[want]; !ok {
 			t.Fatalf("missing account %s in %+v", want, accounts)
 		}
@@ -498,7 +529,7 @@ func TestListOrganizationMemberAccountsWithClientNoMembers(t *testing.T) {
 			"123456789012": {name: "Payer", status: types.AccountStatusActive},
 		},
 	}
-	_, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012")
+	_, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012", ListAccountsInOUOptions{})
 	if err == nil {
 		t.Fatal("expected error when no member accounts remain")
 	}
@@ -818,6 +849,7 @@ func testOUHierarchy() fakeOUHierarchy {
 			"ou-root-sandbox0": {
 				{Id: aws.String("444444444444"), Name: aws.String("Sandbox One"), Status: types.AccountStatusActive},
 				{Id: aws.String("555555555555"), Name: aws.String("Suspended"), Status: types.AccountStatusSuspended},
+				{Id: aws.String("666666666666"), Name: aws.String("Pending Closure"), Status: types.AccountStatusPendingClosure},
 			},
 		},
 	}
@@ -982,6 +1014,26 @@ func TestListAccountsInOUSkipsSuspended(t *testing.T) {
 	}
 }
 
+func TestListAccountsInOUIncludeClosed(t *testing.T) {
+	client := testOUHierarchy()
+	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-sandbox0", ListAccountsInOUOptions{
+		DirectOnly:    true,
+		IncludeClosed: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]struct{}{}
+	for _, acct := range accounts {
+		ids[acct.ID] = struct{}{}
+	}
+	for _, want := range []string{"444444444444", "555555555555", "666666666666"} {
+		if _, ok := ids[want]; !ok {
+			t.Fatalf("missing account %s in %+v", want, accounts)
+		}
+	}
+}
+
 func TestListAccountsInOUMaxDepthChildren(t *testing.T) {
 	client := testOUHierarchy()
 	// Depth 1 under ou-root-prod0000: direct accounts + ou-prod-teama000 accounts (no deeper OUs anyway).
@@ -1009,7 +1061,7 @@ func TestListAccountsInOUMaxDepthChildren(t *testing.T) {
 
 func TestBuildOUAccountMapping(t *testing.T) {
 	client := testOUHierarchy()
-	ids := []string{"111111111111", "222222222222", "333333333333", "444444444444"}
+	ids := []string{"111111111111", "222222222222", "333333333333", "444444444444", "555555555555", "666666666666"}
 	parents, hierarchy, err := buildOUAccountMappingWithClient(context.Background(), client, "r-root", ids)
 	if err != nil {
 		t.Fatal(err)
@@ -1022,6 +1074,12 @@ func TestBuildOUAccountMapping(t *testing.T) {
 	}
 	if parents["444444444444"].ID != "ou-root-sandbox0" {
 		t.Fatalf("444 parent = %+v", parents["444444444444"])
+	}
+	if parents["555555555555"].ID != "ou-root-sandbox0" {
+		t.Fatalf("555 parent = %+v", parents["555555555555"])
+	}
+	if parents["666666666666"].ID != "ou-root-sandbox0" {
+		t.Fatalf("666 parent = %+v", parents["666666666666"])
 	}
 	if len(hierarchy) < 4 {
 		t.Fatalf("hierarchy = %+v", hierarchy)
@@ -1042,7 +1100,7 @@ func TestBuildOUAccountMapping(t *testing.T) {
 
 func TestMapAccountsToChildOUs(t *testing.T) {
 	client := testOUHierarchy()
-	ids := []string{"111111111111", "222222222222", "333333333333", "444444444444"}
+	ids := []string{"111111111111", "222222222222", "333333333333", "444444444444", "555555555555"}
 	got, err := mapAccountsToChildOUsWithClient(context.Background(), client, "r-root", ids)
 	if err != nil {
 		t.Fatal(err)
@@ -1055,6 +1113,9 @@ func TestMapAccountsToChildOUs(t *testing.T) {
 	}
 	if got["444444444444"].ID != "ou-root-sandbox0" || got["444444444444"].Name != "Sandbox" {
 		t.Fatalf("444 = %+v", got["444444444444"])
+	}
+	if got["555555555555"].ID != "ou-root-sandbox0" {
+		t.Fatalf("555 = %+v", got["555555555555"])
 	}
 }
 

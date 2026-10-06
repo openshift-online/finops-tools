@@ -14,19 +14,20 @@ import (
 )
 
 var (
-	costGetAccount         string
-	costGetAccountAliases  string
-	costGetFormat          string
-	costGetOutput          string
-	costGetOU              string
-	costGetPayer           string
-	costGetProvider        string
-	costGetGroupBy         string
-	costGetTag             string
-	costGetQuiet           bool
-	costGetSkipOrgCache    bool
-	costGetRefreshOrgCache bool
-	costGetWorkers         int
+	costGetAccount               string
+	costGetAccountAliases        string
+	costGetFormat                string
+	costGetOutput                string
+	costGetOU                    string
+	costGetPayer                 string
+	costGetProvider              string
+	costGetGroupBy               string
+	costGetTag                   string
+	costGetQuiet                 bool
+	costGetSkipOrgCache          bool
+	costGetRefreshOrgCache       bool
+	costGetIncludeClosedAccounts bool
+	costGetWorkers               int
 )
 
 var accountGetCostCmd = &cobra.Command{
@@ -36,8 +37,8 @@ var accountGetCostCmd = &cobra.Command{
 
 Account selection (exactly one mode):
   --account-id / --account-alias   Explicit accounts (optional --payer for unregistered member IDs)
-  --payer                       All active member accounts in the payer's organization
-  --payer --ou                  Accounts under an OU or org root (scope suffix on each ID)
+  --payer                       All member accounts in the payer's organization (ACTIVE only unless --include-closed-accounts)
+  --payer --ou                  Accounts under an OU or org root (ACTIVE only unless --include-closed-accounts)
   --payer --tag KEY[=VALUE]     Accounts matching an Organizations tag
 
 --ou scope suffixes (per ID):
@@ -68,7 +69,7 @@ Only AWS is supported today; GCP will be added later.`,
 		sel, err := parseCostTargetSelector(
 			costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
 			costGetTag,
-			costGetSkipOrgCache, costGetRefreshOrgCache,
+			costGetSkipOrgCache, costGetRefreshOrgCache, costGetIncludeClosedAccounts,
 		)
 		if err != nil {
 			return err
@@ -107,6 +108,8 @@ func init() {
 		SkipOrgCache:    &costGetSkipOrgCache,
 		RefreshOrgCache: &costGetRefreshOrgCache,
 	})
+	accountGetCostCmd.Flags().BoolVar(&costGetIncludeClosedAccounts, "include-closed-accounts", false,
+		"Include SUSPENDED and PENDING_CLOSURE organization accounts when selecting by --ou or --payer (default: ACTIVE only; ignored with a warning for --tag and --account-id/--account-alias)")
 	accountGetCostCmd.Flags().StringVar(&costGetFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
 	addOutputFlag(accountGetCostCmd, &costGetOutput)
@@ -154,7 +157,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		costGetAccount, costGetAccountAliases, costGetOU, costGetPayer,
 		costGetTag,
-		costGetSkipOrgCache, costGetRefreshOrgCache,
+		costGetSkipOrgCache, costGetRefreshOrgCache, costGetIncludeClosedAccounts,
 	)
 	if err != nil {
 		return err

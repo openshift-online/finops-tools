@@ -40,8 +40,8 @@ var snapshotListCmd = &cobra.Command{
 	Short: "List EBS and RDS snapshots with estimated storage costs",
 	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
-Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone.
-Linked member accounts are scanned using role assumption from the payer.
+Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone
+(--ou/--payer select ACTIVE members only). Linked member accounts are scanned using role assumption from the payer.
 Accounts that cannot be assumed into, or that fail credentialed API calls during the scan,
 are skipped and listed under "Skipped accounts" in the output.
 
@@ -68,7 +68,7 @@ Examples:
 		sel, err := parseCostTargetSelector(
 			snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 			snapshotListTag,
-			snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
+			snapshotListSkipOrgCache, snapshotListRefreshOrgCache, false,
 		)
 		if err != nil {
 			return err
@@ -162,7 +162,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
 		snapshotListTag,
-		snapshotListSkipOrgCache, snapshotListRefreshOrgCache,
+		snapshotListSkipOrgCache, snapshotListRefreshOrgCache, false,
 	)
 	if err != nil {
 		return err

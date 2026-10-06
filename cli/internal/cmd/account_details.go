@@ -48,8 +48,8 @@ account tag (default key: owner), appending @redhat.com when the tag value has
 no @ sign.
 
 Account selection matches finops account get-cost: --account-id, --account-alias,
---ou, --tag, or --payer alone. Linked member accounts are scanned using role
-assumption from the payer.
+--ou, --tag, or --payer alone (--ou/--payer select ACTIVE members only). Linked
+member accounts are scanned using role assumption from the payer.
 
 By default the command prints details and does not send email. To email owners
 via Gmail, pass --send with either --yes (owner addresses) or --redirect-prefix
@@ -74,7 +74,7 @@ Examples:
 		sel, err := parseCostTargetSelector(
 			detailsAccount, detailsAccountAliases, detailsOU, detailsPayer,
 			detailsTag,
-			detailsSkipOrgCache, detailsRefreshOrgCache,
+			detailsSkipOrgCache, detailsRefreshOrgCache, false,
 		)
 		if err != nil {
 			return err
@@ -189,7 +189,7 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 	sel, err := parseCostTargetSelector(
 		detailsAccount, detailsAccountAliases, detailsOU, detailsPayer,
 		detailsTag,
-		detailsSkipOrgCache, detailsRefreshOrgCache,
+		detailsSkipOrgCache, detailsRefreshOrgCache, false,
 	)
 	if err != nil {
 		return err

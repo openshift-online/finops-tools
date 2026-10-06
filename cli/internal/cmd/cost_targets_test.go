@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
@@ -184,7 +185,7 @@ func TestResolveCostTargetsOrg(t *testing.T) {
 	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
-	listOrganizationMemberAccounts = func(context.Context, aws.Config, string) ([]coreaccount.OrganizationAccount, error) {
+	listOrganizationMemberAccounts = func(context.Context, aws.Config, string, coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
 		return []coreaccount.OrganizationAccount{
 			{ID: "123456789012", Name: "Payer"},
 			{ID: "111111111111", Name: "Prod"},
@@ -394,8 +395,85 @@ func TestParseTagFlag(t *testing.T) {
 	}
 }
 
+func TestWarnIfIncludeClosedAccountsIgnored(t *testing.T) {
+	tests := []struct {
+		name    string
+		include bool
+		mode    costTargetSelectionMode
+		want    string
+	}{
+		{
+			name:    "explicit",
+			include: true,
+			mode:    costTargetModeExplicit,
+			want:    "warning: --include-closed-accounts has no effect with --account-id/--account-alias",
+		},
+		{
+			name:    "tag",
+			include: true,
+			mode:    costTargetModeTag,
+			want:    "warning: --include-closed-accounts has no effect with --tag",
+		},
+		{name: "ou", include: true, mode: costTargetModeOU},
+		{name: "org", include: true, mode: costTargetModeOrg},
+		{name: "explicit flag off", include: false, mode: costTargetModeExplicit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			var errOut bytes.Buffer
+			cmd.SetErr(&errOut)
+			warnIfIncludeClosedAccountsIgnored(cmd, costTargetSelector{IncludeClosedAccounts: tt.include}, tt.mode)
+			got := errOut.String()
+			if tt.want == "" {
+				if got != "" {
+					t.Fatalf("unexpected warning: %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("stderr = %q, want substring %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveCostTargetsExplicitWarnsIncludeClosedAccounts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &cobra.Command{}
+	var errOut bytes.Buffer
+	cmd.SetErr(&errOut)
+	sel := costTargetSelector{Aliases: []string{"rh-control"}, IncludeClosedAccounts: true}
+	if _, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "warning: --include-closed-accounts has no effect with --account-id/--account-alias") {
+		t.Fatalf("missing warning, stderr = %q", errOut.String())
+	}
+}
+
+func TestIncludeClosedAccountsFlagGetCostOnly(t *testing.T) {
+	if accountGetCostCmd.Flags().Lookup("include-closed-accounts") == nil {
+		t.Fatal("get-cost should register --include-closed-accounts")
+	}
+	for _, cmd := range []*cobra.Command{accountDetailsCmd, snapshotListCmd, reportCreateCmd} {
+		if cmd.Flags().Lookup("include-closed-accounts") != nil {
+			t.Fatalf("%s should not register --include-closed-accounts", cmd.Name())
+		}
+	}
+}
+
 func TestParseCostTargetSelectorOUScope(t *testing.T) {
-	sel, err := parseCostTargetSelector("", "", "ou-abcd-12345678/,ou-efgh-56789012/*", "rh-control", "", false, false)
+	sel, err := parseCostTargetSelector("", "", "ou-abcd-12345678/,ou-efgh-56789012/*", "rh-control", "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
