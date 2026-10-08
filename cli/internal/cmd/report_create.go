@@ -33,6 +33,9 @@ var reportCreateCmd = &cobra.Command{
 	Short: "Create a report from a template",
 	Long: `Create a report for configured cloud accounts.
 
+AWS account selection matches finops account get-cost (--ou/--payer select ACTIVE
+members only).
+
 Example:
   finops report list
   finops report create costs --account-alias rh-control
@@ -51,7 +54,7 @@ Example:
 		sel, err := parseCostTargetSelector(
 			reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 			reportGenerateTag,
-			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+			reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache, false,
 		)
 		if err != nil {
 			return err
@@ -123,7 +126,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	sel, err := parseCostTargetSelector(
 		reportGenerateAccount, reportGenerateAccountAliases, reportGenerateOU, reportGeneratePayer,
 		reportGenerateTag,
-		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache,
+		reportGenerateSkipOrgCache, reportGenerateRefreshOrgCache, false,
 	)
 	if err != nil {
 		return err

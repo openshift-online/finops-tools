@@ -200,7 +200,7 @@ func filterOrganizationAccountsByTagWithClient(ctx context.Context, client Organ
 
 func scanOrganizationAccountTagsWithClient(ctx context.Context, client OrganizationsAPI, progress TagFilterProgress) ([]OrganizationAccountTags, error) {
 	tagFilterStep(progress, "Listing organization accounts…")
-	accounts, err := listOrganizationAccountsWithClient(ctx, client, "")
+	accounts, err := listOrganizationAccountsWithClient(ctx, client, ListAccountsInOUOptions{AllStates: true})
 	if err != nil {
 		return nil, err
 	}
@@ -249,14 +249,31 @@ func accountTagsMatchFilter(tags []Tag, tagKey, tagValue string) bool {
 	return false
 }
 
-func listOrganizationAccountsWithClient(ctx context.Context, client OrganizationsAPI, statusFilter string) ([]OrganizationAccount, error) {
+func accountStateMatches(state types.AccountState, opts ListAccountsInOUOptions) bool {
+	if opts.AllStates {
+		return true
+	}
+	if s := strings.TrimSpace(opts.State); s != "" {
+		return string(state) == s
+	}
+	switch state {
+	case types.AccountStateActive:
+		return true
+	case types.AccountStateSuspended, types.AccountStatePendingClosure, types.AccountStateClosed:
+		return opts.IncludeClosed
+	default:
+		return false
+	}
+}
+
+func listOrganizationAccountsWithClient(ctx context.Context, client OrganizationsAPI, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
 	accounts, err := listAllOrganizationAccounts(ctx, client)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]OrganizationAccount, 0, len(accounts))
 	for _, acct := range accounts {
-		if statusFilter != "" && string(acct.Status) != statusFilter {
+		if !accountStateMatches(acct.State, opts) {
 			continue
 		}
 		name, err := accountNameFromOrganizationAccount(&acct, aws.ToString(acct.Id))
@@ -291,19 +308,21 @@ func listAllOrganizationAccounts(ctx context.Context, client OrganizationsAPI) (
 	return all, nil
 }
 
-// ListOrganizationAccounts returns all organization accounts.
+// ListOrganizationAccounts returns all organization accounts regardless of state.
 func ListOrganizationAccounts(ctx context.Context, cfg aws.Config) ([]OrganizationAccount, error) {
-	return listOrganizationAccountsWithClient(ctx, newOrganizationsClient(cfg), "")
+	return listOrganizationAccountsWithClient(ctx, newOrganizationsClient(cfg), ListAccountsInOUOptions{AllStates: true})
 }
 
-// ListOrganizationMemberAccounts returns ACTIVE organization accounts excluding excludeAccountID (typically the payer).
-func ListOrganizationMemberAccounts(ctx context.Context, cfg aws.Config, excludeAccountID string) ([]OrganizationAccount, error) {
-	return listOrganizationMemberAccountsWithClient(ctx, newOrganizationsClient(cfg), excludeAccountID)
+// ListOrganizationMemberAccounts returns organization accounts excluding excludeAccountID
+// (typically the payer). Default opts list ACTIVE accounts only; IncludeClosed also
+// includes SUSPENDED, PENDING_CLOSURE, and CLOSED, and AllStates lists every state.
+func ListOrganizationMemberAccounts(ctx context.Context, cfg aws.Config, excludeAccountID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
+	return listOrganizationMemberAccountsWithClient(ctx, newOrganizationsClient(cfg), excludeAccountID, opts)
 }
 
-func listOrganizationMemberAccountsWithClient(ctx context.Context, client OrganizationsAPI, excludeAccountID string) ([]OrganizationAccount, error) {
+func listOrganizationMemberAccountsWithClient(ctx context.Context, client OrganizationsAPI, excludeAccountID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
 	excludeAccountID = strings.TrimSpace(excludeAccountID)
-	accounts, err := listOrganizationAccountsWithClient(ctx, client, string(types.AccountStatusActive))
+	accounts, err := listOrganizationAccountsWithClient(ctx, client, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +334,9 @@ func listOrganizationMemberAccountsWithClient(ctx context.Context, client Organi
 		out = append(out, acct)
 	}
 	if len(out) == 0 {
+		if opts.AllStates || opts.IncludeClosed {
+			return nil, errors.New("no member accounts found in organization")
+		}
 		return nil, errors.New("no active member accounts found in organization")
 	}
 	return out, nil
@@ -398,18 +420,13 @@ func listAccountsUnderParentWithClient(ctx context.Context, client Organizations
 		return nil, fmt.Errorf("parent ID is required")
 	}
 
-	statusFilter := strings.TrimSpace(opts.Status)
-	if statusFilter == "" {
-		statusFilter = string(types.AccountStatusActive)
-	}
-
 	maxDepth, unbounded := effectiveOUMaxDepth(opts)
 
 	seen := make(map[string]struct{})
 	out := make([]OrganizationAccount, 0)
 
 	collectAccounts := func(id string) error {
-		accounts, err := listAccountsForParentWithClient(ctx, client, id, statusFilter)
+		accounts, err := listAccountsForParentWithClient(ctx, client, id, opts)
 		if err != nil {
 			return err
 		}
@@ -518,7 +535,7 @@ func buildOUAccountMappingWithClient(ctx context.Context, client OrganizationsAP
 		})
 		bucket := AccountOUBucket{ID: id, Name: name}
 
-		directAccounts, err := listAccountsForParentWithClient(ctx, client, id, string(types.AccountStatusActive))
+		directAccounts, err := listAccountsForParentWithClient(ctx, client, id, ListAccountsInOUOptions{AllStates: true})
 		if err != nil {
 			return err
 		}
@@ -576,7 +593,7 @@ func mapAccountsToChildOUsWithClient(ctx context.Context, client OrganizationsAP
 
 	out := make(map[string]AccountOUBucket, len(wanted))
 
-	directAccounts, err := listAccountsForParentWithClient(ctx, client, rootID, string(types.AccountStatusActive))
+	directAccounts, err := listAccountsForParentWithClient(ctx, client, rootID, ListAccountsInOUOptions{AllStates: true})
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +609,7 @@ func mapAccountsToChildOUsWithClient(ctx context.Context, client OrganizationsAP
 	}
 	for _, child := range childOUs {
 		childBucket := AccountOUBucket(child)
-		accounts, err := listAccountsUnderParentWithClient(ctx, client, child.ID, ListAccountsInOUOptions{})
+		accounts, err := listAccountsUnderParentWithClient(ctx, client, child.ID, ListAccountsInOUOptions{AllStates: true})
 		if err != nil {
 			return nil, fmt.Errorf("list accounts under OU %s: %w", child.ID, err)
 		}
@@ -643,7 +660,7 @@ func OrganizationRootID(ctx context.Context, cfg aws.Config) (string, error) {
 	return firstRootID(ctx, newOrganizationsClient(cfg))
 }
 
-func listAccountsForParentWithClient(ctx context.Context, client OrganizationsAPI, parentID, statusFilter string) ([]OrganizationAccount, error) {
+func listAccountsForParentWithClient(ctx context.Context, client OrganizationsAPI, parentID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
 	var token *string
 	out := make([]OrganizationAccount, 0)
 	for {
@@ -655,7 +672,7 @@ func listAccountsForParentWithClient(ctx context.Context, client OrganizationsAP
 			return nil, fmt.Errorf("list accounts for parent %s: %w", parentID, err)
 		}
 		for _, acct := range resp.Accounts {
-			if statusFilter != "" && string(acct.Status) != statusFilter {
+			if !accountStateMatches(acct.State, opts) {
 				continue
 			}
 			name, err := accountNameFromOrganizationAccount(&acct, aws.ToString(acct.Id))
