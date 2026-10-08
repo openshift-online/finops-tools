@@ -127,7 +127,7 @@ func findOpenInviteHandshakeIDWithClient(ctx context.Context, client Organizatio
 	return "", fmt.Errorf("no open INVITE handshake found for this account")
 }
 
-// OrganizationContainsAccount reports whether accountID is an ACTIVE member of the organization for cfg.
+// OrganizationContainsAccount reports whether accountID is an ACTIVE-state member of the organization for cfg.
 func OrganizationContainsAccount(ctx context.Context, cfg aws.Config, accountID string) (bool, error) {
 	return organizationContainsAccountWithClient(ctx, newOrganizationsClient(cfg), accountID)
 }
@@ -150,7 +150,7 @@ func organizationContainsAccountWithClient(ctx context.Context, client Organizat
 	if out.Account == nil {
 		return false, nil
 	}
-	return out.Account.Status == types.AccountStatusActive, nil
+	return out.Account.State == types.AccountStateActive, nil
 }
 
 // AccountParentID returns the current parent root or OU ID for accountID (payer credentials).

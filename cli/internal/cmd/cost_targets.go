@@ -236,9 +236,9 @@ func warnIfIncludeClosedAccountsIgnored(cmd *cobra.Command, sel costTargetSelect
 	var msg string
 	switch mode {
 	case costTargetModeExplicit:
-		msg = "warning: --include-closed-accounts has no effect with --account-id/--account-alias (accounts are selected explicitly regardless of Organizations status)\n"
+		msg = "warning: --include-closed-accounts has no effect with --account-id/--account-alias (accounts are selected explicitly regardless of Organizations state)\n"
 	case costTargetModeTag:
-		msg = "warning: --include-closed-accounts has no effect with --tag (tag selection already includes all Organizations statuses)\n"
+		msg = "warning: --include-closed-accounts has no effect with --tag (tag selection already includes all Organizations states)\n"
 	default:
 		return
 	}

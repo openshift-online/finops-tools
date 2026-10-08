@@ -364,15 +364,15 @@ func (f *fakeOrganizationsTagMutator) ListAccountsForParent(
 	return nil, errors.New("not implemented")
 }
 
-type fakeOrganizationsWithStatus struct {
+type fakeOrganizationsWithState struct {
 	organizationsMigrateStub
 	accounts map[string]struct {
-		name   string
-		status types.AccountStatus
+		name  string
+		state types.AccountState
 	}
 }
 
-func (f fakeOrganizationsWithStatus) DescribeAccount(
+func (f fakeOrganizationsWithState) DescribeAccount(
 	_ context.Context,
 	params *organizations.DescribeAccountInput,
 	_ ...func(*organizations.Options),
@@ -387,7 +387,7 @@ func (f fakeOrganizationsWithStatus) DescribeAccount(
 	}, nil
 }
 
-func (f fakeOrganizationsWithStatus) ListAccounts(
+func (f fakeOrganizationsWithState) ListAccounts(
 	_ context.Context,
 	_ *organizations.ListAccountsInput,
 	_ ...func(*organizations.Options),
@@ -395,15 +395,15 @@ func (f fakeOrganizationsWithStatus) ListAccounts(
 	var accounts []types.Account
 	for id, entry := range f.accounts {
 		accounts = append(accounts, types.Account{
-			Id:     aws.String(id),
-			Name:   aws.String(entry.name),
-			Status: entry.status,
+			Id:    aws.String(id),
+			Name:  aws.String(entry.name),
+			State: entry.state,
 		})
 	}
 	return &organizations.ListAccountsOutput{Accounts: accounts}, nil
 }
 
-func (f fakeOrganizationsWithStatus) ListTagsForResource(
+func (f fakeOrganizationsWithState) ListTagsForResource(
 	_ context.Context,
 	_ *organizations.ListTagsForResourceInput,
 	_ ...func(*organizations.Options),
@@ -411,7 +411,7 @@ func (f fakeOrganizationsWithStatus) ListTagsForResource(
 	return &organizations.ListTagsForResourceOutput{}, nil
 }
 
-func (f fakeOrganizationsWithStatus) ListTagsForAccount(
+func (f fakeOrganizationsWithState) ListTagsForAccount(
 	_ context.Context,
 	_ string,
 	_ *string,
@@ -419,14 +419,14 @@ func (f fakeOrganizationsWithStatus) ListTagsForAccount(
 	return nil, nil, nil
 }
 
-func (f fakeOrganizationsWithStatus) SetAccountTag(
+func (f fakeOrganizationsWithState) SetAccountTag(
 	_ context.Context,
 	_, _, _ string,
 ) error {
 	return errors.New("not implemented")
 }
 
-func (f fakeOrganizationsWithStatus) DescribeOrganization(
+func (f fakeOrganizationsWithState) DescribeOrganization(
 	_ context.Context,
 	_ *organizations.DescribeOrganizationInput,
 	_ ...func(*organizations.Options),
@@ -434,7 +434,7 @@ func (f fakeOrganizationsWithStatus) DescribeOrganization(
 	return nil, errors.New("not implemented")
 }
 
-func (f fakeOrganizationsWithStatus) ListRoots(
+func (f fakeOrganizationsWithState) ListRoots(
 	_ context.Context,
 	_ *organizations.ListRootsInput,
 	_ ...func(*organizations.Options),
@@ -442,7 +442,7 @@ func (f fakeOrganizationsWithStatus) ListRoots(
 	return nil, errors.New("not implemented")
 }
 
-func (f fakeOrganizationsWithStatus) ListOrganizationalUnitsForParent(
+func (f fakeOrganizationsWithState) ListOrganizationalUnitsForParent(
 	_ context.Context,
 	_ *organizations.ListOrganizationalUnitsForParentInput,
 	_ ...func(*organizations.Options),
@@ -450,7 +450,7 @@ func (f fakeOrganizationsWithStatus) ListOrganizationalUnitsForParent(
 	return nil, errors.New("not implemented")
 }
 
-func (f fakeOrganizationsWithStatus) ListAccountsForParent(
+func (f fakeOrganizationsWithState) ListAccountsForParent(
 	_ context.Context,
 	_ *organizations.ListAccountsForParentInput,
 	_ ...func(*organizations.Options),
@@ -459,15 +459,15 @@ func (f fakeOrganizationsWithStatus) ListAccountsForParent(
 }
 
 func TestListOrganizationMemberAccountsWithClient(t *testing.T) {
-	client := fakeOrganizationsWithStatus{
+	client := fakeOrganizationsWithState{
 		accounts: map[string]struct {
-			name   string
-			status types.AccountStatus
+			name  string
+			state types.AccountState
 		}{
-			"123456789012": {name: "Payer", status: types.AccountStatusActive},
-			"111111111111": {name: "Member One", status: types.AccountStatusActive},
-			"222222222222": {name: "Member Two", status: types.AccountStatusActive},
-			"333333333333": {name: "Suspended", status: types.AccountStatusSuspended},
+			"123456789012": {name: "Payer", state: types.AccountStateActive},
+			"111111111111": {name: "Member One", state: types.AccountStateActive},
+			"222222222222": {name: "Member Two", state: types.AccountStateActive},
+			"333333333333": {name: "Closed", state: types.AccountStateClosed},
 		},
 	}
 
@@ -483,7 +483,7 @@ func TestListOrganizationMemberAccountsWithClient(t *testing.T) {
 		ids[acct.ID] = struct{}{}
 	}
 	if _, ok := ids["333333333333"]; ok {
-		t.Fatalf("suspended member included by default: %+v", accounts)
+		t.Fatalf("closed member included by default: %+v", accounts)
 	}
 	for _, want := range []string{"111111111111", "222222222222"} {
 		if _, ok := ids[want]; !ok {
@@ -493,15 +493,16 @@ func TestListOrganizationMemberAccountsWithClient(t *testing.T) {
 }
 
 func TestListOrganizationMemberAccountsWithClientIncludeClosed(t *testing.T) {
-	client := fakeOrganizationsWithStatus{
+	client := fakeOrganizationsWithState{
 		accounts: map[string]struct {
-			name   string
-			status types.AccountStatus
+			name  string
+			state types.AccountState
 		}{
-			"123456789012": {name: "Payer", status: types.AccountStatusActive},
-			"111111111111": {name: "Member One", status: types.AccountStatusActive},
-			"333333333333": {name: "Suspended", status: types.AccountStatusSuspended},
-			"666666666666": {name: "Pending Closure", status: types.AccountStatusPendingClosure},
+			"123456789012": {name: "Payer", state: types.AccountStateActive},
+			"111111111111": {name: "Member One", state: types.AccountStateActive},
+			"333333333333": {name: "Suspended", state: types.AccountStateSuspended},
+			"666666666666": {name: "Pending Closure", state: types.AccountStatePendingClosure},
+			"777777777777": {name: "Closed", state: types.AccountStateClosed},
 		},
 	}
 
@@ -513,7 +514,7 @@ func TestListOrganizationMemberAccountsWithClientIncludeClosed(t *testing.T) {
 	for _, acct := range accounts {
 		ids[acct.ID] = struct{}{}
 	}
-	for _, want := range []string{"111111111111", "333333333333", "666666666666"} {
+	for _, want := range []string{"111111111111", "333333333333", "666666666666", "777777777777"} {
 		if _, ok := ids[want]; !ok {
 			t.Fatalf("missing account %s in %+v", want, accounts)
 		}
@@ -521,12 +522,12 @@ func TestListOrganizationMemberAccountsWithClientIncludeClosed(t *testing.T) {
 }
 
 func TestListOrganizationMemberAccountsWithClientNoMembers(t *testing.T) {
-	client := fakeOrganizationsWithStatus{
+	client := fakeOrganizationsWithState{
 		accounts: map[string]struct {
-			name   string
-			status types.AccountStatus
+			name  string
+			state types.AccountState
 		}{
-			"123456789012": {name: "Payer", status: types.AccountStatusActive},
+			"123456789012": {name: "Payer", state: types.AccountStateActive},
 		},
 	}
 	_, err := listOrganizationMemberAccountsWithClient(context.Background(), client, "123456789012", ListAccountsInOUOptions{})
@@ -840,16 +841,17 @@ func testOUHierarchy() fakeOUHierarchy {
 		},
 		accountsByParent: map[string][]types.Account{
 			"ou-root-prod0000": {
-				{Id: aws.String("111111111111"), Name: aws.String("Prod One"), Status: types.AccountStatusActive},
-				{Id: aws.String("222222222222"), Name: aws.String("Prod Two"), Status: types.AccountStatusActive},
+				{Id: aws.String("111111111111"), Name: aws.String("Prod One"), State: types.AccountStateActive},
+				{Id: aws.String("222222222222"), Name: aws.String("Prod Two"), State: types.AccountStateActive},
 			},
 			"ou-prod-teama000": {
-				{Id: aws.String("333333333333"), Name: aws.String("Team A One"), Status: types.AccountStatusActive},
+				{Id: aws.String("333333333333"), Name: aws.String("Team A One"), State: types.AccountStateActive},
 			},
 			"ou-root-sandbox0": {
-				{Id: aws.String("444444444444"), Name: aws.String("Sandbox One"), Status: types.AccountStatusActive},
-				{Id: aws.String("555555555555"), Name: aws.String("Suspended"), Status: types.AccountStatusSuspended},
-				{Id: aws.String("666666666666"), Name: aws.String("Pending Closure"), Status: types.AccountStatusPendingClosure},
+				{Id: aws.String("444444444444"), Name: aws.String("Sandbox One"), State: types.AccountStateActive},
+				{Id: aws.String("555555555555"), Name: aws.String("Suspended"), State: types.AccountStateSuspended},
+				{Id: aws.String("666666666666"), Name: aws.String("Pending Closure"), State: types.AccountStatePendingClosure},
+				{Id: aws.String("777777777777"), Name: aws.String("Closed"), State: types.AccountStateClosed},
 			},
 		},
 	}
@@ -1003,7 +1005,7 @@ func TestListAccountsInOURecursive(t *testing.T) {
 	}
 }
 
-func TestListAccountsInOUSkipsSuspended(t *testing.T) {
+func TestListAccountsInOUSkipsNonActive(t *testing.T) {
 	client := testOUHierarchy()
 	accounts, err := listAccountsInOUWithClient(context.Background(), client, "ou-root-sandbox0", ListAccountsInOUOptions{DirectOnly: true})
 	if err != nil {
@@ -1027,7 +1029,7 @@ func TestListAccountsInOUIncludeClosed(t *testing.T) {
 	for _, acct := range accounts {
 		ids[acct.ID] = struct{}{}
 	}
-	for _, want := range []string{"444444444444", "555555555555", "666666666666"} {
+	for _, want := range []string{"444444444444", "555555555555", "666666666666", "777777777777"} {
 		if _, ok := ids[want]; !ok {
 			t.Fatalf("missing account %s in %+v", want, accounts)
 		}

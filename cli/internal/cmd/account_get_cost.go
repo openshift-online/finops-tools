@@ -109,7 +109,7 @@ func init() {
 		RefreshOrgCache: &costGetRefreshOrgCache,
 	})
 	accountGetCostCmd.Flags().BoolVar(&costGetIncludeClosedAccounts, "include-closed-accounts", false,
-		"Include SUSPENDED and PENDING_CLOSURE organization accounts when selecting by --ou or --payer (default: ACTIVE only; ignored with a warning for --tag and --account-id/--account-alias)")
+		"Include SUSPENDED, PENDING_CLOSURE, and CLOSED organization accounts when selecting by --ou or --payer (default: ACTIVE only; ignored with a warning for --tag and --account-id/--account-alias)")
 	accountGetCostCmd.Flags().StringVar(&costGetFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
 	addOutputFlag(accountGetCostCmd, &costGetOutput)
