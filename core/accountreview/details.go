@@ -13,24 +13,26 @@ import (
 // Inventory table and CSV section keys. Pretty-print, JSON, CSV, and email
 // all derive resource columns from AccountDetails using these keys.
 const (
-	SectionAccount           = "account"
-	SectionTag               = "tag"
-	SectionOwnerError        = "owner_error"
-	SectionMonth             = "month"
-	SectionTopService        = "top_service"
-	SectionInventoryError    = "inventory_error"
-	SectionEC2               = "ec2"
-	SectionRDS               = "rds"
-	SectionRDSCluster        = "rds_cluster"
-	SectionRoute53           = "route53"
-	SectionCount             = "count"
-	CountUnattachedEBS       = "unattached_ebs"
-	CountUnassociatedEIP     = "unassociated_eips"
-	CountLoadBalancers       = "load_balancers"
-	CountNATGateways         = "nat_gateways"
-	CountS3Buckets           = "s3_buckets"
-	CountLambda              = "lambda_functions"
-	CountVPCs                = "vpcs"
+	SectionAccount        = "account"
+	SectionTag            = "tag"
+	SectionOwnerError     = "owner_error"
+	SectionMonth          = "month"
+	SectionTopService     = "top_service"
+	SectionInventoryError = "inventory_error"
+	SectionEC2            = "ec2"
+	SectionRDS            = "rds"
+	SectionRDSCluster     = "rds_cluster"
+	SectionRoute53        = "route53"
+	SectionOpenShift      = "openshift"
+	SectionOpenShiftError = "openshift_error"
+	SectionCount          = "count"
+	CountUnattachedEBS    = "unattached_ebs"
+	CountUnassociatedEIP  = "unassociated_eips"
+	CountLoadBalancers    = "load_balancers"
+	CountNATGateways      = "nat_gateways"
+	CountS3Buckets        = "s3_buckets"
+	CountLambda           = "lambda_functions"
+	CountVPCs             = "vpcs"
 	// NoneFoundInventoryPrefix is the pretty-print / email lead-in for NoneFoundLine.
 	NoneFoundInventoryPrefix = "None found (scanned): "
 )
@@ -40,21 +42,23 @@ const (
 // It is a projection of AccountReport and omits raw inventory extras such as
 // EC2 launch time, RDS Multi-AZ, Route53 zone IDs, and per-resource EBS/EIP lists.
 type AccountDetails struct {
-	AccountID      string              `json:"account_id"`
-	AccountName    string              `json:"account_name"`
-	DisplayAlias   string              `json:"display_alias,omitempty"`
-	OUPath         string              `json:"ou_path,omitempty"`
-	OwnerEmail     string              `json:"owner_email,omitempty"`
-	OwnerError     string              `json:"owner_error,omitempty"`
-	Tags           []coreaccount.Tag   `json:"tags,omitempty"`
-	MonthlyCosts   MonthlyCostsDetails `json:"monthly_costs"`
-	EC2Instances   []EC2Detail         `json:"ec2_instances,omitempty"`
-	RDSInstances   []RDSDetail         `json:"rds_instances,omitempty"`
-	RDSClusters    []RDSClusterDetail  `json:"rds_clusters,omitempty"`
-	HostedZones    []HostedZoneDetail  `json:"hosted_zones,omitempty"`
-	ResourceCounts ResourceCounts      `json:"resource_counts"`
-	InventoryError string              `json:"inventory_error,omitempty"`
-	GeneratedAt    time.Time           `json:"generated_at"`
+	AccountID              string                   `json:"account_id"`
+	AccountName            string                   `json:"account_name"`
+	DisplayAlias           string                   `json:"display_alias,omitempty"`
+	OUPath                 string                   `json:"ou_path,omitempty"`
+	OwnerEmail             string                   `json:"owner_email,omitempty"`
+	OwnerError             string                   `json:"owner_error,omitempty"`
+	Tags                   []coreaccount.Tag        `json:"tags,omitempty"`
+	MonthlyCosts           MonthlyCostsDetails      `json:"monthly_costs"`
+	EC2Instances           []EC2Detail              `json:"ec2_instances,omitempty"`
+	RDSInstances           []RDSDetail              `json:"rds_instances,omitempty"`
+	RDSClusters            []RDSClusterDetail       `json:"rds_clusters,omitempty"`
+	HostedZones            []HostedZoneDetail       `json:"hosted_zones,omitempty"`
+	OpenShiftClusters      []OpenShiftClusterDetail `json:"openshift_clusters,omitempty"`
+	ResourceCounts         ResourceCounts           `json:"resource_counts"`
+	InventoryError         string                   `json:"inventory_error,omitempty"`
+	OpenShiftClustersError string                   `json:"openshift_clusters_error,omitempty"`
+	GeneratedAt            time.Time                `json:"generated_at"`
 }
 
 // MonthlyCostsDetails is the cost section of AccountDetails (raw floats).
@@ -97,6 +101,17 @@ type RDSClusterDetail struct {
 	Engine    string `json:"engine"`
 	Status    string `json:"status"`
 	Region    string `json:"region"`
+}
+
+// OpenShiftClusterDetail is one OCM cluster row shown in review output.
+type OpenShiftClusterDetail struct {
+	Environment      string `json:"environment"`
+	Name             string `json:"name"`
+	ClusterID        string `json:"cluster_id"`
+	ProductType      string `json:"product_type"`
+	State            string `json:"state"`
+	Region           string `json:"region"`
+	OpenShiftVersion string `json:"openshift_version,omitempty"`
 }
 
 // HostedZoneDetail is the Route53 row shown in review output (public/private, not zone id).
@@ -155,8 +170,12 @@ func DetailsFrom(r AccountReport) AccountDetails {
 			LambdaFunctions:  len(inv.LambdaFunctions),
 			VPCs:             len(inv.VPCs),
 		},
-		InventoryError: r.InventoryError,
-		GeneratedAt:    r.GeneratedAt,
+		InventoryError:         r.InventoryError,
+		OpenShiftClustersError: r.OpenShiftClustersError,
+		GeneratedAt:            r.GeneratedAt,
+	}
+	if r.OpenShiftClusters != nil {
+		d.OpenShiftClusters = append([]OpenShiftClusterDetail(nil), r.OpenShiftClusters...)
 	}
 	if n := len(inv.EC2Instances); n > 0 {
 		d.EC2Instances = make([]EC2Detail, n)
@@ -215,7 +234,9 @@ func DetailsFromReports(reports []AccountReport) []AccountDetails {
 	return out
 }
 
-// InventoryTables returns the detailed resource tables in display order.
+// InventoryTables returns AWS inventory resource tables in display order.
+// OpenShift clusters are separate via OpenShiftTable so they are not mixed with
+// AWS inventory counts in Resources output.
 func (d AccountDetails) InventoryTables() []ResourceTable {
 	ec2Rows := make([][]string, len(d.EC2Instances))
 	for i, inst := range d.EC2Instances {
@@ -239,6 +260,45 @@ func (d AccountDetails) InventoryTables() []ResourceTable {
 		{Key: SectionRDSCluster, Title: "RDS clusters", Headers: []string{"ID", "Engine", "Status", "Region"}, Rows: clusterRows, Count: len(d.RDSClusters)},
 		{Key: SectionRoute53, Title: "Route53 hosted zones", Headers: []string{"Name", "Type", "Records"}, Rows: zoneRows, Count: len(d.HostedZones)},
 	}
+}
+
+// OpenShiftTable returns the OpenShift clusters table (always; Count may be zero).
+func (d AccountDetails) OpenShiftTable() ResourceTable {
+	ocpRows := make([][]string, len(d.OpenShiftClusters))
+	for i, c := range d.OpenShiftClusters {
+		ocpRows[i] = []string{
+			dashIfEmpty(c.Environment),
+			dashIfEmpty(c.Name),
+			dashIfEmpty(c.ClusterID),
+			dashIfEmpty(c.ProductType),
+			dashIfEmpty(c.State),
+			dashIfEmpty(c.Region),
+			dashIfEmpty(c.OpenShiftVersion),
+		}
+	}
+	return ResourceTable{
+		Key:     SectionOpenShift,
+		Title:   "OpenShift clusters",
+		Headers: []string{"Environment", "Name", "OCM ID", "Product", "State", "Region", "Version"},
+		Rows:    ocpRows,
+		Count:   len(d.OpenShiftClusters),
+	}
+}
+
+// OpenShiftSectionTitle is the human-readable OpenShift section heading.
+// Failed or skipped lookups use "(unavailable)" so callers do not imply a
+// confirmed empty result via "(0)".
+func (d AccountDetails) OpenShiftSectionTitle() string {
+	if strings.TrimSpace(d.OpenShiftClustersError) != "" || d.OpenShiftClusters == nil {
+		return "OpenShift clusters (unavailable)"
+	}
+	return fmt.Sprintf("OpenShift clusters (%d)", len(d.OpenShiftClusters))
+}
+
+// HasOpenShiftSection is true when OpenShift lookup ran or failed (so the section
+// should appear separately from AWS Resources).
+func (d AccountDetails) HasOpenShiftSection() bool {
+	return d.OpenShiftClusters != nil || strings.TrimSpace(d.OpenShiftClustersError) != ""
 }
 
 // InventoryCounts returns count-only inventory lines in display order.
@@ -277,10 +337,9 @@ func (d AccountDetails) NonzeroInventoryCounts() []ResourceCount {
 	return out
 }
 
-// EmptyInventoryTitles lists resource types that were scanned and found empty,
+// EmptyInventoryTitles lists AWS resource types that were scanned and found empty,
 // in the same order as InventoryTables then InventoryCounts.
-// When InventoryError is set the scan was incomplete, so zeros are not
-// confirmed empty and this returns nil.
+// When InventoryError is set the scan was incomplete, so zeros are not confirmed empty.
 func (d AccountDetails) EmptyInventoryTitles() []string {
 	if strings.TrimSpace(d.InventoryError) != "" {
 		return nil
@@ -296,10 +355,13 @@ func (d AccountDetails) EmptyInventoryTitles() []string {
 			titles = append(titles, c.Title)
 		}
 	}
+	if len(titles) == 0 {
+		return nil
+	}
 	return titles
 }
 
-// NoneFoundLine returns a single display line for scanned-empty resource types.
+// NoneFoundLine returns a single display line for scanned-empty AWS resource types.
 // It is empty when the scan was incomplete or every type has a non-zero count.
 func (d AccountDetails) NoneFoundLine() string {
 	titles := d.EmptyInventoryTitles()
@@ -307,6 +369,18 @@ func (d AccountDetails) NoneFoundLine() string {
 		return ""
 	}
 	return NoneFoundInventoryPrefix + strings.Join(titles, ", ")
+}
+
+// OpenShiftNoneFoundLine is shown in the OpenShift section when lookup succeeded
+// with zero clusters. Empty when lookup was skipped/failed or clusters exist.
+func (d AccountDetails) OpenShiftNoneFoundLine() string {
+	if strings.TrimSpace(d.OpenShiftClustersError) != "" || d.OpenShiftClusters == nil {
+		return ""
+	}
+	if len(d.OpenShiftClusters) > 0 {
+		return ""
+	}
+	return NoneFoundInventoryPrefix + "OpenShift clusters"
 }
 
 // MarshalJSON omits zero resource_counts fields when InventoryError is set so

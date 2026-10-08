@@ -9,9 +9,45 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/core/accountreview"
 	"github.com/spf13/cobra"
 )
+
+func TestValidateAccountDetailsSnowflakeAlias(t *testing.T) {
+	t.Parallel()
+	cfg := configstore.File{
+		Snowflake: configstore.SnowflakeConfig{
+			AccountAliases: map[string]configstore.SnowflakeAccount{
+				"rhprod": {Account: "ORG-ACCT", Warehouse: "WH"},
+			},
+		},
+	}
+	if err := validateAccountDetailsSnowflakeAlias(cfg, ""); err != nil {
+		t.Fatalf("empty alias: %v", err)
+	}
+	if err := validateAccountDetailsSnowflakeAlias(cfg, "rhprod"); err != nil {
+		t.Fatalf("known alias: %v", err)
+	}
+	err := validateAccountDetailsSnowflakeAlias(cfg, "missing")
+	if err == nil {
+		t.Fatal("expected unknown alias error")
+	}
+	if !strings.Contains(err.Error(), "unknown snowflake account alias") {
+		t.Fatalf("error = %v", err)
+	}
+	noWH := configstore.File{
+		Snowflake: configstore.SnowflakeConfig{
+			AccountAliases: map[string]configstore.SnowflakeAccount{
+				"nowh": {Account: "ORG-ACCT"},
+			},
+		},
+	}
+	err = validateAccountDetailsSnowflakeAlias(noWH, "nowh")
+	if err == nil {
+		t.Fatal("expected warehouse error")
+	}
+}
 
 func TestValidateAccountDetailsSendFlags(t *testing.T) {
 	t.Parallel()

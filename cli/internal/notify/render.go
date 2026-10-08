@@ -28,6 +28,9 @@ const generatedBy = "Red Hat Hybrid Platform FinOps"
 // Raw scan errors stay off the body so owners are not asked to interpret AWS API failures.
 const incompleteInventoryNote = "Inventory collection was incomplete. Missing resources are not confirmed unused."
 
+// incompleteOpenShiftNote is shown in owner emails when OpenShiftClustersError is set.
+const incompleteOpenShiftNote = "OpenShift cluster lookup was incomplete. Clusters in this account may not be listed."
+
 const (
 	htmlTableStyle  = `width:100%;border-collapse:collapse;font-size:.9rem`
 	htmlCellStyle   = `text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
@@ -209,13 +212,53 @@ func writeInventoryText(b *strings.Builder, d accountreview.AccountDetails) {
 			b.WriteByte('\n')
 		}
 	}
-	for _, c := range counts {
-		fmt.Fprintf(b, "  %s: %d\n", c.Title, c.Count)
+	if len(counts) > 0 || d.NoneFoundLine() != "" {
+		if len(tables) > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString("  Other resources:\n")
+		for _, c := range counts {
+			fmt.Fprintf(b, "    %s: %d\n", c.Title, c.Count)
+		}
+		if line := d.NoneFoundLine(); line != "" {
+			fmt.Fprintf(b, "    %s\n", line)
+		}
 	}
-	if line := d.NoneFoundLine(); line != "" {
+	writeOpenShiftText(b, d)
+	writeWarningsText(b, d)
+}
+
+func writeWarningsText(b *strings.Builder, d accountreview.AccountDetails) {
+	invNote := incompleteInventoryLine(d)
+	ocpNote := incompleteOpenShiftLine(d)
+	if invNote == "" && ocpNote == "" {
+		return
+	}
+	b.WriteString("\nWarnings:\n")
+	if invNote != "" {
+		fmt.Fprintf(b, "  %s\n", invNote)
+	}
+	if ocpNote != "" {
+		fmt.Fprintf(b, "  %s\n", ocpNote)
+	}
+}
+
+func writeOpenShiftText(b *strings.Builder, d accountreview.AccountDetails) {
+	if !d.HasOpenShiftSection() {
+		return
+	}
+	table := d.OpenShiftTable()
+	fmt.Fprintf(b, "\n%s:\n", d.OpenShiftSectionTitle())
+	if table.Count > 0 {
+		for _, row := range table.Rows {
+			b.WriteString("  ")
+			b.WriteString(strings.Join(row, "  "))
+			b.WriteByte('\n')
+		}
+	} else if line := d.OpenShiftNoneFoundLine(); line != "" {
 		fmt.Fprintf(b, "  %s\n", line)
 	}
-	if note := incompleteInventoryLine(d); note != "" {
+	if note := incompleteOpenShiftLine(d); note != "" {
 		fmt.Fprintf(b, "  %s\n", note)
 	}
 }
@@ -372,21 +415,64 @@ func writeInventoryHTML(b *strings.Builder, d accountreview.AccountDetails) {
 	for _, table := range tables {
 		writeResourceTable(b, table)
 	}
-	if len(counts) > 0 {
-		fmt.Fprintf(b, `<p class="meta" style="%s">`, htmlMetaStyle)
-		for i, c := range counts {
-			if i > 0 {
-				b.WriteString(" · ")
+	if len(counts) > 0 || d.NoneFoundLine() != "" {
+		fmt.Fprintf(b, `<h4 style="%s">Other resources</h4>`, htmlH4Style)
+		if len(counts) > 0 {
+			fmt.Fprintf(b, `<p class="meta" style="%s">`, htmlMetaStyle)
+			for i, c := range counts {
+				if i > 0 {
+					b.WriteString(" · ")
+				}
+				fmt.Fprintf(b, `%s: %d`, htmlEscape(c.Title), c.Count)
 			}
-			fmt.Fprintf(b, `%s: %d`, htmlEscape(c.Title), c.Count)
+			b.WriteString(`</p>`)
 		}
-		b.WriteString(`</p>`)
+		if line := d.NoneFoundLine(); line != "" {
+			fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(line))
+		}
 	}
-	if line := d.NoneFoundLine(); line != "" {
+	writeOpenShiftHTML(b, d)
+	writeWarningsHTML(b, d)
+}
+
+func writeWarningsHTML(b *strings.Builder, d accountreview.AccountDetails) {
+	invNote := incompleteInventoryLine(d)
+	ocpNote := incompleteOpenShiftLine(d)
+	if invNote == "" && ocpNote == "" {
+		return
+	}
+	b.WriteString(`<h3>Warnings</h3>`)
+	if invNote != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(invNote))
+	}
+	if ocpNote != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(ocpNote))
+	}
+}
+
+func writeOpenShiftHTML(b *strings.Builder, d accountreview.AccountDetails) {
+	if !d.HasOpenShiftSection() {
+		return
+	}
+	table := d.OpenShiftTable()
+	fmt.Fprintf(b, `<h3>%s</h3>`, htmlEscape(d.OpenShiftSectionTitle()))
+	if table.Count > 0 {
+		writeHTMLTableOpen(b)
+		b.WriteString(`<thead><tr>`)
+		for _, h := range table.Headers {
+			writeHTMLHeaderCell(b, h, false)
+		}
+		b.WriteString(`</tr></thead><tbody>`)
+		for _, row := range table.Rows {
+			b.WriteString(`<tr>`)
+			for _, cell := range row {
+				writeHTMLCell(b, cell, false)
+			}
+			b.WriteString(`</tr>`)
+		}
+		b.WriteString(`</tbody></table>`)
+	} else if line := d.OpenShiftNoneFoundLine(); line != "" {
 		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(line))
-	}
-	if note := incompleteInventoryLine(d); note != "" {
-		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(note))
 	}
 }
 
@@ -453,6 +539,13 @@ func incompleteInventoryLine(d accountreview.AccountDetails) string {
 		return ""
 	}
 	return incompleteInventoryNote
+}
+
+func incompleteOpenShiftLine(d accountreview.AccountDetails) string {
+	if strings.TrimSpace(d.OpenShiftClustersError) == "" {
+		return ""
+	}
+	return incompleteOpenShiftNote
 }
 
 func costSummaryLine(d accountreview.AccountDetails) string {

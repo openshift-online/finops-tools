@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/openshift-online/finops-tools/cli/internal/progress"
 	"github.com/openshift-online/finops-tools/core/accountreview"
 	"github.com/openshift-online/finops-tools/core/cost"
+	"github.com/openshift-online/finops-tools/core/ocmmapping"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +33,7 @@ var (
 	detailsSend              bool
 	detailsSkipOrgCache      bool
 	detailsRefreshOrgCache   bool
+	detailsSnowflakeAlias    string
 	detailsTag               string
 	detailsWorkers           int
 	detailsYes               bool
@@ -61,12 +64,21 @@ that account and does not stop the rest of the run. Incomplete inventory (includ
 assume-role failures) is shown as an inventory warning and still included in owner
 email with a generic incomplete-scan note.
 
+OpenShift clusters are loaded from the production Dataverse Snowflake mart
+(HCMFINOPS_DB.MARTS.OCM_MAPPING) across Production, Stage, and Integration.
+Use --snowflake-alias to select the Snowflake account (default:
+snowflake.account_alias). An unknown --snowflake-alias fails before AWS work.
+When no Snowflake account is configured (and the flag is omitted) or the lookup
+fails after connect, AWS cost/inventory still succeed and the OpenShift section
+records a soft error.
+
 Gmail uses gcloud Application Default Credentials (finops does not modify ADC). Verify access:
   finops config gmail login
 
 Examples:
   finops account details --account-alias my-linked
   finops account details --payer rh-control --ou 'ou-abcd-12345678/*' --format json -o review.json
+  finops account details --account-alias my-linked --snowflake-alias rhprod
   finops account details --account-alias my-linked --send --redirect-prefix finops
   finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes`,
 	Args: cobra.NoArgs,
@@ -129,6 +141,8 @@ func init() {
 	accountDetailsCmd.Flags().StringVar(&detailsFormat, "format", string(output.FormatPrettyPrint), "Output format: pretty-print, json, csv")
 	addOutputFlag(accountDetailsCmd, &detailsOutput)
 	bindLinkedRoleFlag(accountDetailsCmd, &detailsRole)
+	accountDetailsCmd.Flags().StringVar(&detailsSnowflakeAlias, "snowflake-alias", "",
+		"Snowflake account alias for OpenShift cluster lookup (default: snowflake.account_alias)")
 	accountDetailsCmd.Flags().BoolVar(&detailsQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(accountDetailsCmd, &detailsWorkers, "")
 }
@@ -182,6 +196,9 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := applyExcludeRecentDaysDefault(cmd, cfg, &detailsExcludeRecentDays); err != nil {
+		return err
+	}
+	if err := validateAccountDetailsSnowflakeAlias(cfg, detailsSnowflakeAlias); err != nil {
 		return err
 	}
 
@@ -260,6 +277,8 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	enrichAccountDetailsOpenShift(awsCtx, cfg, detailsSnowflakeAlias, status, buildResult.Reports)
+
 	details := accountreview.DetailsFromReports(buildResult.Reports)
 	// Open -o only after gather finishes so a long/failed run does not leave an empty file.
 	if err := writeAccountDetailsOutput(cmd, format, details); err != nil {
@@ -333,6 +352,66 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 	}
 
 	return accountDetailsAfterSummary(writeAccountDetailsDeliverySummary(cmd.ErrOrStderr(), deliveryResults), deliveryResults)
+}
+
+// validateAccountDetailsSnowflakeAlias fails fast when --snowflake-alias is set but
+// unknown or missing a warehouse, so AWS gather does not run for a typo. An empty
+// alias is allowed (OpenShift lookup may soft-skip later if no default is configured).
+func validateAccountDetailsSnowflakeAlias(cfg configstore.File, snowflakeAlias string) error {
+	if strings.TrimSpace(snowflakeAlias) == "" {
+		return nil
+	}
+	alias, acct, err := cfg.ResolveSnowflakeAccountAlias(snowflakeAlias)
+	if err != nil {
+		return err
+	}
+	acct = cfg.ResolveSnowflakeSession(acct)
+	return configstore.ValidateSnowflakeWarehouse(acct, alias)
+}
+
+// enrichAccountDetailsOpenShift loads OCM clusters from Snowflake and attaches them
+// to reports. Soft-fails when Snowflake is unavailable so AWS review still completes.
+// Callers must already validate an explicit --snowflake-alias via
+// validateAccountDetailsSnowflakeAlias.
+func enrichAccountDetailsOpenShift(
+	ctx context.Context,
+	cfg configstore.File,
+	snowflakeAlias string,
+	status *progress.Writer,
+	reports []accountreview.AccountReport,
+) {
+	if len(reports) == 0 {
+		return
+	}
+	_, _, resolveErr := cfg.ResolveSnowflakeAccountAlias(snowflakeAlias)
+	if resolveErr != nil {
+		status.Step("Skipping OpenShift clusters: " + resolveErr.Error())
+		accountreview.ApplyOpenShiftClustersError(reports, resolveErr)
+		return
+	}
+
+	status.Step("Looking up OpenShift clusters in Snowflake…")
+	querier, err := openSnowflakeMartQuerier(ctx, cfg, snowflakeAlias)
+	if err != nil {
+		status.Step("Skipping OpenShift clusters: " + err.Error())
+		accountreview.ApplyOpenShiftClustersError(reports, err)
+		return
+	}
+	defer func() {
+		_ = querier.Close()
+	}()
+
+	accountIDs := make([]string, len(reports))
+	for i, r := range reports {
+		accountIDs[i] = r.AccountID
+	}
+	byAccount, err := ocmmapping.LookupByAWSAccounts(ctx, querier, accountIDs, "")
+	if err != nil {
+		status.Step("Skipping OpenShift clusters: " + err.Error())
+		accountreview.ApplyOpenShiftClustersError(reports, err)
+		return
+	}
+	accountreview.ApplyOpenShiftClusters(reports, byAccount, nil)
 }
 
 // writeAccountDetailsOutput opens --output (if set) immediately before writing so

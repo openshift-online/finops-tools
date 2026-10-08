@@ -271,6 +271,68 @@ func TestRenderAccountEmailOmitsInventoryWarnings(t *testing.T) {
 	if !strings.Contains(msg.HTMLBody, incompleteInventoryNote) {
 		t.Fatalf("html missing incomplete-inventory note: %s", msg.HTMLBody)
 	}
+	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
+		warnIdx := strings.Index(body, "Warnings")
+		vpcIdx := strings.Index(body, "VPCs")
+		if warnIdx < 0 || vpcIdx < 0 || warnIdx < vpcIdx {
+			t.Fatalf("expected Warnings after resource counts:\n%s", body)
+		}
+	}
+}
+
+func TestRenderAccountEmailIncludesOpenShiftClusters(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		ResourceCounts: accountreview.ResourceCounts{VPCs: 3},
+		OpenShiftClusters: []accountreview.OpenShiftClusterDetail{{
+			Environment: "Stage",
+			Name:        "stage-cluster",
+			ClusterID:   "ocm-stage-1",
+			ProductType: "OSD",
+			State:       "ready",
+			Region:      "us-west-2",
+		}},
+	})
+	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
+		if !strings.Contains(body, "OpenShift clusters") || !strings.Contains(body, "stage-cluster") {
+			t.Fatalf("email missing OpenShift clusters:\n%s", body)
+		}
+		resIdx := strings.Index(body, "Resources")
+		otherIdx := strings.Index(body, "Other resources")
+		ocpIdx := strings.Index(body, "OpenShift clusters")
+		vpcIdx := strings.Index(body, "VPCs")
+		if resIdx < 0 || otherIdx < 0 || ocpIdx < 0 || vpcIdx < 0 || !(resIdx < otherIdx && otherIdx < vpcIdx && vpcIdx < ocpIdx) {
+			t.Fatalf("expected Resources → Other resources → VPCs → OpenShift:\n%s", body)
+		}
+	}
+}
+
+func TestRenderAccountEmailOmitsOpenShiftLookupDetails(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:              "111111111111",
+		AccountName:            "test-account",
+		GeneratedAt:            time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		OpenShiftClustersError: "token expired for alias rhprod",
+	})
+	if strings.Contains(msg.TextBody, "token expired") || strings.Contains(msg.HTMLBody, "token expired") {
+		t.Fatalf("email should omit raw OpenShift lookup errors:\n%s", msg.TextBody)
+	}
+	if !strings.Contains(msg.TextBody, incompleteOpenShiftNote) {
+		t.Fatalf("text missing incomplete-openshift note: %s", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, incompleteOpenShiftNote) {
+		t.Fatalf("html missing incomplete-openshift note: %s", msg.HTMLBody)
+	}
+	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
+		if strings.Contains(body, "OpenShift clusters (0)") {
+			t.Fatalf("failed lookup must not imply zero clusters:\n%s", body)
+		}
+		if !strings.Contains(body, "OpenShift clusters (unavailable)") {
+			t.Fatalf("failed lookup missing unavailable title:\n%s", body)
+		}
+	}
 }
 
 func TestRenderOwnerGroupEmail(t *testing.T) {

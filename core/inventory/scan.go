@@ -186,7 +186,7 @@ func (defaultAccountScanner) scanAccount(ctx context.Context, q Query, target Ac
 	cancel()
 
 	sortInventory(&inv)
-	inv.SkippedRegions = sortRegionWarnings(warnings)
+	inv.SkippedRegions = coalesceRegionWarnings(sortRegionWarnings(warnings))
 	return inv, nil
 }
 
@@ -392,4 +392,44 @@ func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
 		return warnings[i].Region < warnings[j].Region
 	})
 	return warnings
+}
+
+// coalesceRegionWarnings keeps a single timeout summary per region when a region
+// scan timed out, dropping verbose per-service SDK errors for that region.
+// Regions without a timeout keep their service warnings unchanged.
+func coalesceRegionWarnings(warnings []RegionWarning) []RegionWarning {
+	if len(warnings) == 0 {
+		return warnings
+	}
+	timeoutByRegion := map[string]RegionWarning{}
+	for _, w := range warnings {
+		if !strings.Contains(strings.ToLower(w.Message), "timed out") {
+			continue
+		}
+		region := strings.TrimSpace(w.Region)
+		if region == "" {
+			continue
+		}
+		if _, ok := timeoutByRegion[region]; !ok {
+			timeoutByRegion[region] = w
+		}
+	}
+	if len(timeoutByRegion) == 0 {
+		return warnings
+	}
+	out := make([]RegionWarning, 0, len(warnings))
+	seenTimeout := map[string]bool{}
+	for _, w := range warnings {
+		region := strings.TrimSpace(w.Region)
+		if _, timedOut := timeoutByRegion[region]; !timedOut {
+			out = append(out, w)
+			continue
+		}
+		if seenTimeout[region] {
+			continue
+		}
+		seenTimeout[region] = true
+		out = append(out, timeoutByRegion[region])
+	}
+	return out
 }
