@@ -114,13 +114,23 @@ func writeAccountDetailsCSVAccount(cw *csv.Writer, d accountreview.AccountDetail
 			return err
 		}
 	}
-	if d.HasOpenShiftSection() {
-		table := d.OpenShiftTable()
-		for _, row := range table.Rows {
-			id, name, attr1, attr2, attr3, attr4, attr5 := csvCellsFromResourceRow(row)
-			if err := cw.Write(accountDetailsCSVRow(d, table.Key, id, name, attr1, attr2, attr3, attr4, attr5, "", "")); err != nil {
-				return err
-			}
+	// OpenShift CSV uses ClusterID as id (like ec2/rds), not the display table
+	// order which leads with Environment for humans.
+	for _, c := range d.OpenShiftClusters {
+		if err := cw.Write(accountDetailsCSVRow(
+			d,
+			accountreview.SectionOpenShift,
+			c.ClusterID,
+			c.Name,
+			c.Environment,
+			c.ProductType,
+			c.State,
+			c.Region,
+			c.OpenShiftVersion,
+			"",
+			"",
+		)); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -310,7 +310,7 @@ func TestWriteAccountDetailsCSV(t *testing.T) {
 		",top_service,,AmazonEC2,,,,,,100,USD",
 		",ec2,i-abc,web,t3.micro,running,us-east-1",
 		",rds_cluster,cluster-1,aurora-postgresql,available,us-east-1",
-		",openshift,Production,prod-cluster,ocm-prod-1,",
+		",openshift,ocm-prod-1,prod-cluster,Production,",
 		"ocm-prod-1",
 		"4.16.0",
 		",inventory_error,,,us-west-2: denied",
