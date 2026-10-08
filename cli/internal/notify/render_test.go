@@ -303,7 +303,8 @@ func TestRenderAccountEmailIncludesOpenShiftClusters(t *testing.T) {
 		otherIdx := strings.Index(body, "Other resources")
 		ocpIdx := strings.Index(body, "OpenShift clusters")
 		vpcIdx := strings.Index(body, "VPCs")
-		if resIdx < 0 || otherIdx < 0 || ocpIdx < 0 || vpcIdx < 0 || !(resIdx < otherIdx && otherIdx < vpcIdx && vpcIdx < ocpIdx) {
+		if resIdx < 0 || otherIdx < 0 || ocpIdx < 0 || vpcIdx < 0 ||
+			resIdx >= otherIdx || otherIdx >= vpcIdx || vpcIdx >= ocpIdx {
 			t.Fatalf("expected Resources → Other resources → VPCs → OpenShift:\n%s", body)
 		}
 	}
