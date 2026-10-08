@@ -258,9 +258,6 @@ func writeOpenShiftText(b *strings.Builder, d accountreview.AccountDetails) {
 	} else if line := d.OpenShiftNoneFoundLine(); line != "" {
 		fmt.Fprintf(b, "  %s\n", line)
 	}
-	if note := incompleteOpenShiftLine(d); note != "" {
-		fmt.Fprintf(b, "  %s\n", note)
-	}
 }
 
 func writeActionRequiredText(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time) {

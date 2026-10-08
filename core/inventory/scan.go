@@ -161,7 +161,7 @@ func (defaultAccountScanner) scanAccount(ctx context.Context, q Query, target Ac
 			warnings = append(warnings, RegionWarning{
 				AccountID: target.AccountID,
 				Region:    region,
-				Message:   fmt.Sprintf("scan timed out after %s", regionScanTimeout),
+				Message:   fmt.Sprintf("%s %s", regionScanTimeoutPrefix, regionScanTimeout),
 			})
 			mu.Unlock()
 		}
@@ -394,16 +394,21 @@ func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
 	return warnings
 }
 
-// coalesceRegionWarnings keeps a single timeout summary per region when a region
-// scan timed out, dropping verbose per-service SDK errors for that region.
-// Regions without a timeout keep their service warnings unchanged.
+// regionScanTimeoutPrefix is the Message prefix used when regionCtx expires.
+// coalesceRegionWarnings matches only this summary so per-service errors that
+// happen to contain "timed out" do not hide unrelated regional warnings.
+const regionScanTimeoutPrefix = "scan timed out after"
+
+// coalesceRegionWarnings keeps the region scan-timeout summary when present,
+// dropping verbose per-service SDK errors for that region. Regions without a
+// regionCtx timeout keep their service warnings unchanged.
 func coalesceRegionWarnings(warnings []RegionWarning) []RegionWarning {
 	if len(warnings) == 0 {
 		return warnings
 	}
 	timeoutByRegion := map[string]RegionWarning{}
 	for _, w := range warnings {
-		if !strings.Contains(strings.ToLower(w.Message), "timed out") {
+		if !strings.HasPrefix(w.Message, regionScanTimeoutPrefix) {
 			continue
 		}
 		region := strings.TrimSpace(w.Region)

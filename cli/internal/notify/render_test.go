@@ -326,6 +326,9 @@ func TestRenderAccountEmailOmitsOpenShiftLookupDetails(t *testing.T) {
 	if !strings.Contains(msg.HTMLBody, incompleteOpenShiftNote) {
 		t.Fatalf("html missing incomplete-openshift note: %s", msg.HTMLBody)
 	}
+	if strings.Count(msg.TextBody, incompleteOpenShiftNote) != 1 {
+		t.Fatalf("text should print incomplete-openshift note once under Warnings:\n%s", msg.TextBody)
+	}
 	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
 		if strings.Contains(body, "OpenShift clusters (0)") {
 			t.Fatalf("failed lookup must not imply zero clusters:\n%s", body)

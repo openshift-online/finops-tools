@@ -35,6 +35,30 @@ func TestCoalesceRegionWarningsDropsServiceNoiseOnTimeout(t *testing.T) {
 	}
 }
 
+func TestCoalesceRegionWarningsIgnoresServiceTimedOutSubstring(t *testing.T) {
+	t.Parallel()
+	in := []RegionWarning{
+		{Region: "us-west-2", Message: "ec2: request timed out"},
+		{Region: "us-west-2", Message: "rds: access denied"},
+	}
+	got := coalesceRegionWarnings(in)
+	if len(got) != 2 {
+		t.Fatalf("service timed-out must not coalesce region: %+v", got)
+	}
+}
+
+func TestCoalesceRegionWarningsPrefersRegionScanSummary(t *testing.T) {
+	t.Parallel()
+	got := coalesceRegionWarnings([]RegionWarning{
+		{Region: "eu-west-1", Message: "ec2: request timed out"},
+		{Region: "eu-west-1", Message: "scan timed out after 45s"},
+		{Region: "eu-west-1", Message: "rds: access denied"},
+	})
+	if len(got) != 1 || got[0].Message != "scan timed out after 45s" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
 func TestCoalesceRegionWarningsNoTimeoutUnchanged(t *testing.T) {
 	t.Parallel()
 	in := []RegionWarning{
