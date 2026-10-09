@@ -23,16 +23,17 @@ func (m *mockRows) Scan(dest ...any) error {
 		if i >= len(row) {
 			continue
 		}
-		p, ok := d.(*string)
+		pp, ok := d.(**string)
 		if !ok {
 			continue
 		}
 		if row[i] == nil {
-			*p = ""
+			*pp = nil
 			continue
 		}
 		if s, ok := row[i].(string); ok {
-			*p = s
+			v := s
+			*pp = &v
 		}
 	}
 	return nil
@@ -97,6 +98,29 @@ func TestLookupByAWSAccounts_EmptyAccounts(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestLookupByAWSAccounts_NullColumnsBecomeEmpty(t *testing.T) {
+	t.Parallel()
+	mq := &mockQueryer{rows: &mockRows{data: [][]any{
+		{"Production", nil, "ocm-1", nil, "ready", nil, nil, "111111111111"},
+	}}}
+
+	got, err := LookupByAWSAccounts(context.Background(), mq, []string{"111111111111"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clusters := got["111111111111"]
+	if len(clusters) != 1 {
+		t.Fatalf("clusters = %#v", clusters)
+	}
+	c := clusters[0]
+	if c.ClusterName != "" || c.ProductType != "" || c.Region != "" || c.OpenShiftVersion != "" {
+		t.Fatalf("null columns should be empty strings, got %+v", c)
+	}
+	if c.Environment != "Production" || c.ClusterID != "ocm-1" || c.State != "ready" {
+		t.Fatalf("non-null columns = %+v", c)
 	}
 }
 

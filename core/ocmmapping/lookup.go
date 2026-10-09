@@ -60,20 +60,32 @@ func LookupByAWSAccounts(ctx context.Context, querier RowQuerier, accountIDs []s
 
 	out := make(map[string][]Cluster, len(ids))
 	for rows.Next() {
-		var c Cluster
+		var (
+			environment, clusterName, clusterID, productType *string
+			state, region, openShiftVersion, awsAccountID    *string
+		)
 		if scanErr := rows.Scan(
-			&c.Environment,
-			&c.ClusterName,
-			&c.ClusterID,
-			&c.ProductType,
-			&c.State,
-			&c.Region,
-			&c.OpenShiftVersion,
-			&c.AWSAccountID,
+			&environment,
+			&clusterName,
+			&clusterID,
+			&productType,
+			&state,
+			&region,
+			&openShiftVersion,
+			&awsAccountID,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scan ocm mapping row: %w", scanErr)
 		}
-		c.AWSAccountID = strings.TrimSpace(c.AWSAccountID)
+		c := Cluster{
+			Environment:      stringOrEmpty(environment),
+			ClusterName:      stringOrEmpty(clusterName),
+			ClusterID:        stringOrEmpty(clusterID),
+			ProductType:      stringOrEmpty(productType),
+			State:            stringOrEmpty(state),
+			Region:           stringOrEmpty(region),
+			OpenShiftVersion: stringOrEmpty(openShiftVersion),
+			AWSAccountID:     strings.TrimSpace(stringOrEmpty(awsAccountID)),
+		}
 		if c.AWSAccountID == "" {
 			continue
 		}
@@ -122,6 +134,13 @@ WHERE AWS_ACCOUNT_ID IN (%s)
   AND LOWER(CLOUD_PROVIDER) = 'aws'
 ORDER BY ENVIRONMENT, CLUSTER_NAME, CLUSTER_ID`, martTable, strings.Join(placeholders, ", "))
 	return strings.TrimSpace(sqlText), args, nil
+}
+
+func stringOrEmpty(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func uniqueNonEmpty(ids []string) []string {

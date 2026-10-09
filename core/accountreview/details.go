@@ -175,7 +175,10 @@ func DetailsFrom(r AccountReport) AccountDetails {
 		GeneratedAt:            r.GeneratedAt,
 	}
 	if r.OpenShiftClusters != nil {
-		d.OpenShiftClusters = append([]OpenShiftClusterDetail(nil), r.OpenShiftClusters...)
+		// make+copy (not append to nil) so a successful zero-cluster result stays
+		// non-nil and HasOpenShiftSection can show "OpenShift clusters (0)".
+		d.OpenShiftClusters = make([]OpenShiftClusterDetail, len(r.OpenShiftClusters))
+		copy(d.OpenShiftClusters, r.OpenShiftClusters)
 	}
 	if n := len(inv.EC2Instances); n > 0 {
 		d.EC2Instances = make([]EC2Detail, n)

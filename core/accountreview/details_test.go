@@ -288,6 +288,22 @@ func TestDetailsFromOpenShiftClusters(t *testing.T) {
 	}
 }
 
+func TestDetailsFromPreservesEmptyOpenShiftClusters(t *testing.T) {
+	t.Parallel()
+	d := DetailsFrom(AccountReport{
+		OpenShiftClusters: []OpenShiftClusterDetail{},
+	})
+	if d.OpenShiftClusters == nil {
+		t.Fatal("successful zero-cluster lookup must stay non-nil after DetailsFrom")
+	}
+	if !d.HasOpenShiftSection() {
+		t.Fatal("expected OpenShift section for successful empty lookup")
+	}
+	if got := d.OpenShiftSectionTitle(); got != "OpenShift clusters (0)" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
 func TestOpenShiftSectionTitleUnavailableOnFailure(t *testing.T) {
 	t.Parallel()
 	d := AccountDetails{OpenShiftClustersError: "snowflake unavailable"}
