@@ -42,6 +42,15 @@ func sampleAccountDetails() accountreview.AccountDetails {
 			Status:    "available",
 			Region:    "us-east-1",
 		}},
+		OpenShiftClusters: []accountreview.OpenShiftClusterDetail{{
+			Environment:      "Production",
+			Name:             "prod-cluster",
+			ClusterID:        "ocm-prod-1",
+			ProductType:      "ROSA Classic",
+			State:            "ready",
+			Region:           "us-east-1",
+			OpenShiftVersion: "4.16.0",
+		}},
 		ResourceCounts: accountreview.ResourceCounts{
 			UnattachedEBS: 2,
 			VPCs:          1,
@@ -79,9 +88,14 @@ func TestWriteAccountDetailsPretty(t *testing.T) {
 		"EC2 instances",
 		"i-abc",
 		"cluster-1",
+		"Other resources",
 		"Unattached EBS volumes: 2",
 		"VPCs: 1",
-		"Inventory warnings: us-west-2: denied",
+		"OpenShift clusters",
+		"prod-cluster",
+		"ocm-prod-1",
+		"Warnings",
+		"Inventory: us-west-2: denied",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pretty missing %q\n%s", want, out)
@@ -288,14 +302,17 @@ func TestWriteAccountDetailsCSV(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"account_id,account_name,owner_email,section,id,name,attr1,attr2,attr3,amount,currency",
+		"account_id,account_name,owner_email,section,id,name,attr1,attr2,attr3,attr4,attr5,amount,currency",
 		"111111111111,test-account,jdoe@redhat.com,account,111111111111,test-account,my-linked,Root / Sandbox",
 		",tag,,owner,jdoe",
-		",month,,2026-01,,,,1234.5,USD",
-		",month,,Total,,,,1234.5,USD",
-		",top_service,,AmazonEC2,,,,100,USD",
+		",month,,2026-01,,,,,,1234.5,USD",
+		",month,,Total,,,,,,1234.5,USD",
+		",top_service,,AmazonEC2,,,,,,100,USD",
 		",ec2,i-abc,web,t3.micro,running,us-east-1",
 		",rds_cluster,cluster-1,aurora-postgresql,available,us-east-1",
+		",openshift,ocm-prod-1,prod-cluster,Production,",
+		"ocm-prod-1",
+		"4.16.0",
 		",inventory_error,,,us-west-2: denied",
 		",count,unattached_ebs,Unattached EBS volumes,2",
 		",count,vpcs,VPCs,1",

@@ -72,8 +72,12 @@ type AccountReport struct {
 	MonthlyCosts cost.AccountMonthlyCosts   `json:"monthly_costs"`
 	Inventory    inventory.AccountInventory `json:"inventory"`
 	// InventoryError is a human-readable join of regional skips and account-level inventory warnings.
-	InventoryError string    `json:"inventory_error,omitempty"`
-	GeneratedAt    time.Time `json:"generated_at"`
+	InventoryError string `json:"inventory_error,omitempty"`
+	// OpenShiftClusters are OCM clusters for this AWS account (nil when not queried).
+	OpenShiftClusters []OpenShiftClusterDetail `json:"openshift_clusters,omitempty"`
+	// OpenShiftClustersError explains a skipped or failed OCM/Snowflake lookup.
+	OpenShiftClustersError string    `json:"openshift_clusters_error,omitempty"`
+	GeneratedAt            time.Time `json:"generated_at"`
 }
 
 // DeliveryResult records the outcome for one account or owner group.

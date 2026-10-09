@@ -9,9 +9,70 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/core/accountreview"
 	"github.com/spf13/cobra"
 )
+
+func TestValidateAccountDetailsSnowflakeAlias(t *testing.T) {
+	t.Parallel()
+	cfg := configstore.File{
+		Snowflake: configstore.SnowflakeConfig{
+			AccountAliases: map[string]configstore.SnowflakeAccount{
+				"rhprod": {Account: "ORG-ACCT", Warehouse: "WH"},
+			},
+		},
+	}
+	if err := validateAccountDetailsSnowflakeAlias(cfg, "", false); err != nil {
+		t.Fatalf("omitted alias: %v", err)
+	}
+	err := validateAccountDetailsSnowflakeAlias(cfg, "", true)
+	if err == nil {
+		t.Fatal("expected empty explicit alias error")
+	}
+	if !strings.Contains(err.Error(), "was set but is empty") {
+		t.Fatalf("empty explicit alias error = %v", err)
+	}
+	err = validateAccountDetailsSnowflakeAlias(cfg, "   ", true)
+	if err == nil {
+		t.Fatal("expected blank explicit alias error")
+	}
+	if err := validateAccountDetailsSnowflakeAlias(cfg, "rhprod", true); err != nil {
+		t.Fatalf("known alias: %v", err)
+	}
+	err = validateAccountDetailsSnowflakeAlias(cfg, "missing", true)
+	if err == nil {
+		t.Fatal("expected unknown alias error")
+	}
+	if !strings.Contains(err.Error(), "unknown snowflake account alias") {
+		t.Fatalf("error = %v", err)
+	}
+	noWH := configstore.File{
+		Snowflake: configstore.SnowflakeConfig{
+			AccountAliases: map[string]configstore.SnowflakeAccount{
+				"nowh": {Account: "ORG-ACCT"},
+			},
+		},
+	}
+	err = validateAccountDetailsSnowflakeAlias(noWH, "nowh", true)
+	if err == nil {
+		t.Fatal("expected warehouse error")
+	}
+	noAcct := configstore.File{
+		Snowflake: configstore.SnowflakeConfig{
+			AccountAliases: map[string]configstore.SnowflakeAccount{
+				"noacct": {Warehouse: "WH"},
+			},
+		},
+	}
+	err = validateAccountDetailsSnowflakeAlias(noAcct, "noacct", true)
+	if err == nil {
+		t.Fatal("expected account identifier error")
+	}
+	if !strings.Contains(err.Error(), "no account identifier") {
+		t.Fatalf("error = %v", err)
+	}
+}
 
 func TestValidateAccountDetailsSendFlags(t *testing.T) {
 	t.Parallel()

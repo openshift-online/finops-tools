@@ -99,6 +99,15 @@ func TestResolveSnowflakeSession(t *testing.T) {
 	}
 }
 
+func TestValidateSnowflakeAccount(t *testing.T) {
+	if err := ValidateSnowflakeAccount(SnowflakeAccount{Account: "ORG-ACCT"}, "rhsandbox"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if err := ValidateSnowflakeAccount(SnowflakeAccount{}, "rhsandbox"); err == nil {
+		t.Fatal("expected error for missing account identifier")
+	}
+}
+
 func TestValidateSnowflakeWarehouse(t *testing.T) {
 	if err := ValidateSnowflakeWarehouse(SnowflakeAccount{Warehouse: "WH"}, "rhsandbox"); err != nil {
 		t.Fatalf("unexpected: %v", err)

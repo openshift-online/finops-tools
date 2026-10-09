@@ -148,6 +148,16 @@ func writeAccountDetailsPrettyAccount(w io.Writer, s styler, d accountreview.Acc
 		return err
 	}
 
+	if err := writeAccountDetailsPrettyResources(w, s, d); err != nil {
+		return err
+	}
+	if err := writeAccountDetailsPrettyOpenShift(w, s, d); err != nil {
+		return err
+	}
+	return writeAccountDetailsPrettyWarnings(w, s, d)
+}
+
+func writeAccountDetailsPrettyResources(w io.Writer, s styler, d accountreview.AccountDetails) error {
 	if err := writeSectionTitle(w, s, "Resources"); err != nil {
 		return err
 	}
@@ -162,26 +172,89 @@ func writeAccountDetailsPrettyAccount(w io.Writer, s styler, d accountreview.Acc
 			return err
 		}
 	}
-	for _, c := range counts {
-		if _, err := fmt.Fprintf(w, "  %s: %d\n", c.Title, c.Count); err != nil {
+	if len(counts) > 0 || d.NoneFoundLine() != "" {
+		if len(tables) > 0 {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+		if err := writeSubsectionTitle(w, s, "Other resources"); err != nil {
+			return err
+		}
+		for _, c := range counts {
+			if _, err := fmt.Fprintf(w, "  %s: %d\n", c.Title, c.Count); err != nil {
+				return err
+			}
+		}
+		if line := d.NoneFoundLine(); line != "" {
+			if s.enabled {
+				line = s.dim(line)
+			}
+			if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func writeAccountDetailsPrettyWarnings(w io.Writer, s styler, d accountreview.AccountDetails) error {
+	inv := strings.TrimSpace(d.InventoryError)
+	ocp := strings.TrimSpace(d.OpenShiftClustersError)
+	if inv == "" && ocp == "" {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if err := writeSectionTitle(w, s, "Warnings"); err != nil {
+		return err
+	}
+	for _, part := range strings.Split(inv, "; ") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		line := "  Inventory: " + part
+		if s.enabled {
+			line = s.dim(line)
+		}
+		if _, err := fmt.Fprintf(w, "%s\n", line); err != nil {
 			return err
 		}
 	}
-	if line := d.NoneFoundLine(); line != "" {
+	if ocp != "" {
+		line := "  OpenShift: " + ocp
+		if s.enabled {
+			line = s.dim(line)
+		}
+		if _, err := fmt.Fprintf(w, "%s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeAccountDetailsPrettyOpenShift(w io.Writer, s styler, d accountreview.AccountDetails) error {
+	if !d.HasOpenShiftSection() {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	table := d.OpenShiftTable()
+	if err := writeSectionTitle(w, s, d.OpenShiftSectionTitle()); err != nil {
+		return err
+	}
+	if table.Count > 0 {
+		if err := writeAccountDetailsTable(w, s, "", table.Headers, table.Rows); err != nil {
+			return err
+		}
+	} else if line := d.OpenShiftNoneFoundLine(); line != "" {
 		if s.enabled {
 			line = s.dim(line)
 		}
 		if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
-			return err
-		}
-	}
-
-	if d.InventoryError != "" {
-		msg := "Inventory warnings: " + d.InventoryError
-		if s.enabled {
-			msg = s.dim(msg)
-		}
-		if _, err := fmt.Fprintf(w, "\n%s\n", msg); err != nil {
 			return err
 		}
 	}
