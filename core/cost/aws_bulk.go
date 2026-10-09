@@ -217,7 +217,7 @@ func fetchAWSDailyNetAmortizedBulk(ctx context.Context, q CostQuery, targets []A
 	batchResults := make([]dailyBatchResult, len(batches))
 	err := parallel.ForEach(ctx, q.Workers, len(batches), func(ctx context.Context, i int) error {
 		filter := linkedAccountsFilter(batches[i])
-		daily, cur, err := sumNetAmortizedDaily(ctx, ce, dr, filter)
+		daily, cur, err := sumNetAmortizedDailyWithCoverage(ctx, ce, dr, filter, q.RequireDailyCoverage)
 		if err != nil {
 			return err
 		}
@@ -239,7 +239,7 @@ func fetchAWSDailyNetAmortizedBulk(ctx context.Context, q CostQuery, targets []A
 		series[i] = br.daily
 	}
 
-	return MergeDaily(series), currency, nil
+	return mergeDaily(series, q.RequireDailyCoverage), currency, nil
 }
 
 func bulkMergedCostResult(targets []AccountTarget, q CostQuery, dr DateRange, amount float64, currency string, credTarget AccountTarget) CostResult {
