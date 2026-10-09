@@ -47,6 +47,20 @@ func TestValidateAccountDetailsSnowflakeAlias(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected warehouse error")
 	}
+	noAcct := configstore.File{
+		Snowflake: configstore.SnowflakeConfig{
+			AccountAliases: map[string]configstore.SnowflakeAccount{
+				"noacct": {Warehouse: "WH"},
+			},
+		},
+	}
+	err = validateAccountDetailsSnowflakeAlias(noAcct, "noacct")
+	if err == nil {
+		t.Fatal("expected account identifier error")
+	}
+	if !strings.Contains(err.Error(), "no account identifier") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestValidateAccountDetailsSendFlags(t *testing.T) {

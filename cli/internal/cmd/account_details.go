@@ -67,7 +67,7 @@ email with a generic incomplete-scan note.
 OpenShift clusters are loaded from the production Dataverse Snowflake mart
 (HCMFINOPS_DB.MARTS.OCM_MAPPING) across Production, Stage, and Integration.
 Use --snowflake-alias to select the Snowflake account (default:
-snowflake.account_alias). An unknown --snowflake-alias fails before AWS work.
+snowflake.account_alias). An unknown or incomplete --snowflake-alias fails before AWS work.
 When no Snowflake account is configured (and the flag is omitted) or the lookup
 fails after connect, AWS cost/inventory still succeed and the OpenShift section
 records a soft error.
@@ -355,14 +355,18 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 }
 
 // validateAccountDetailsSnowflakeAlias fails fast when --snowflake-alias is set but
-// unknown or missing a warehouse, so AWS gather does not run for a typo. An empty
-// alias is allowed (OpenShift lookup may soft-skip later if no default is configured).
+// unknown or incomplete (missing account identifier or warehouse), so AWS gather does
+// not run for a typo. An empty alias is allowed (OpenShift lookup may soft-skip later
+// if no default is configured).
 func validateAccountDetailsSnowflakeAlias(cfg configstore.File, snowflakeAlias string) error {
 	if strings.TrimSpace(snowflakeAlias) == "" {
 		return nil
 	}
 	alias, acct, err := cfg.ResolveSnowflakeAccountAlias(snowflakeAlias)
 	if err != nil {
+		return err
+	}
+	if err := configstore.ValidateSnowflakeAccount(acct, alias); err != nil {
 		return err
 	}
 	acct = cfg.ResolveSnowflakeSession(acct)

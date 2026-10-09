@@ -50,6 +50,9 @@ func openSnowflakeMartQuerier(ctx context.Context, cfg configstore.File, snowfla
 	if err != nil {
 		return nil, err
 	}
+	if err := configstore.ValidateSnowflakeAccount(acct, alias); err != nil {
+		return nil, err
+	}
 	acct = cfg.ResolveSnowflakeSession(acct)
 	if err := configstore.ValidateSnowflakeWarehouse(acct, alias); err != nil {
 		return nil, err

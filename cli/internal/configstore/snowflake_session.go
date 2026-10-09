@@ -33,6 +33,19 @@ func (f File) ResolveSnowflakeSession(acct SnowflakeAccount) SnowflakeAccount {
 	return out
 }
 
+// ValidateSnowflakeAccount reports when an alias has no account identifier.
+// SetSnowflakeAlias enforces this at write time, so this only fires for
+// hand-edited configs.
+func ValidateSnowflakeAccount(acct SnowflakeAccount, alias string) error {
+	if strings.TrimSpace(acct.Account) != "" {
+		return nil
+	}
+	return fmt.Errorf(
+		"snowflake alias %q has no account identifier configured; set the account on finops config account add snowflake, or add account under snowflake.account_aliases.%s in the finops config",
+		alias, alias,
+	)
+}
+
 // ValidateSnowflakeWarehouse reports when no warehouse is configured after ResolveSnowflakeSession.
 func ValidateSnowflakeWarehouse(acct SnowflakeAccount, alias string) error {
 	if strings.TrimSpace(acct.Warehouse) != "" {
