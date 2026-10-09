@@ -67,10 +67,10 @@ email with a generic incomplete-scan note.
 OpenShift clusters are loaded from the production Dataverse Snowflake mart
 (HCMFINOPS_DB.MARTS.OCM_MAPPING) across Production, Stage, and Integration.
 Use --snowflake-alias to select the Snowflake account (default:
-snowflake.account_alias). An unknown or incomplete --snowflake-alias fails before AWS work.
-When no Snowflake account is configured (and the flag is omitted) or the lookup
-fails after connect, AWS cost/inventory still succeed and the OpenShift section
-records a soft error.
+snowflake.account_alias). A blank, unknown, or incomplete --snowflake-alias fails
+before AWS work. When no Snowflake account is configured (and the flag is omitted)
+or the lookup fails after connect, AWS cost/inventory still succeed and the
+OpenShift section records a soft error.
 
 Gmail uses gcloud Application Default Credentials (finops does not modify ADC). Verify access:
   finops config gmail login
@@ -198,7 +198,7 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 	if err := applyExcludeRecentDaysDefault(cmd, cfg, &detailsExcludeRecentDays); err != nil {
 		return err
 	}
-	if err := validateAccountDetailsSnowflakeAlias(cfg, detailsSnowflakeAlias); err != nil {
+	if err := validateAccountDetailsSnowflakeAlias(cfg, detailsSnowflakeAlias, cmd.Flags().Changed("snowflake-alias")); err != nil {
 		return err
 	}
 
@@ -355,11 +355,14 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 }
 
 // validateAccountDetailsSnowflakeAlias fails fast when --snowflake-alias is set but
-// unknown or incomplete (missing account identifier or warehouse), so AWS gather does
-// not run for a typo. An empty alias is allowed (OpenShift lookup may soft-skip later
-// if no default is configured).
-func validateAccountDetailsSnowflakeAlias(cfg configstore.File, snowflakeAlias string) error {
+// blank, unknown, or incomplete (missing account identifier or warehouse), so AWS
+// gather does not run for a typo. Omitting the flag is allowed (OpenShift lookup may
+// soft-skip later if no default is configured).
+func validateAccountDetailsSnowflakeAlias(cfg configstore.File, snowflakeAlias string, aliasFlagSet bool) error {
 	if strings.TrimSpace(snowflakeAlias) == "" {
+		if aliasFlagSet {
+			return fmt.Errorf("--snowflake-alias was set but is empty")
+		}
 		return nil
 	}
 	alias, acct, err := cfg.ResolveSnowflakeAccountAlias(snowflakeAlias)

@@ -23,13 +23,24 @@ func TestValidateAccountDetailsSnowflakeAlias(t *testing.T) {
 			},
 		},
 	}
-	if err := validateAccountDetailsSnowflakeAlias(cfg, ""); err != nil {
-		t.Fatalf("empty alias: %v", err)
+	if err := validateAccountDetailsSnowflakeAlias(cfg, "", false); err != nil {
+		t.Fatalf("omitted alias: %v", err)
 	}
-	if err := validateAccountDetailsSnowflakeAlias(cfg, "rhprod"); err != nil {
+	err := validateAccountDetailsSnowflakeAlias(cfg, "", true)
+	if err == nil {
+		t.Fatal("expected empty explicit alias error")
+	}
+	if !strings.Contains(err.Error(), "was set but is empty") {
+		t.Fatalf("empty explicit alias error = %v", err)
+	}
+	err = validateAccountDetailsSnowflakeAlias(cfg, "   ", true)
+	if err == nil {
+		t.Fatal("expected blank explicit alias error")
+	}
+	if err := validateAccountDetailsSnowflakeAlias(cfg, "rhprod", true); err != nil {
 		t.Fatalf("known alias: %v", err)
 	}
-	err := validateAccountDetailsSnowflakeAlias(cfg, "missing")
+	err = validateAccountDetailsSnowflakeAlias(cfg, "missing", true)
 	if err == nil {
 		t.Fatal("expected unknown alias error")
 	}
@@ -43,7 +54,7 @@ func TestValidateAccountDetailsSnowflakeAlias(t *testing.T) {
 			},
 		},
 	}
-	err = validateAccountDetailsSnowflakeAlias(noWH, "nowh")
+	err = validateAccountDetailsSnowflakeAlias(noWH, "nowh", true)
 	if err == nil {
 		t.Fatal("expected warehouse error")
 	}
@@ -54,7 +65,7 @@ func TestValidateAccountDetailsSnowflakeAlias(t *testing.T) {
 			},
 		},
 	}
-	err = validateAccountDetailsSnowflakeAlias(noAcct, "noacct")
+	err = validateAccountDetailsSnowflakeAlias(noAcct, "noacct", true)
 	if err == nil {
 		t.Fatal("expected account identifier error")
 	}
