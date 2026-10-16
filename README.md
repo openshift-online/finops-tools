@@ -708,6 +708,39 @@ finops snapshot list --account-id 333333333333 --payer rhc --older-than-days 90 
 
 When Cost Explorer data is available, the summary shows **attributed** storage cost for listed snapshots (scaled to billed `EBS:SnapshotUsage` and `RDS:ChargedBackupUsage` for the last complete calendar month) and **account-wide** billed amounts (also in JSON as `summary.billed_costs`). Per-snapshot **$/MO** is each snapshot's share of that attributed cost; **—** on EBS means no incremental blocks. Without CE data, summary falls back to API estimates. Payer credentials need `ce:GetCostAndUsage` with `LINKED_ACCOUNT` scope.
 
+### Extended support (AWS)
+
+Find AWS resources running versions that have passed their **standard support end date** (AWS Extended Support). Today this covers **RDS DB instances and Aurora/RDS DB clusters**; EKS and ElastiCache are planned. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer.
+
+```bash
+finops extended-support list --account-alias rh-control
+finops extended-support list --payer rh-control
+finops extended-support list --payer rh-control --services rds --format json
+finops extended-support list --payer rh-control --regions us-east-1,us-west-2
+```
+
+A resource is reported when the standard support end date for its engine major version (from `rds:DescribeDBMajorEngineVersions`) is in the past. The output includes both the standard support end date and, when published, the extended support end date. Supported engines are MySQL, PostgreSQL, Aurora MySQL, and Aurora PostgreSQL. Version lookup includes deprecated versions, and linked-account roles are assumed when each account's scan begins.
+
+Each run shares validated payer configuration and an STS client across the payer's linked accounts. Member roles are still assumed and their identities verified separately. If role assumption reports invalid or expired payer credentials, one worker reloads the payer profile and, for SAML authentication, reruns the existing login flow if needed; other workers wait for that renewal. The affected role assumption is retried once. Permission errors do not trigger login. Failed renewal is shared across dependent accounts so login is not repeated for every member. SAML renewal requires working VPN/Kerberos access. With `--auth-method profile`, the configured SDK provider/profile is reloaded; scan workers never prompt for access keys, and profiles that require an external login must be renewed externally.
+
+| Flag | Description |
+|------|-------------|
+| `--services` | Services to scan: `rds` (comma-separated; default `rds`) |
+| `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
+| `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (`--ou`/`--payer` are ACTIVE members only) |
+| `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
+| `--format` | `pretty-print` (default), `json`, or `csv` |
+| `--output` / `-o` | Write output to a file instead of stdout |
+| `--quiet` | Suppress progress messages on stderr |
+| `--workers` | Maximum concurrent workers for multi-account AWS scans (default: `25`, max: `1000`; use `1` for sequential) |
+| `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
+
+Required IAM permissions in each scanned account: `ec2:DescribeRegions`, `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:DescribeDBEngineVersions`, and `rds:DescribeDBMajorEngineVersions`. Payer credentials also need `sts:AssumeRole` into the configured linked-account role.
+
+Accounts that cannot be assumed into are skipped and listed under "Skipped accounts"; failed instance or cluster discovery is listed under "Skipped regions", including partial discovery failures. Successful discoveries from the same region are retained. An engine/version lookup failure affects only the resources that depend on that lookup.
+
+Resources with missing engine/version information, failed lifecycle lookups, or missing standard support end dates appear under "Support status unknown" in pretty-print output and `summary.unclassified_resources` in JSON. They are excluded from the Extended Support count. CSV contains only confirmed Extended Support resources. Check warnings before treating an empty result as "no resources in extended support".
+
 ### Reports
 
 Generate HTML reports from configured accounts. Templates use Go's **`html/template`**, embedded in the CLI binary under `cli/internal/report/templates/`.
