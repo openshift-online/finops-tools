@@ -737,7 +737,9 @@ Each run shares validated payer configuration and an STS client across the payer
 
 Required IAM permissions in each scanned account: `ec2:DescribeRegions`, `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:DescribeDBEngineVersions`, and `rds:DescribeDBMajorEngineVersions`. Payer credentials also need `sts:AssumeRole` into the configured linked-account role.
 
-Accounts that cannot be assumed into are skipped and listed under "Skipped accounts"; failed instance or cluster discovery is listed under "Skipped regions", including partial discovery failures. Successful discoveries from the same region are retained. An engine/version lookup failure affects only the resources that depend on that lookup.
+After the initial scan finishes, accounts skipped because credentials could not be loaded or enabled regions could not be discovered are retried once. The retry uses fresh payer-session state, reloads credentials, and can renew a SAML login if needed. Successful accounts are not rescanned. Recovered findings are merged into the result and totals; only accounts that still fail remain under "Skipped accounts" (`summary.skipped_accounts` in JSON), with their latest failure reason. This list is held in memory for the run and can be saved with JSON output. Region-only failures and accounts excluded during account selection are not included in this retry.
+
+Failed instance or cluster discovery is listed under "Skipped regions", including partial discovery failures. Successful discoveries from the same region are retained. An engine/version lookup failure affects only the resources that depend on that lookup.
 
 Resources with missing engine/version information, failed lifecycle lookups, or missing standard support end dates appear under "Support status unknown" in pretty-print output and `summary.unclassified_resources` in JSON. They are excluded from the Extended Support count. CSV contains only confirmed Extended Support resources. Check warnings before treating an empty result as "no resources in extended support".
 

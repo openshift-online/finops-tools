@@ -78,6 +78,10 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		return Result{}, err
 	}
 
+	return buildResult(records, warnings, unclassified, skippedAccounts), nil
+}
+
+func buildResult(records []Record, warnings []RegionWarning, unclassified []ResourceWarning, skippedAccounts []AccountWarning) Result {
 	sortRecords(records)
 	return Result{
 		Records: records,
@@ -89,7 +93,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 			SkippedAccounts:       sortAccountWarnings(skippedAccounts),
 			UnclassifiedResources: sortResourceWarnings(unclassified),
 		},
-	}, nil
+	}
 }
 
 func (q Query) withDefaults() Query {

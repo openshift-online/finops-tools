@@ -2,9 +2,13 @@
 package cmd
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
 	"github.com/openshift-online/finops-tools/cli/internal/progress"
+	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/openshift-online/finops-tools/core/extendedsupport"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +29,7 @@ var (
 	extendedSupportListTag             string
 	extendedSupportListWorkers         int
 	extendedSupportListFetch           = extendedsupport.Fetch
+	extendedSupportListRetry           = extendedsupport.RetrySkippedAccounts
 )
 
 var extendedSupportListCmd = &cobra.Command{
@@ -37,6 +42,8 @@ Account selection matches finops account get-cost: --account-id, --account-alias
 (--ou/--payer select ACTIVE members only). Linked member accounts are scanned using role assumption from the payer.
 Accounts that cannot be assumed into, or regions that fail credentialed API calls during the scan,
 are skipped and listed under "Skipped accounts" or "Skipped regions" in the output.
+After the initial scan, skipped accounts are retried once using fresh payer-session state.
+The final skipped-account list contains only accounts that still could not be scanned.
 
 A resource is reported when its engine major version's standard support end date (from
 RDS DescribeDBMajorEngineVersions) is in the past.
@@ -179,32 +186,64 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if len(scanTargets) == 0 {
-		return output.WriteExtendedSupportListResult(out, format, extendedsupport.Result{
-			Summary: extendedsupport.Summary{
-				SkippedAccounts: skippedAccounts,
-			},
-		})
+	query := extendedsupport.Query{
+		Targets:  scanTargets,
+		Services: services,
+		Regions:  regions,
+		Workers:  extendedSupportListWorkers,
+		Now:      time.Now().UTC(),
 	}
-
-	if len(scanTargets) <= 1 {
-		status.Step("Scanning account for extended-support resources…")
-	}
-	scanBar := progress.NewBar(cmd.ErrOrStderr(), extendedSupportListQuiet, "Scanning accounts for extended-support resources…", len(scanTargets))
-	result, err := extendedSupportListFetch(awsCtx, extendedsupport.Query{
-		Targets:         scanTargets,
-		Services:        services,
-		Regions:         regions,
-		AccountProgress: scanBar,
-		Workers:         extendedSupportListWorkers,
-	})
-	if scanBar != nil {
+	var result extendedsupport.Result
+	if len(scanTargets) > 0 {
+		if len(scanTargets) == 1 {
+			status.Step("Scanning account for extended-support resources…")
+		}
+		scanBar := progress.NewBar(cmd.ErrOrStderr(), extendedSupportListQuiet, "Scanning accounts for extended-support resources…", len(scanTargets))
+		query.AccountProgress = scanBar
+		result, err = extendedSupportListFetch(awsCtx, query)
 		scanBar.Finish()
-	}
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
 	result.Summary.SkippedAccounts = mergeExtendedSupportSkippedAccounts(skippedAccounts, result.Summary.SkippedAccounts)
+	if len(result.Summary.SkippedAccounts) > 0 {
+		if err := awsCtx.Err(); err != nil {
+			return err
+		}
+		skippedIDs := make(map[string]bool, len(result.Summary.SkippedAccounts))
+		for _, warning := range result.Summary.SkippedAccounts {
+			skippedIDs[warning.AccountID] = true
+		}
+		var retryTargets []cost.AccountTarget
+		for _, target := range costTargets {
+			if skippedIDs[target.AccountID] {
+				retryTargets = append(retryTargets, target)
+			}
+		}
+		if len(retryTargets) > 0 {
+			status.Step(fmt.Sprintf("Retrying %d skipped account(s) once…", len(retryTargets)))
+			// A new preparation gives retries fresh payer-session state, including
+			// another chance to renew a login that failed during the first pass.
+			retryScanTargets, retrySkipped, err := prepareExtendedSupportTargets(
+				cmd, cfg, retryTargets,
+				awsFlags.CredentialsFile, awsFlags.ConfigPath, extendedSupportListRole,
+				extendedSupportListWorkers, nil,
+			)
+			if err != nil {
+				return err
+			}
+			result.Summary.SkippedAccounts = mergeExtendedSupportSkippedAccounts(result.Summary.SkippedAccounts, retrySkipped)
+			retryBar := progress.NewBar(cmd.ErrOrStderr(), extendedSupportListQuiet, "Retrying skipped accounts…", len(retryScanTargets))
+			query.Targets = retryScanTargets
+			query.AccountProgress = retryBar
+			result, err = extendedSupportListRetry(awsCtx, query, result)
+			retryBar.Finish()
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	return output.WriteExtendedSupportListResult(out, format, result)
 }

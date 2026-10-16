@@ -110,9 +110,17 @@ func mergeExtendedSupportSkippedAccounts(prepare, scan []extendedsupport.Account
 	if len(prepare) == 0 && len(scan) == 0 {
 		return nil
 	}
-	out := make([]extendedsupport.AccountWarning, 0, len(prepare)+len(scan))
-	out = append(out, prepare...)
-	out = append(out, scan...)
+	byAccount := make(map[string]extendedsupport.AccountWarning, len(prepare)+len(scan))
+	for _, warning := range prepare {
+		byAccount[warning.AccountID] = warning
+	}
+	for _, warning := range scan {
+		byAccount[warning.AccountID] = warning
+	}
+	out := make([]extendedsupport.AccountWarning, 0, len(byAccount))
+	for _, warning := range byAccount {
+		out = append(out, warning)
+	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].AccountID != out[j].AccountID {
 			return out[i].AccountID < out[j].AccountID
