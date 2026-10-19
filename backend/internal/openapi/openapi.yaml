@@ -18,7 +18,7 @@ info:
 servers:
   - url: http://localhost:8080
     description: Local development
-  - url: https://finops-backend-finops-team--finops-tools-backend.apps.prod-stable-spoke1-dc-rdu2.p1.openshiftapps.com
+  - url: https://finops-backend-finops-team--finops-tools-backend.apps.mpp-w2-preprod.cfln.p1.openshiftapps.com
     description: OpenShift (replace host with `oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}'`)
 
 tags:

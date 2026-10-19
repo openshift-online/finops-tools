@@ -236,7 +236,7 @@ curl -s 'http://localhost:8080/v1/aws/accounts/historical-count?aggregate=sum&fr
 
 ### OpenShift deployment
 
-Runtime namespace: **`finops-team--finops-tools-backend`** on cluster `prod-stable-spoke1-dc-rdu2`.
+Runtime namespace: **`finops-team--finops-tools-backend`** on cluster `mpp-w2-preprod`.
 
 The TenantNamespace CR (`metadata.name: finops-tools-backend`) is applied in **`finops-team--config`**; the platform provisions **`finops-team--finops-tools-backend`**.
 
