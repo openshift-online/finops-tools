@@ -88,8 +88,9 @@ paths:
       tags: [health]
       summary: Readiness probe
       description: |
-        When Snowflake is configured, the default connection must be reachable
-        before this endpoint returns 200.
+        Confirms the process can serve HTTP. Does not call Snowflake (or other
+        external dependencies) so probes do not resume a warehouse. Query
+        handlers return 503 when Snowflake is unavailable.
       operationId: getReadyz
       responses:
         "200":
@@ -100,12 +101,6 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
-        "503":
-          description: Snowflake is not available
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/snowflake/query:
     post:

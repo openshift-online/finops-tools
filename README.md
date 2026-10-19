@@ -80,7 +80,7 @@ OpenAPI 3.0 spec: embedded in the binary and served at `GET /openapi.yaml` (sour
 |--------|------|-------------|
 | `GET` | `/openapi.yaml` | OpenAPI 3.0 specification (YAML) |
 | `GET` | `/livez` | Liveness probe; process is up (no external deps) |
-| `GET` | `/readyz` | Readiness probe; Snowflake must be reachable when configured |
+| `GET` | `/readyz` | Readiness probe; process can serve HTTP (does not ping Snowflake) |
 | `GET` | `/health` | Alias for `/livez` |
 | `POST` | `/v1/snowflake/query` | Run read-only SQL against Snowflake (`SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, `EXPLAIN`, `LIST`) |
 | `GET` | `/v1/aws/accounts/historical-count` | Daily AWS linked-account counts per payer (time series) |
@@ -189,7 +189,7 @@ Private keys must be **unencrypted PEM** (PKCS#8 or PKCS#1). Decrypt encrypted k
 
 \*Provide one of token, inline private key, or private key file per connection.
 
-Readiness (`/readyz`) checks only the **default** connection. Other connections connect lazily on first query.
+Readiness (`/readyz`) does not ping Snowflake (probes must not resume a warehouse). Connections open lazily on first query; query handlers return 503 when Snowflake is unavailable.
 
 #### Separate Secrets per environment
 

@@ -35,41 +35,13 @@ func TestLivezHandler(t *testing.T) {
 	}
 }
 
-type fakeSnowflakeChecker struct {
-	err error
-}
-
-func (f *fakeSnowflakeChecker) Check(context.Context) error {
-	return f.err
-}
-
 func TestReadyzHandler(t *testing.T) {
-	t.Run("no snowflake", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-		rec := httptest.NewRecorder()
-		(&Readyz{}).ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-		}
-	})
-
-	t.Run("snowflake ok", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-		rec := httptest.NewRecorder()
-		(&Readyz{Snowflake: &fakeSnowflakeChecker{}}).ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-		}
-	})
-
-	t.Run("snowflake unavailable", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-		rec := httptest.NewRecorder()
-		(&Readyz{Snowflake: &fakeSnowflakeChecker{err: backendsnowflake.ErrUnavailable}}).ServeHTTP(rec, req)
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
-		}
-	})
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	(&Readyz{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
 }
 
 func TestOpenAPIHandler(t *testing.T) {

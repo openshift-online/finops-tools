@@ -49,11 +49,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	livez := &handler.Livez{}
 	mux.Handle("/livez", livez)
 	mux.Handle("/health", livez) // backwards-compatible alias for /livez
-	var snowflakeChecker handler.SnowflakeChecker
-	if s.snowflake != nil {
-		snowflakeChecker = s.snowflake
-	}
-	mux.Handle("/readyz", &handler.Readyz{Snowflake: snowflakeChecker})
+	mux.Handle("/readyz", &handler.Readyz{})
 	mux.Handle("/v1/snowflake/query", &handler.SnowflakeQuery{
 		Querier:      querier,
 		QueryTimeout: cfg.QueryTimeout,
