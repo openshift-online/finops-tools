@@ -212,8 +212,12 @@ func TestNonemptyInventoryFiltersZeros(t *testing.T) {
 		t.Fatalf("empty counts = %+v", got)
 	}
 	emptyTitles := empty.EmptyInventoryTitles()
-	if len(emptyTitles) != len(empty.InventoryTables())+len(empty.InventoryCounts()) {
-		t.Fatalf("empty titles = %v", emptyTitles)
+	wantEmpty := len(empty.InventoryTables()) + len(empty.InventoryCounts())
+	if len(emptyTitles) != wantEmpty {
+		t.Fatalf("empty titles = %v (len %d, want %d)", emptyTitles, len(emptyTitles), wantEmpty)
+	}
+	if stringsContain(emptyTitles, "OpenShift clusters") {
+		t.Fatalf("OpenShift must not appear in AWS empty titles: %v", emptyTitles)
 	}
 	foundTitles := d.EmptyInventoryTitles()
 	if stringsContain(foundTitles, "EC2 instances") || stringsContain(foundTitles, "VPCs") {
@@ -231,10 +235,84 @@ func TestEmptyInventoryTitlesOmitsWhenScanIncomplete(t *testing.T) {
 		ResourceCounts: ResourceCounts{VPCs: 3},
 	}
 	if got := d.EmptyInventoryTitles(); got != nil {
-		t.Fatalf("incomplete scan must not claim types were empty: %v", got)
+		t.Fatalf("incomplete AWS scan must not claim types were empty: %v", got)
 	}
 	if got := d.NoneFoundLine(); got != "" {
-		t.Fatalf("incomplete scan must not emit a none-found line: %q", got)
+		t.Fatalf("incomplete AWS scan must not emit a none-found line: %q", got)
+	}
+}
+
+func TestOpenShiftNoneFoundLineIndependentOfAWSInventoryError(t *testing.T) {
+	t.Parallel()
+	d := AccountDetails{
+		InventoryError:    "us-west-2: denied",
+		OpenShiftClusters: []OpenShiftClusterDetail{},
+	}
+	if got := d.EmptyInventoryTitles(); got != nil {
+		t.Fatalf("incomplete AWS scan must not claim AWS types empty: %v", got)
+	}
+	if got := d.OpenShiftNoneFoundLine(); !strings.Contains(got, "OpenShift clusters") {
+		t.Fatalf("OpenShift none-found = %q", got)
+	}
+	d.OpenShiftClustersError = "snowflake unavailable"
+	d.OpenShiftClusters = nil
+	if got := d.OpenShiftNoneFoundLine(); got != "" {
+		t.Fatalf("failed OCM lookup must not claim OpenShift empty: %q", got)
+	}
+}
+
+func TestDetailsFromOpenShiftClusters(t *testing.T) {
+	t.Parallel()
+	d := DetailsFrom(AccountReport{
+		OpenShiftClusters: []OpenShiftClusterDetail{{
+			Environment: "Production",
+			Name:        "my-cluster",
+			ClusterID:   "ocm-1",
+			ProductType: "ROSA Classic",
+			State:       "ready",
+			Region:      "us-east-1",
+		}},
+	})
+	if len(d.OpenShiftClusters) != 1 || d.OpenShiftClusters[0].Name != "my-cluster" {
+		t.Fatalf("clusters = %+v", d.OpenShiftClusters)
+	}
+	table := d.OpenShiftTable()
+	if table.Key != SectionOpenShift || table.Count != 1 || table.Rows[0][2] != "ocm-1" {
+		t.Fatalf("openshift table = %+v", table)
+	}
+	if d.HasOpenShiftSection() != true {
+		t.Fatal("expected OpenShift section")
+	}
+	if got := d.OpenShiftSectionTitle(); got != "OpenShift clusters (1)" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+func TestDetailsFromPreservesEmptyOpenShiftClusters(t *testing.T) {
+	t.Parallel()
+	d := DetailsFrom(AccountReport{
+		OpenShiftClusters: []OpenShiftClusterDetail{},
+	})
+	if d.OpenShiftClusters == nil {
+		t.Fatal("successful zero-cluster lookup must stay non-nil after DetailsFrom")
+	}
+	if !d.HasOpenShiftSection() {
+		t.Fatal("expected OpenShift section for successful empty lookup")
+	}
+	if got := d.OpenShiftSectionTitle(); got != "OpenShift clusters (0)" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+func TestOpenShiftSectionTitleUnavailableOnFailure(t *testing.T) {
+	t.Parallel()
+	d := AccountDetails{OpenShiftClustersError: "snowflake unavailable"}
+	if got := d.OpenShiftSectionTitle(); got != "OpenShift clusters (unavailable)" {
+		t.Fatalf("failed lookup title = %q", got)
+	}
+	d = AccountDetails{OpenShiftClusters: []OpenShiftClusterDetail{}}
+	if got := d.OpenShiftSectionTitle(); got != "OpenShift clusters (0)" {
+		t.Fatalf("empty success title = %q", got)
 	}
 }
 

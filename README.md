@@ -618,13 +618,13 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 
 ### Account details (AWS)
 
-Gather **monthly cost trends** and **resource inventory** (EC2, RDS, Route53, S3, Lambda, load balancers, and more) for one or more accounts. The same details are printed to stdout and used in owner notification emails.
+Gather **monthly cost trends**, **resource inventory** (EC2, RDS, Route53, S3, Lambda, load balancers, and more), and **OpenShift clusters** from the production Dataverse Snowflake mart (`HCMFINOPS_DB.MARTS.OCM_MAPPING`, all `ENVIRONMENT` values: Production, Stage, Integration) for one or more accounts. The same details are printed to stdout and used in owner notification emails.
 
 The owner email is derived from the Organizations `owner` tag, appending `@redhat.com` when the tag value has no `@` sign.
 
 By default the command prints details and does not send email. To email owners via **Gmail**, pass `--send` with either `--yes` (owner addresses) or `--redirect-prefix` (test delivery to `PREFIX+<owner>@redhat.com`). `--group-by` only affects how emails are batched; stdout is always one record per account. When sending, a delivery summary is written to stderr (pretty-print) so JSON/CSV stdout stays a pure details payload.
 
-A Cost Explorer, inventory, or owner-tag failure on one account is recorded for that account and does not stop the rest of the run.
+A Cost Explorer, inventory, or owner-tag failure on one account is recorded for that account and does not stop the rest of the run. OpenShift cluster lookup uses Dataverse Snowflake OAuth (`--snowflake-alias`, default `snowflake.account_alias`). An unknown or incomplete `--snowflake-alias` fails before AWS work. If the flag is omitted and no Snowflake account is configured, or the lookup fails after connect, AWS cost/inventory still succeed and the OpenShift section records a soft error (owner email shows a generic incomplete-lookup note).
 
 Gmail uses existing gcloud Application Default Credentials. finops does **not** modify `~/.config/gcloud/application_default_credentials.json`. API quota is billed to `hcmfinops` via client options.
 
@@ -643,6 +643,9 @@ finops account details --account-alias my-linked
 
 # Machine-readable details
 finops account details --payer rh-control --ou 'ou-abcd-12345678/*' --format json -o review.json
+
+# OpenShift clusters from a specific Snowflake alias
+finops account details --account-alias my-linked --snowflake-alias rhprod
 
 # Test send to your inbox via plus-addressing (details still go to stdout)
 finops account details --payer rh-control --account-id 111111111111 --send --redirect-prefix finops
@@ -663,14 +666,15 @@ finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner
 | `--months` | Calendar months of cost history to include (default: `6`) |
 | `--exclude-recent-days` | Omit the last N UTC days from the cost end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
+| `--snowflake-alias` | Snowflake account alias for OpenShift cluster lookup (default: `snowflake.account_alias`) |
 | `--quiet` | Suppress progress messages on stderr |
 | `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential) |
 
 `--format json` on this command is account details (not a delivery summary). Delivery status with `--send` is printed on stderr.
 
-JSON and CSV keep raw numbers (no thousands separators). CSV columns are `account_id`, `account_name`, `owner_email`, `section`, `id`, `name`, `attr1`, `attr2`, `attr3`, `amount`, `currency`, with one row per fact (`account`, `tag`, `month`, `top_service`, `ec2`, `rds`, `rds_cluster`, `route53`, `count`, `owner_error`, `inventory_error`).
+JSON and CSV keep raw numbers (no thousands separators). CSV columns are `account_id`, `account_name`, `owner_email`, `section`, `id`, `name`, `attr1`, `attr2`, `attr3`, `attr4`, `attr5`, `amount`, `currency`, with one row per fact (`account`, `tag`, `month`, `top_service`, `ec2`, `rds`, `rds_cluster`, `route53`, `openshift`, `count`, `owner_error`, `inventory_error`, `openshift_error`).
 
-When `inventory_error` is set, the scan was incomplete: JSON omits zero `resource_counts` fields, and CSV omits zero `count` rows. Check `inventory_error` before treating missing resources as confirmed unused. Pretty-print and owner email do the same (no “None found” line after a partial scan). Assume-role failures are recorded as inventory errors and still included in owner email with a generic incomplete-scan note.
+When `inventory_error` is set, the AWS inventory scan was incomplete: JSON omits zero `resource_counts` fields, and CSV omits zero `count` rows. Check `inventory_error` before treating missing resources as confirmed unused. Pretty-print and owner email do the same for AWS inventory (no “None found” line for AWS types after a partial scan). Assume-role failures are recorded as inventory errors and still included in owner email with a generic incomplete-scan note. When `openshift_clusters_error` / `openshift_error` is set, OpenShift lookup was skipped or failed; owner email shows a generic incomplete-lookup note without raw Snowflake errors.
 
 `--group-by` and `--redirect-prefix` require `--send`.
 

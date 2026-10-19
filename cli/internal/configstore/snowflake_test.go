@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,31 @@ func TestResolveSnowflakeAccountAlias(t *testing.T) {
 	}
 }
 
+func TestResolveSnowflakeAccountAliasMultipleWithoutDefault(t *testing.T) {
+	cfg := File{
+		Snowflake: SnowflakeConfig{
+			AccountAliases: map[string]SnowflakeAccount{
+				"rhprod":  {Account: "ORG-ACCT"},
+				"sandbox": {Account: "ORG-SBX"},
+			},
+		},
+	}
+	_, _, err := cfg.ResolveSnowflakeAccountAlias("")
+	if err == nil {
+		t.Fatal("expected error when multiple aliases and no default")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "--account-alias") || strings.Contains(msg, "--snowflake-alias") {
+		t.Fatalf("error should not name a command-specific flag: %v", err)
+	}
+	if !strings.Contains(msg, "explicit Snowflake account alias") {
+		t.Fatalf("error = %v, want guidance to pass an explicit Snowflake alias", err)
+	}
+	if !strings.Contains(msg, "snowflake.account_alias") {
+		t.Fatalf("error = %v, want default-config guidance", err)
+	}
+}
+
 func TestResolveSnowflakeSession(t *testing.T) {
 	cfg := File{}
 	cfg, err := cfg.SetDefault(DefaultFQNSnowflakeWarehouse, "GLOBAL_WH")
@@ -96,6 +122,15 @@ func TestResolveSnowflakeSession(t *testing.T) {
 	got = cfg.ResolveSnowflakeSession(SnowflakeAccount{Account: "ORG-ACCT"})
 	if got.Warehouse != "GLOBAL_WH" || got.Role != "GLOBAL_ROLE" {
 		t.Fatalf("got %+v, want global defaults", got)
+	}
+}
+
+func TestValidateSnowflakeAccount(t *testing.T) {
+	if err := ValidateSnowflakeAccount(SnowflakeAccount{Account: "ORG-ACCT"}, "rhsandbox"); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if err := ValidateSnowflakeAccount(SnowflakeAccount{}, "rhsandbox"); err == nil {
+		t.Fatal("expected error for missing account identifier")
 	}
 }
 

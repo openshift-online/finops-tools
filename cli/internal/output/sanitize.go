@@ -68,6 +68,7 @@ func sanitizeAccountDetailsForTTY(d accountreview.AccountDetails) accountreview.
 	d.OwnerEmail = SanitizeTerminal(d.OwnerEmail)
 	d.OwnerError = SanitizeTerminal(d.OwnerError)
 	d.InventoryError = SanitizeTerminal(d.InventoryError)
+	d.OpenShiftClustersError = SanitizeTerminal(d.OpenShiftClustersError)
 	d.MonthlyCosts = sanitizeMonthlyCostsForTTY(d.MonthlyCosts)
 	if n := len(d.Tags); n > 0 {
 		tags := make([]coreaccount.Tag, n)
@@ -124,6 +125,21 @@ func sanitizeAccountDetailsForTTY(d accountreview.AccountDetails) accountreview.
 			}
 		}
 		d.HostedZones = rows
+	}
+	if n := len(d.OpenShiftClusters); n > 0 {
+		rows := make([]accountreview.OpenShiftClusterDetail, n)
+		for i, c := range d.OpenShiftClusters {
+			rows[i] = accountreview.OpenShiftClusterDetail{
+				Environment:      SanitizeTerminal(c.Environment),
+				Name:             SanitizeTerminal(c.Name),
+				ClusterID:        SanitizeTerminal(c.ClusterID),
+				ProductType:      SanitizeTerminal(c.ProductType),
+				State:            SanitizeTerminal(c.State),
+				Region:           SanitizeTerminal(c.Region),
+				OpenShiftVersion: SanitizeTerminal(c.OpenShiftVersion),
+			}
+		}
+		d.OpenShiftClusters = rows
 	}
 	return d
 }
