@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +72,31 @@ func TestResolveSnowflakeAccountAlias(t *testing.T) {
 	alias, got, err = cfg.ResolveSnowflakeAccountAlias("")
 	if err != nil || alias != "sandbox" || got.Account != "ORG-SBX" {
 		t.Fatalf("configured default: alias=%q acct=%+v err=%v", alias, got, err)
+	}
+}
+
+func TestResolveSnowflakeAccountAliasMultipleWithoutDefault(t *testing.T) {
+	cfg := File{
+		Snowflake: SnowflakeConfig{
+			AccountAliases: map[string]SnowflakeAccount{
+				"rhprod":  {Account: "ORG-ACCT"},
+				"sandbox": {Account: "ORG-SBX"},
+			},
+		},
+	}
+	_, _, err := cfg.ResolveSnowflakeAccountAlias("")
+	if err == nil {
+		t.Fatal("expected error when multiple aliases and no default")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "--account-alias") || strings.Contains(msg, "--snowflake-alias") {
+		t.Fatalf("error should not name a command-specific flag: %v", err)
+	}
+	if !strings.Contains(msg, "explicit Snowflake account alias") {
+		t.Fatalf("error = %v, want guidance to pass an explicit Snowflake alias", err)
+	}
+	if !strings.Contains(msg, "snowflake.account_alias") {
+		t.Fatalf("error = %v, want default-config guidance", err)
 	}
 }
 

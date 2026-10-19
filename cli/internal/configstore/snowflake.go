@@ -112,8 +112,9 @@ func (f File) ResolveSnowflakeAccountAlias(explicit string) (alias string, acct 
 		acct, _ = f.SnowflakeAccountForAlias(alias)
 		return alias, acct, nil
 	default:
+		// Do not name --account-alias / --snowflake-alias: callers use different flags.
 		return "", SnowflakeAccount{}, fmt.Errorf(
-			"multiple snowflake accounts registered; pass --account-alias or set finops config default set --name snowflake.account_alias --value <alias>",
+			"multiple snowflake accounts registered; pass an explicit Snowflake account alias or set finops config default set --name snowflake.account_alias --value <alias>",
 		)
 	}
 }
