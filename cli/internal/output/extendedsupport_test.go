@@ -118,7 +118,38 @@ func TestWriteExtendedSupportListResultPretty(t *testing.T) {
 	}
 }
 
-func TestWriteExtendedSupportIncludesEKSInEveryFormat(t *testing.T) {
+func TestWriteExtendedSupportEmptyBillingSelectionExplainsCoverage(t *testing.T) {
+	result := extendedsupport.Result{Summary: extendedsupport.Summary{BillingSelection: &extendedsupport.BillingSelection{
+		PayerAccountID: "123456789012", Start: "2026-09-20", EndExclusive: "2026-10-20",
+		UsageTypes: []string{}, EligibleAccountCount: 250, SelectedAccountCount: 0,
+		Notice: "Billing data can be delayed; accounts without matching recorded usage in this window are not scanned.",
+	}}}
+	var pretty bytes.Buffer
+	if err := WriteExtendedSupportListResult(&pretty, FormatPrettyPrint, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Cost Explorer", "0 of 250", "2026-09-20", "end exclusive", "Billing data can be delayed", "not scanned", "Resources in extended support:"} {
+		if !strings.Contains(pretty.String(), want) {
+			t.Errorf("missing %q: %s", want, &pretty)
+		}
+	}
+	if strings.Contains(pretty.String(), "Skipped accounts") {
+		t.Fatal("filtered accounts were reported as scan failures")
+	}
+	var encoded bytes.Buffer
+	if err := WriteExtendedSupportListResult(&encoded, FormatJSON, result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded extendedsupport.Result
+	if err := json.Unmarshal(encoded.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Summary.BillingSelection == nil || decoded.Summary.BillingSelection.EligibleAccountCount != 250 || decoded.Summary.BillingSelection.SelectedAccountCount != 0 || len(decoded.Summary.SkippedAccounts) != 0 {
+		t.Fatal(decoded)
+	}
+}
+
+func TestWriteExtendedSupportIncludesAllServicesInEveryFormat(t *testing.T) {
 	r := fixtureExtendedSupportResult()
 	cluster := r.Records[0]
 	cluster.Service = extendedsupport.ServiceEKS
@@ -129,27 +160,39 @@ func TestWriteExtendedSupportIncludesEKSInEveryFormat(t *testing.T) {
 	cluster.MajorEngineVersion = "1.31"
 	cluster.EngineLifecycleSupport = "EXTENDED"
 	r.Records = append(r.Records, cluster)
-	r.Summary.TotalCount = 2
+	cache := r.Records[0]
+	cache.Service = extendedsupport.ServiceElastiCache
+	cache.ResourceType = extendedsupport.ResourceTypeElastiCacheCluster
+	cache.ResourceID = "cache-old"
+	cache.Engine = "redis"
+	cache.EngineVersion = "5.0.6"
+	cache.MajorEngineVersion = "5"
+	cache.EngineLifecycleSupport = ""
+	r.Records = append(r.Records, cache)
+	r.Summary.TotalCount = 3
 	r.Summary.ByService = append(r.Summary.ByService, extendedsupport.ServiceSummary{Service: extendedsupport.ServiceEKS, Count: 1})
+	r.Summary.ByService = append(r.Summary.ByService, extendedsupport.ServiceSummary{Service: extendedsupport.ServiceElastiCache, Count: 1})
 	r.Summary.SkippedRegions = []extendedsupport.RegionWarning{{AccountID: "222222222222", Region: "us-west-2", Service: extendedsupport.ServiceEKS, Message: "EKS list denied"}}
+	r.Summary.SkippedRegions = append(r.Summary.SkippedRegions, extendedsupport.RegionWarning{AccountID: "222222222222", Region: "us-west-2", Service: extendedsupport.ServiceElastiCache, Message: "ElastiCache list denied"})
 	r.Summary.UnclassifiedResources = []extendedsupport.ResourceWarning{{AccountID: "111111111111", Region: "us-east-1", Service: extendedsupport.ServiceEKS, ResourceType: extendedsupport.ResourceTypeEKSCluster, ResourceID: "eks-unknown", Message: "version metadata missing"}}
+	r.Summary.UnclassifiedResources = append(r.Summary.UnclassifiedResources, extendedsupport.ResourceWarning{AccountID: "111111111111", Region: "us-east-1", Service: extendedsupport.ServiceElastiCache, ResourceType: extendedsupport.ResourceTypeElastiCacheCluster, ResourceID: "cache-unknown", Message: "cache lifecycle missing"})
 	for _, format := range []Format{FormatPrettyPrint, FormatJSON, FormatCSV} {
 		t.Run(string(format), func(t *testing.T) {
 			var out bytes.Buffer
 			if err := WriteExtendedSupportListResult(&out, format, r); err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"eks-old", "eks-cluster", "kubernetes", "1.31", "db-old"} {
+			for _, want := range []string{"eks-old", "eks-cluster", "kubernetes", "1.31", "db-old", "cache-old", "elasticache-cluster", "redis", "5.0.6"} {
 				if !strings.Contains(out.String(), want) {
 					t.Fatalf("missing %q: %s", want, out.String())
 				}
 			}
 			if format == FormatCSV {
-				if strings.Contains(out.String(), "eks-unknown") || len(strings.Split(strings.TrimSpace(out.String()), "\n")) != 3 {
+				if strings.Contains(out.String(), "eks-unknown") || strings.Contains(out.String(), "cache-unknown") || len(strings.Split(strings.TrimSpace(out.String()), "\n")) != 4 {
 					t.Fatal(out.String())
 				}
 			} else {
-				for _, want := range []string{"eks-unknown", "EKS list denied"} {
+				for _, want := range []string{"eks-unknown", "EKS list denied", "cache-unknown", "ElastiCache list denied"} {
 					if !strings.Contains(out.String(), want) {
 						t.Fatal(out.String())
 					}
@@ -161,6 +204,9 @@ func TestWriteExtendedSupportIncludesEKSInEveryFormat(t *testing.T) {
 					t.Fatal(err)
 				}
 				if decoded.Summary.SkippedRegions[0].Service != extendedsupport.ServiceEKS || decoded.Summary.UnclassifiedResources[0].Service != extendedsupport.ServiceEKS || decoded.Records[1].EngineLifecycleSupport != "EXTENDED" {
+					t.Fatal(decoded)
+				}
+				if decoded.Summary.SkippedRegions[1].Service != extendedsupport.ServiceElastiCache || decoded.Summary.UnclassifiedResources[1].Service != extendedsupport.ServiceElastiCache || decoded.Records[2].Service != extendedsupport.ServiceElastiCache {
 					t.Fatal(decoded)
 				}
 			}

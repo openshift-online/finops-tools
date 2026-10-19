@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestExtendedSupportListPreRunRejectsUnknownService(t *testing.T) {
 	extendedSupportListAccount = "123456789012"
 	extendedSupportListAccountAliases = ""
 	extendedSupportListFormat = string(output.FormatPrettyPrint)
-	extendedSupportListServices = "elasticache"
+	extendedSupportListServices = "opensearch"
 	t.Cleanup(func() {
 		extendedSupportListAccount = ""
 		extendedSupportListServices = "rds"
@@ -273,6 +274,7 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                            string
 		services                                                        string
+		wantServices                                                    []extendedsupport.Service
 		allSkipped, preparationSkipped, noSkipped, canceled, retryError bool
 	}{
 		{name: "some accounts skipped"},
@@ -281,7 +283,9 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 		{name: "no skipped accounts", noSkipped: true},
 		{name: "canceled scan", canceled: true},
 		{name: "retry error", retryError: true},
-		{name: "RDS and EKS share catalog through retry", services: "rds,eks"},
+		{name: "RDS and EKS share catalog through retry", services: "rds,eks", wantServices: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS}},
+		{name: "RDS EKS and ElastiCache through retry", services: "rds,eks,elasticache", wantServices: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS, extendedsupport.ServiceElastiCache}},
+		{name: "ElastiCache only through retry", services: "elasticache", wantServices: []extendedsupport.Service{extendedsupport.ServiceElastiCache}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")
@@ -347,7 +351,7 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				fetchCalls++
 				scanTime = q.Now
 				catalog = q.EKSVersionCatalog
-				if tc.services != "" && catalog == nil {
+				if strings.Contains(tc.services, "eks") && catalog == nil {
 					t.Fatal("combined scan has no shared EKS catalog")
 				}
 				if tc.canceled {
@@ -371,9 +375,9 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				if tc.allSkipped {
 					wantTargets = 3
 				}
-				wantServices := []extendedsupport.Service{extendedsupport.ServiceRDS}
-				if tc.services != "" {
-					wantServices = append(wantServices, extendedsupport.ServiceEKS)
+				wantServices := tc.wantServices
+				if wantServices == nil {
+					wantServices = []extendedsupport.Service{extendedsupport.ServiceRDS}
 				}
 				if len(q.Targets) != wantTargets || len(result.Summary.SkippedAccounts) != wantTargets || q.Now.IsZero() || (!scanTime.IsZero() && !q.Now.Equal(scanTime)) || !reflect.DeepEqual(q.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(q.Services, wantServices) || q.Workers != 1 || q.EKSVersionCatalog != catalog {
 					t.Fatalf("retry query = %+v, initial result = %+v", q, result)

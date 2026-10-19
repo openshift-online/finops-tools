@@ -43,6 +43,19 @@ func LogGetCostAndUsage(ctx context.Context, in *costexplorer.GetCostAndUsageInp
 	Log(ctx, formatGetCostAndUsage(in))
 }
 
+// LogGetDimensionValues logs dimension discovery, including its billing window.
+func LogGetDimensionValues(ctx context.Context, in *costexplorer.GetDimensionValuesInput) {
+	if in == nil {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("CostExplorer.GetDimensionValues")
+	fmt.Fprintf(&b, " dimension=%s context=%s", in.Dimension, in.Context)
+	appendCETimePeriod(&b, in.TimePeriod)
+	appendCEPageToken(&b, in.NextPageToken)
+	Log(ctx, b.String())
+}
+
 func formatGetCostAndUsage(in *costexplorer.GetCostAndUsageInput) string {
 	var b strings.Builder
 	b.WriteString("CostExplorer.GetCostAndUsage")

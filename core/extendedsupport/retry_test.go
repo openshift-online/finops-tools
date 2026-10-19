@@ -77,6 +77,7 @@ func TestRetrySkippedAccountsAfterInitialScan(t *testing.T) {
 		t.Fatalf("initial summary = %+v", initial.Summary)
 	}
 	initial.Summary.SkippedAccounts = append(initial.Summary.SkippedAccounts, AccountWarning{AccountID: missingTarget, Message: "no retry target"})
+	initial.Summary.BillingSelection = &BillingSelection{PayerAccountID: "123456789012", SelectedAccountCount: 5}
 	before, _ := json.Marshal(initial)
 	// A repeated target must still be attempted only once in the retry pass.
 	q.Targets = append(q.Targets, q.Targets[1])
@@ -92,6 +93,9 @@ func TestRetrySkippedAccountsAfterInitialScan(t *testing.T) {
 	}
 	if result.Records[0].ResourceID != "original" || result.Records[1].ResourceID != "recovered" {
 		t.Fatalf("records = %+v", result.Records)
+	}
+	if result.Summary.BillingSelection != initial.Summary.BillingSelection {
+		t.Fatal("retry lost the billing selection metadata")
 	}
 	wantSkipped := []AccountWarning{
 		{AccountID: missingTarget, Message: "no retry target"},

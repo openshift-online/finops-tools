@@ -62,10 +62,12 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 			accounts = append(accounts, warning)
 		}
 	}
-	return buildResult(
+	merged := buildResult(
 		append(records, retry.Records...),
 		append(regions, retry.Summary.SkippedRegions...),
 		append(resources, retry.Summary.UnclassifiedResources...),
 		append(accounts, retry.Summary.SkippedAccounts...),
-	), nil
+	)
+	merged.Summary.BillingSelection = result.Summary.BillingSelection
+	return merged, nil
 }

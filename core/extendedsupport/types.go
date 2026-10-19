@@ -19,6 +19,8 @@ const (
 	ServiceRDS Service = "rds"
 	// ServiceEKS covers Amazon EKS Kubernetes clusters.
 	ServiceEKS Service = "eks"
+	// ServiceElastiCache covers node-based and serverless ElastiCache caches.
+	ServiceElastiCache Service = "elasticache"
 )
 
 // ParseServices parses a comma-separated --services value.
@@ -26,7 +28,7 @@ const (
 func ParseServices(s string) ([]Service, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return []Service{ServiceRDS, ServiceEKS}, nil
+		return []Service{ServiceRDS, ServiceEKS, ServiceElastiCache}, nil
 	}
 	var services []Service
 	seen := make(map[Service]struct{})
@@ -41,8 +43,10 @@ func ParseServices(s string) ([]Service, error) {
 			service = ServiceRDS
 		case "eks":
 			service = ServiceEKS
+		case "elasticache":
+			service = ServiceElastiCache
 		default:
-			return nil, fmt.Errorf("unknown service %q (supported: rds, eks)", part)
+			return nil, fmt.Errorf("unknown service %q (supported: rds, eks, elasticache)", part)
 		}
 		if _, ok := seen[service]; ok {
 			continue
@@ -60,9 +64,11 @@ func ParseServices(s string) ([]Service, error) {
 type ResourceType string
 
 const (
-	ResourceTypeRDSInstance ResourceType = "rds-instance"
-	ResourceTypeRDSCluster  ResourceType = "rds-cluster"
-	ResourceTypeEKSCluster  ResourceType = "eks-cluster"
+	ResourceTypeRDSInstance           ResourceType = "rds-instance"
+	ResourceTypeRDSCluster            ResourceType = "rds-cluster"
+	ResourceTypeEKSCluster            ResourceType = "eks-cluster"
+	ResourceTypeElastiCacheCluster    ResourceType = "elasticache-cluster"
+	ResourceTypeElastiCacheServerless ResourceType = "elasticache-serverless-cache"
 )
 
 // AccountTarget holds credentials scoped to one AWS account for a scan.
@@ -96,10 +102,11 @@ type Query struct {
 	// If nil, Fetch creates a catalog scoped to that call.
 	EKSVersionCatalog *EKSVersionCatalog
 	// Workers bounds concurrent account scans (0 = default).
-	Workers      int
-	regionLister regionLister
-	rdsLister    rdsLister
-	eksLister    eksLister
+	Workers           int
+	regionLister      regionLister
+	rdsLister         rdsLister
+	eksLister         eksLister
+	elastiCacheLister elastiCacheLister
 }
 
 // Record is one resource currently past its standard support end date.
@@ -172,6 +179,7 @@ type Summary struct {
 	SkippedRegions        []RegionWarning   `json:"skipped_regions,omitempty"`
 	SkippedAccounts       []AccountWarning  `json:"skipped_accounts,omitempty"`
 	UnclassifiedResources []ResourceWarning `json:"unclassified_resources,omitempty"`
+	BillingSelection      *BillingSelection `json:"billing_selection,omitempty"`
 }
 
 // Result is the output of Fetch.
