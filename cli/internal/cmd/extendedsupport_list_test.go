@@ -27,7 +27,7 @@ func TestExtendedSupportListPreRunRejectsUnknownService(t *testing.T) {
 	extendedSupportListAccount = "123456789012"
 	extendedSupportListAccountAliases = ""
 	extendedSupportListFormat = string(output.FormatPrettyPrint)
-	extendedSupportListServices = "opensearch"
+	extendedSupportListServices = "documentdb"
 	t.Cleanup(func() {
 		extendedSupportListAccount = ""
 		extendedSupportListServices = "rds"
@@ -286,6 +286,8 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 		{name: "RDS and EKS share catalog through retry", services: "rds,eks", wantServices: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS}},
 		{name: "RDS EKS and ElastiCache through retry", services: "rds,eks,elasticache", wantServices: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS, extendedsupport.ServiceElastiCache}},
 		{name: "ElastiCache only through retry", services: "elasticache", wantServices: []extendedsupport.Service{extendedsupport.ServiceElastiCache}},
+		{name: "All services through retry", services: "rds,eks,elasticache,opensearch", wantServices: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS, extendedsupport.ServiceElastiCache, extendedsupport.ServiceOpenSearch}},
+		{name: "OpenSearch only through retry", services: "opensearch", wantServices: []extendedsupport.Service{extendedsupport.ServiceOpenSearch}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")

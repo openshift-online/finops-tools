@@ -21,6 +21,8 @@ const (
 	ServiceEKS Service = "eks"
 	// ServiceElastiCache covers node-based and serverless ElastiCache caches.
 	ServiceElastiCache Service = "elasticache"
+	// ServiceOpenSearch covers managed OpenSearch and legacy Elasticsearch domains.
+	ServiceOpenSearch Service = "opensearch"
 )
 
 // ParseServices parses a comma-separated --services value.
@@ -28,7 +30,7 @@ const (
 func ParseServices(s string) ([]Service, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return []Service{ServiceRDS, ServiceEKS, ServiceElastiCache}, nil
+		return []Service{ServiceRDS, ServiceEKS, ServiceElastiCache, ServiceOpenSearch}, nil
 	}
 	var services []Service
 	seen := make(map[Service]struct{})
@@ -45,8 +47,10 @@ func ParseServices(s string) ([]Service, error) {
 			service = ServiceEKS
 		case "elasticache":
 			service = ServiceElastiCache
+		case "opensearch":
+			service = ServiceOpenSearch
 		default:
-			return nil, fmt.Errorf("unknown service %q (supported: rds, eks, elasticache)", part)
+			return nil, fmt.Errorf("unknown service %q (supported: rds, eks, elasticache, opensearch)", part)
 		}
 		if _, ok := seen[service]; ok {
 			continue
@@ -69,6 +73,7 @@ const (
 	ResourceTypeEKSCluster            ResourceType = "eks-cluster"
 	ResourceTypeElastiCacheCluster    ResourceType = "elasticache-cluster"
 	ResourceTypeElastiCacheServerless ResourceType = "elasticache-serverless-cache"
+	ResourceTypeOpenSearchDomain      ResourceType = "opensearch-domain"
 )
 
 // AccountTarget holds credentials scoped to one AWS account for a scan.
@@ -107,6 +112,7 @@ type Query struct {
 	rdsLister         rdsLister
 	eksLister         eksLister
 	elastiCacheLister elastiCacheLister
+	openSearchLister  openSearchLister
 }
 
 // Record is one resource currently past its standard support end date.

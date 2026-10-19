@@ -120,6 +120,9 @@ func (q Query) withDefaults() Query {
 	if q.elastiCacheLister == nil {
 		q.elastiCacheLister = awsElastiCacheLister{}
 	}
+	if q.openSearchLister == nil {
+		q.openSearchLister = awsOpenSearchLister{}
+	}
 	return q
 }
 
@@ -219,7 +222,7 @@ func scanRegion(
 	services map[Service]struct{},
 ) (regionScanResult, error) {
 	var result regionScanResult
-	for _, service := range []Service{ServiceRDS, ServiceEKS, ServiceElastiCache} {
+	for _, service := range []Service{ServiceRDS, ServiceEKS, ServiceElastiCache, ServiceOpenSearch} {
 		if _, ok := services[service]; !ok {
 			continue
 		}
@@ -232,6 +235,8 @@ func scanRegion(
 			found, err = q.eksLister.ListEKSExtendedSupport(ctx, target.AWSConfig, region, accountID, now)
 		case ServiceElastiCache:
 			found, err = q.elastiCacheLister.ListElastiCacheExtendedSupport(ctx, target.AWSConfig, region, accountID, now)
+		case ServiceOpenSearch:
+			found, err = q.openSearchLister.ListOpenSearchExtendedSupport(ctx, target.AWSConfig, region, accountID, now)
 		}
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			if ctx.Err() != nil {

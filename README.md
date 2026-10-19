@@ -502,7 +502,7 @@ These persistent flags are available on AWS-backed commands (`account`, `snapsho
 | `--auth-method` | `saml` (default) or `profile`; when omitted, uses `defaults.aws.auth_method` from config |
 | `--config` | Path to finops config file (default: OS-specific config dir) |
 | `--credentials-file` | Path to AWS credentials file (default: `~/.aws/credentials`) |
-| `--verbose` / `-v` | Log external commands (`klist`, `curl`, …) and selected AWS API calls (STS, Organizations, EC2, RDS, EKS, ElastiCache, Cost Explorer) to stderr |
+| `--verbose` / `-v` | Log external commands (`klist`, `curl`, …) and selected AWS API calls (STS, Organizations, EC2, RDS, EKS, ElastiCache, OpenSearch, Cost Explorer) to stderr |
 
 Verbose output uses two line prefixes: `+ "command" "args"` for external binaries and `+ AWS Service.Operation …` for cloud API calls. Organizations tag reads log `ListTagsForResource`; tag writes log `TagResource` (matching the AWS API operation names).
 
@@ -710,7 +710,7 @@ When Cost Explorer data is available, the summary shows **attributed** storage c
 
 ### Extended support (AWS)
 
-Find AWS resources running versions in **AWS Extended Support**. This covers **RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters, and ElastiCache caches**. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer. RDS, EKS, and ElastiCache are scanned by default.
+Find AWS resources running versions in **AWS Extended Support**. This covers **RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters, ElastiCache caches, and OpenSearch Service domains**. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer. RDS, EKS, ElastiCache, and OpenSearch are scanned by default.
 
 ```bash
 finops extended-support list --account-alias rh-control
@@ -720,6 +720,7 @@ finops extended-support list --payer rh-control --full-scan
 finops extended-support list --payer rh-control --services rds --format json
 finops extended-support list --payer rh-control --services eks --format json
 finops extended-support list --payer rh-control --services elasticache --format json
+finops extended-support list --payer rh-control --services opensearch --format json
 finops extended-support list --payer rh-control --services rds,eks
 finops extended-support list --payer rh-control --regions us-east-1,us-west-2
 ```
@@ -740,11 +741,15 @@ ElastiCache discovery paginates `DescribeCacheClusters` and `DescribeServerlessC
 
 ElastiCache's version API does not expose lifecycle dates. The scanner bundles the [AWS Redis OSS support schedule](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/extended-support-versions.html), reviewed October 19, 2026: Redis OSS 4 and 5 enter Extended Support on February 1, 2026 through January 31, 2029, and Redis OSS 6 on February 1, 2027 through January 31, 2030. Calendar dates are inclusive in UTC. Redis OSS 7 has no announced end of standard support; Valkey and Memcached have no announced paid Extended Support schedule and are excluded. Unknown Redis OSS versions, missing engine/version information, and versions past Extended Support produce resource warnings. The bundled schedule must be updated when AWS announces new dates; it is not refreshed from the documentation during a run.
 
+OpenSearch Service discovery uses `ListDomainNames` (an unpaginated API) and `DescribeDomain` for each unique domain, including both OpenSearch and legacy Elasticsearch. Deleted domains are excluded. Findings use service `opensearch`, resource type `opensearch-domain`, and engine `opensearch` or `elasticsearch`. The numeric major.minor version is stored in both version fields because lifecycle schedules apply at that level. Tags are fetched only for confirmed findings using `ListTags`; failed tag lookups retain the domain and produce a warning. A failed domain description does not stop other domains from being checked. OpenSearch Serverless collections are excluded because AWS manages their engine versions.
+
+OpenSearch's APIs do not provide lifecycle dates, so the scanner bundles the [AWS OpenSearch and Elasticsearch support schedule](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/what-is.html#standard-and-extended-support), reviewed October 19, 2026, including the revised Extended Support end dates announced in August 2026. End dates are inclusive UTC calendar dates; classification begins the day after standard support ends and continues through the published Extended Support end date. Known versions with no announced end of standard support are excluded; unknown versions, missing versions, and versions past Extended Support produce resource warnings. Update the bundled table when AWS announces new dates; it is not refreshed from the documentation during a run.
+
 Each run shares validated payer configuration and an STS client across the payer's linked accounts. Member roles are still assumed and their identities verified separately. If role assumption reports invalid or expired payer credentials, one worker reloads the payer profile and, for SAML authentication, reruns the existing login flow if needed; other workers wait for that renewal. The affected role assumption is retried once. Permission errors do not trigger login. Failed renewal is shared across dependent accounts so login is not repeated for every member. SAML renewal requires working VPN/Kerberos access. With `--auth-method profile`, the configured SDK provider/profile is reloaded; scan workers never prompt for access keys, and profiles that require an external login must be renewed externally.
 
 | Flag | Description |
 |------|-------------|
-| `--services` | Services to scan: `rds`, `eks`, `elasticache` (comma-separated; default `rds,eks,elasticache`) |
+| `--services` | Services to scan: `rds`, `eks`, `elasticache`, `opensearch` (comma-separated; default `rds,eks,elasticache,opensearch`) |
 | `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
 | `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same selector forms as `finops account get-cost`; `--ou`/`--payer` are ACTIVE members only. `--payer` alone additionally applies the Cost Explorer candidate filter |
 | `--full-scan` | With `--payer` alone, bypass Cost Explorer and scan every active member |
@@ -756,7 +761,7 @@ Each run shares validated payer configuration and an STS client across the payer
 | `--workers` | Maximum concurrent workers for multi-account AWS scans (default: `25`, max: `1000`; use `1` for sequential) |
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 
-Required IAM permissions in each scanned account: `ec2:DescribeRegions`; for RDS, `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:DescribeDBEngineVersions`, and `rds:DescribeDBMajorEngineVersions`; for EKS, `eks:ListClusters`, `eks:DescribeCluster`, and `eks:DescribeClusterVersions`; for ElastiCache, `elasticache:DescribeCacheClusters`, `elasticache:DescribeServerlessCaches`, and `elasticache:ListTagsForResource` (missing tags produce warnings but retain findings). Payer credentials also need `sts:AssumeRole` into the configured linked-account role. Allow `eks:DescribeClusterVersions` on the payer for catalog preloading. `eks:ListClusters` and `eks:DescribeClusterVersions` require resource `"*"`; `eks:DescribeCluster` can be scoped to cluster ARNs. Use `--services rds`, `--services eks`, or `--services elasticache` to limit the scan to one service.
+Required IAM permissions in each scanned account: `ec2:DescribeRegions`; for RDS, `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:DescribeDBEngineVersions`, and `rds:DescribeDBMajorEngineVersions`; for EKS, `eks:ListClusters`, `eks:DescribeCluster`, and `eks:DescribeClusterVersions`; for ElastiCache, `elasticache:DescribeCacheClusters`, `elasticache:DescribeServerlessCaches`, and `elasticache:ListTagsForResource`; for OpenSearch Service, `es:ListDomainNames`, `es:DescribeDomain`, and `es:ListTags`. Failed tag lookups produce warnings but retain findings. Payer credentials also need `sts:AssumeRole` into the configured linked-account role. Allow `eks:DescribeClusterVersions` on the payer for catalog preloading. `eks:ListClusters` and `eks:DescribeClusterVersions` require resource `"*"`; `eks:DescribeCluster` can be scoped to cluster ARNs. Use `--services rds`, `--services eks`, `--services elasticache`, or `--services opensearch` to limit the scan to one service.
 
 After the initial scan finishes, accounts skipped because credentials could not be loaded or enabled regions could not be discovered are retried once. The retry uses fresh payer-session state, reloads credentials, and can renew a SAML login if needed. Successful accounts are not rescanned. Recovered findings are merged into the result and totals; only accounts that still fail remain under "Skipped accounts" (`summary.skipped_accounts` in JSON), with their latest failure reason. This list is held in memory for the run and can be saved with JSON output. Region-only failures and accounts excluded during account selection are not included in this retry.
 

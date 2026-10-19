@@ -12,7 +12,7 @@ func TestParseServices(t *testing.T) {
 		want    []Service
 		wantErr bool
 	}{
-		{name: "empty selects default", value: "", want: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache}},
+		{name: "empty selects default", value: "", want: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache, ServiceOpenSearch}},
 		{name: "rds", value: "rds", want: []Service{ServiceRDS}},
 		{name: "case insensitive", value: " RDS ", want: []Service{ServiceRDS}},
 		{name: "deduplicates", value: "rds,rds", want: []Service{ServiceRDS}},
@@ -20,9 +20,10 @@ func TestParseServices(t *testing.T) {
 		{name: "both", value: "rds,eks", want: []Service{ServiceRDS, ServiceEKS}},
 		{name: "mixed deduplicates", value: " EKS,rds,eks ", want: []Service{ServiceEKS, ServiceRDS}},
 		{name: "elasticache", value: "elasticache", want: []Service{ServiceElastiCache}},
-		{name: "all services", value: " RDS,EKS,ElastiCache,elasticache ", want: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache}},
-		{name: "unknown", value: "opensearch", wantErr: true},
-		{name: "mixed unknown", value: "rds,opensearch", wantErr: true},
+		{name: "opensearch", value: "opensearch", want: []Service{ServiceOpenSearch}},
+		{name: "all services", value: " RDS,EKS,ElastiCache,OpenSearch,opensearch ", want: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache, ServiceOpenSearch}},
+		{name: "unknown", value: "documentdb", wantErr: true},
+		{name: "mixed unknown", value: "rds,documentdb", wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

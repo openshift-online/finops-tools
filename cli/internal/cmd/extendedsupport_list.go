@@ -37,7 +37,8 @@ var (
 var extendedSupportListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List AWS resources running in extended support",
-	Long: `Discover RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters, and ElastiCache caches
+	Long: `Discover RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters,
+ElastiCache caches, and OpenSearch Service domains
 running versions in AWS Extended Support.
 
 Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone
@@ -60,6 +61,10 @@ Node-based caches and serverless caches are checked. Replication-group member
 cache clusters are reported individually; their parent group is not counted again.
 Unknown versions produce resource warnings. Valkey and Memcached have no announced
 paid Extended Support schedule and are excluded.
+OpenSearch Service checks both OpenSearch and legacy Elasticsearch domains using
+ListDomainNames and DescribeDomain, with a bundled AWS lifecycle schedule.
+Unknown versions produce resource warnings. OpenSearch Serverless is excluded
+because its engine versions are managed by AWS.
 
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions
@@ -68,6 +73,8 @@ Required IAM permissions in each scanned account:
   eks:ListClusters, eks:DescribeCluster, eks:DescribeClusterVersions
   elasticache:DescribeCacheClusters, elasticache:DescribeServerlessCaches
   elasticache:ListTagsForResource (missing tags produce warnings but retain resources)
+  es:ListDomainNames, es:DescribeDomain
+  es:ListTags (missing tags produce warnings but retain resources)
 
 Payer credentials also need sts:AssumeRole into the configured linked-account role.
 Payer-wide billing selection needs ce:GetDimensionValues and ce:GetCostAndUsage.
@@ -82,6 +89,7 @@ Examples:
   finops extended-support list --payer rh-control --services rds --format json
   finops extended-support list --payer rh-control --services eks --format json
   finops extended-support list --payer rh-control --services elasticache --format json
+  finops extended-support list --payer rh-control --services opensearch --format json
   finops extended-support list --payer rh-control --regions us-east-1,us-west-2`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -128,8 +136,8 @@ func init() {
 		RefreshOrgCache: &extendedSupportListRefreshOrgCache,
 	})
 	extendedSupportListCmd.Flags().Lookup("payer").Usage = "Registered payer alias: alone selects members with billed Extended Support usage (--full-scan selects all active members); required with --ou/--tag or unregistered --account-id"
-	extendedSupportListCmd.Flags().StringVar(&extendedSupportListServices, "services", "rds,eks,elasticache",
-		"Services to scan: rds,eks,elasticache (comma-separated)")
+	extendedSupportListCmd.Flags().StringVar(&extendedSupportListServices, "services", "rds,eks,elasticache,opensearch",
+		"Services to scan: rds,eks,elasticache,opensearch (comma-separated)")
 	extendedSupportListCmd.Flags().StringVar(&extendedSupportListRegions, "regions", "",
 		"Limit scan to comma-separated AWS regions (default: all enabled regions)")
 	extendedSupportListCmd.Flags().BoolVar(&extendedSupportListFullScan, "full-scan", false,

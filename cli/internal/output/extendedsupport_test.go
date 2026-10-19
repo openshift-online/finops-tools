@@ -169,30 +169,42 @@ func TestWriteExtendedSupportIncludesAllServicesInEveryFormat(t *testing.T) {
 	cache.MajorEngineVersion = "5"
 	cache.EngineLifecycleSupport = ""
 	r.Records = append(r.Records, cache)
-	r.Summary.TotalCount = 3
+	domain := r.Records[0]
+	domain.Service = extendedsupport.ServiceOpenSearch
+	domain.ResourceType = extendedsupport.ResourceTypeOpenSearchDomain
+	domain.ResourceID = "domain-old"
+	domain.Engine = "elasticsearch"
+	domain.EngineVersion = "7.8"
+	domain.MajorEngineVersion = "7.8"
+	domain.EngineLifecycleSupport = ""
+	r.Records = append(r.Records, domain)
+	r.Summary.TotalCount = 4
 	r.Summary.ByService = append(r.Summary.ByService, extendedsupport.ServiceSummary{Service: extendedsupport.ServiceEKS, Count: 1})
 	r.Summary.ByService = append(r.Summary.ByService, extendedsupport.ServiceSummary{Service: extendedsupport.ServiceElastiCache, Count: 1})
+	r.Summary.ByService = append(r.Summary.ByService, extendedsupport.ServiceSummary{Service: extendedsupport.ServiceOpenSearch, Count: 1})
 	r.Summary.SkippedRegions = []extendedsupport.RegionWarning{{AccountID: "222222222222", Region: "us-west-2", Service: extendedsupport.ServiceEKS, Message: "EKS list denied"}}
 	r.Summary.SkippedRegions = append(r.Summary.SkippedRegions, extendedsupport.RegionWarning{AccountID: "222222222222", Region: "us-west-2", Service: extendedsupport.ServiceElastiCache, Message: "ElastiCache list denied"})
+	r.Summary.SkippedRegions = append(r.Summary.SkippedRegions, extendedsupport.RegionWarning{AccountID: "222222222222", Region: "us-west-2", Service: extendedsupport.ServiceOpenSearch, Message: "OpenSearch list denied"})
 	r.Summary.UnclassifiedResources = []extendedsupport.ResourceWarning{{AccountID: "111111111111", Region: "us-east-1", Service: extendedsupport.ServiceEKS, ResourceType: extendedsupport.ResourceTypeEKSCluster, ResourceID: "eks-unknown", Message: "version metadata missing"}}
 	r.Summary.UnclassifiedResources = append(r.Summary.UnclassifiedResources, extendedsupport.ResourceWarning{AccountID: "111111111111", Region: "us-east-1", Service: extendedsupport.ServiceElastiCache, ResourceType: extendedsupport.ResourceTypeElastiCacheCluster, ResourceID: "cache-unknown", Message: "cache lifecycle missing"})
+	r.Summary.UnclassifiedResources = append(r.Summary.UnclassifiedResources, extendedsupport.ResourceWarning{AccountID: "111111111111", Region: "us-east-1", Service: extendedsupport.ServiceOpenSearch, ResourceType: extendedsupport.ResourceTypeOpenSearchDomain, ResourceID: "domain-unknown", Message: "OpenSearch lifecycle missing"})
 	for _, format := range []Format{FormatPrettyPrint, FormatJSON, FormatCSV} {
 		t.Run(string(format), func(t *testing.T) {
 			var out bytes.Buffer
 			if err := WriteExtendedSupportListResult(&out, format, r); err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"eks-old", "eks-cluster", "kubernetes", "1.31", "db-old", "cache-old", "elasticache-cluster", "redis", "5.0.6"} {
+			for _, want := range []string{"eks-old", "eks-cluster", "kubernetes", "1.31", "db-old", "cache-old", "elasticache-cluster", "redis", "5.0.6", "domain-old", "opensearch-domain", "elasticsearch", "7.8"} {
 				if !strings.Contains(out.String(), want) {
 					t.Fatalf("missing %q: %s", want, out.String())
 				}
 			}
 			if format == FormatCSV {
-				if strings.Contains(out.String(), "eks-unknown") || strings.Contains(out.String(), "cache-unknown") || len(strings.Split(strings.TrimSpace(out.String()), "\n")) != 4 {
+				if strings.Contains(out.String(), "eks-unknown") || strings.Contains(out.String(), "cache-unknown") || strings.Contains(out.String(), "domain-unknown") || len(strings.Split(strings.TrimSpace(out.String()), "\n")) != 5 {
 					t.Fatal(out.String())
 				}
 			} else {
-				for _, want := range []string{"eks-unknown", "EKS list denied", "cache-unknown", "ElastiCache list denied"} {
+				for _, want := range []string{"eks-unknown", "EKS list denied", "cache-unknown", "ElastiCache list denied", "domain-unknown", "OpenSearch list denied"} {
 					if !strings.Contains(out.String(), want) {
 						t.Fatal(out.String())
 					}
@@ -207,6 +219,9 @@ func TestWriteExtendedSupportIncludesAllServicesInEveryFormat(t *testing.T) {
 					t.Fatal(decoded)
 				}
 				if decoded.Summary.SkippedRegions[1].Service != extendedsupport.ServiceElastiCache || decoded.Summary.UnclassifiedResources[1].Service != extendedsupport.ServiceElastiCache || decoded.Records[2].Service != extendedsupport.ServiceElastiCache {
+					t.Fatal(decoded)
+				}
+				if decoded.Summary.SkippedRegions[2].Service != extendedsupport.ServiceOpenSearch || decoded.Summary.UnclassifiedResources[2].Service != extendedsupport.ServiceOpenSearch || decoded.Records[3].Service != extendedsupport.ServiceOpenSearch {
 					t.Fatal(decoded)
 				}
 			}
