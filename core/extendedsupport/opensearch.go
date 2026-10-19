@@ -25,6 +25,7 @@ type openSearchLister interface {
 
 type awsOpenSearchLister struct {
 	newClient func(aws.Config) OpenSearchAPI
+	catalog   *HealthLifecycleCatalog
 }
 
 func (l awsOpenSearchLister) ListOpenSearchExtendedSupport(ctx context.Context, cfg aws.Config, region, accountID string, now time.Time) (regionScanResult, error) {
@@ -88,7 +89,7 @@ func (l awsOpenSearchLister) ListOpenSearchExtendedSupport(ctx context.Context, 
 			if returned := strings.TrimSpace(aws.ToString(status.DomainName)); returned != "" && returned != name {
 				warning.Message = fmt.Sprintf("OpenSearch.DescribeDomain for %s returned information for %s", name, returned)
 			} else {
-				record, unknown := classifyOpenSearch(accountID, region, name, aws.ToString(status.EngineVersion), now)
+				record, unknown := classifyOpenSearch(accountID, region, name, aws.ToString(status.EngineVersion), now, l.catalog)
 				if unknown != nil {
 					result.UnclassifiedResources = append(result.UnclassifiedResources, *unknown)
 				}

@@ -26,6 +26,7 @@ type elastiCacheLister interface {
 
 type awsElastiCacheLister struct {
 	newClient func(aws.Config) ElastiCacheAPI
+	catalog   *HealthLifecycleCatalog
 }
 
 type elastiCacheResource struct {
@@ -94,7 +95,7 @@ func (l awsElastiCacheLister) ListElastiCacheExtendedSupport(ctx context.Context
 		}},
 	}
 	for _, source := range sources {
-		err := scanElastiCachePages(ctx, client, source.page, accountID, region, now, &result)
+		err := scanElastiCachePages(ctx, client, source.page, accountID, region, now, l.catalog, &result)
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			if ctx.Err() != nil {
 				return result, ctx.Err()
@@ -111,7 +112,7 @@ func (l awsElastiCacheLister) ListElastiCacheExtendedSupport(ctx context.Context
 	return result, nil
 }
 
-func scanElastiCachePages(ctx context.Context, client ElastiCacheAPI, page elastiCachePage, accountID, region string, now time.Time, result *regionScanResult) error {
+func scanElastiCachePages(ctx context.Context, client ElastiCacheAPI, page elastiCachePage, accountID, region string, now time.Time, catalog *HealthLifecycleCatalog, result *regionScanResult) error {
 	seenIDs, seenTokens := make(map[string]bool), make(map[string]bool)
 	var token *string
 	for {
@@ -131,7 +132,7 @@ func scanElastiCachePages(ctx context.Context, client ElastiCacheAPI, page elast
 				continue
 			}
 			seenIDs[resource.id] = true
-			record, warning := classifyElastiCache(resource, accountID, region, now)
+			record, warning := classifyElastiCache(resource, accountID, region, now, catalog)
 			if warning != nil {
 				result.UnclassifiedResources = append(result.UnclassifiedResources, *warning)
 			}
@@ -182,26 +183,8 @@ func scanElastiCachePages(ctx context.Context, client ElastiCacheAPI, page elast
 	}
 }
 
-// ElastiCache's DescribeCacheEngineVersions API has no lifecycle dates. This
-// schedule is maintained from AWS's published Redis OSS support calendar:
-// https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/extended-support-versions.html
-// https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/engine-versions.html
-// Reviewed 2026-10-19. Dates are inclusive calendar dates in UTC. Update this
-// table when AWS announces new dates; unknown versions produce warnings.
-type elastiCacheLifecycle struct{ standardEnd, extendedEnd time.Time }
-
-var elastiCacheRedisLifecycle = map[string]elastiCacheLifecycle{
-	"4": {standardEnd: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), extendedEnd: time.Date(2029, 1, 31, 0, 0, 0, 0, time.UTC)},
-	"5": {standardEnd: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), extendedEnd: time.Date(2029, 1, 31, 0, 0, 0, 0, time.UTC)},
-	"6": {standardEnd: time.Date(2027, 1, 31, 0, 0, 0, 0, time.UTC), extendedEnd: time.Date(2030, 1, 31, 0, 0, 0, 0, time.UTC)},
-}
-
-func classifyElastiCache(cache elastiCacheResource, accountID, region string, now time.Time) (*Record, *ResourceWarning) {
+func classifyElastiCache(cache elastiCacheResource, accountID, region string, now time.Time, catalog *HealthLifecycleCatalog) (*Record, *ResourceWarning) {
 	engine, version := strings.ToLower(strings.TrimSpace(cache.engine)), strings.TrimSpace(cache.version)
-	// AWS has no announced paid Extended Support for Valkey or Memcached.
-	if engine == "valkey" || engine == "memcached" {
-		return nil, nil
-	}
 	warning := &ResourceWarning{
 		AccountID: accountID, Region: region, Service: ServiceElastiCache,
 		ResourceType: cache.resourceType, ResourceID: cache.id, Engine: engine, EngineVersion: version,
@@ -211,7 +194,7 @@ func classifyElastiCache(cache elastiCacheResource, accountID, region string, no
 		warning.Message = "ElastiCache cache identifier is missing"
 	case engine == "":
 		warning.Message = "ElastiCache engine is missing"
-	case engine != "redis":
+	case engine != "redis" && engine != "valkey" && engine != "memcached":
 		warning.Message = "ElastiCache lifecycle information for engine " + engine + " is missing"
 	case version == "":
 		warning.Message = "ElastiCache engine version is missing"
@@ -219,31 +202,11 @@ func classifyElastiCache(cache elastiCacheResource, accountID, region string, no
 		parts := strings.Split(version, ".")
 		for _, part := range parts {
 			if _, err := strconv.ParseUint(part, 10, 32); err != nil {
-				warning.Message = "ElastiCache Redis OSS engine version is invalid: " + version
+				warning.Message = "ElastiCache engine version is invalid: " + version
 				return nil, warning
 			}
 		}
-		major := parts[0]
-		// Redis OSS 7 is supported and has no announced standard-support end.
-		if major == "7" {
-			return nil, nil
-		}
-		lifecycle, ok := elastiCacheRedisLifecycle[major]
-		switch {
-		case !ok:
-			warning.Message = "ElastiCache lifecycle information for Redis OSS major version " + major + " is missing"
-		case now.Before(lifecycle.standardEnd.AddDate(0, 0, 1)):
-			return nil, nil
-		case !now.Before(lifecycle.extendedEnd.AddDate(0, 0, 1)):
-			warning.Message = "ElastiCache Redis OSS version is past extended support"
-		default:
-			return &Record{
-				AccountID: accountID, Region: region, Service: ServiceElastiCache,
-				ResourceType: cache.resourceType, ResourceID: cache.id, Engine: engine,
-				EngineVersion: version, MajorEngineVersion: major,
-				StandardSupportEndDate: lifecycle.standardEnd, ExtendedSupportEndDate: &lifecycle.extendedEnd,
-			}, nil
-		}
+		return classifyHealthSupport(catalog, *warning, now)
 	}
 	return nil, warning
 }

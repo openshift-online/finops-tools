@@ -228,7 +228,7 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 				ResourceType: extendedsupport.ResourceTypeRDSInstance,
 				ResourceID:   "db-old",
 			}},
-			Summary: extendedsupport.Summary{TotalCount: 1},
+			Summary: extendedsupport.Summary{TotalCount: 1, LifecycleWarnings: []string{"AWS Health lifecycle catalog unavailable"}},
 		}, nil
 	}
 	ensureExtendedSupportCredentials = func(_ *cobra.Command, _ configstore.File, _ []cost.AccountTarget, _, _, _ string) error {
@@ -258,7 +258,8 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd := extendedSupportListCmd
 	cmd.SetOut(buf)
-	cmd.SetErr(new(bytes.Buffer))
+	notices := new(bytes.Buffer)
+	cmd.SetErr(notices)
 	if err := runExtendedSupportList(cmd, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +268,18 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte(`"resource_id": "db-old"`)) {
 		t.Fatalf("output = %s", buf.String())
+	}
+	if !strings.Contains(notices.String(), "AWS Health lifecycle catalog unavailable") || !strings.Contains(buf.String(), "lifecycle_warnings") {
+		t.Fatal(buf.String(), notices.String())
+	}
+	buf.Reset()
+	notices.Reset()
+	extendedSupportListFormat = string(output.FormatCSV)
+	if err := runExtendedSupportList(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(notices.String(), "AWS Health lifecycle catalog unavailable") || strings.Contains(buf.String(), "catalog unavailable") || !strings.Contains(buf.String(), "db-old") {
+		t.Fatal(buf.String(), notices.String())
 	}
 }
 
@@ -328,6 +341,7 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			prepareCalls, fetchCalls, retryCalls := 0, 0, 0
 			var scanTime time.Time
 			var catalog *extendedsupport.EKSVersionCatalog
+			var healthCatalog *extendedsupport.HealthLifecycleCatalog
 			ensureExtendedSupportCredentials = func(_ *cobra.Command, _ configstore.File, _ []cost.AccountTarget, _, _, _ string) error { return nil }
 			prepareExtendedSupportTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ int, _ *progress.Bar) ([]extendedsupport.AccountTarget, []extendedsupport.AccountWarning, error) {
 				prepareCalls++
@@ -353,6 +367,10 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				fetchCalls++
 				scanTime = q.Now
 				catalog = q.EKSVersionCatalog
+				healthCatalog = q.HealthLifecycleCatalog
+				if (strings.Contains(tc.services, "elasticache") || strings.Contains(tc.services, "opensearch")) != (healthCatalog != nil) {
+					t.Fatal("wrong Health catalog selection", q.Services)
+				}
 				if strings.Contains(tc.services, "eks") && catalog == nil {
 					t.Fatal("combined scan has no shared EKS catalog")
 				}
@@ -381,7 +399,7 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				if wantServices == nil {
 					wantServices = []extendedsupport.Service{extendedsupport.ServiceRDS}
 				}
-				if len(q.Targets) != wantTargets || len(result.Summary.SkippedAccounts) != wantTargets || q.Now.IsZero() || (!scanTime.IsZero() && !q.Now.Equal(scanTime)) || !reflect.DeepEqual(q.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(q.Services, wantServices) || q.Workers != 1 || q.EKSVersionCatalog != catalog {
+				if len(q.Targets) != wantTargets || len(result.Summary.SkippedAccounts) != wantTargets || q.Now.IsZero() || (!scanTime.IsZero() && !q.Now.Equal(scanTime)) || !reflect.DeepEqual(q.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(q.Services, wantServices) || q.Workers != 1 || q.EKSVersionCatalog != catalog || q.HealthLifecycleCatalog != healthCatalog {
 					t.Fatalf("retry query = %+v, initial result = %+v", q, result)
 				}
 				for _, target := range q.Targets {

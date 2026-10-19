@@ -106,6 +106,9 @@ type Query struct {
 	// EKSVersionCatalog is shared across accounts and may be retained for retries.
 	// If nil, Fetch creates a catalog scoped to that call.
 	EKSVersionCatalog *EKSVersionCatalog
+	// HealthLifecycleCatalog shares live ElastiCache/OpenSearch support metadata
+	// across accounts and retries. If nil, Fetch creates one for this call.
+	HealthLifecycleCatalog *HealthLifecycleCatalog
 	// Workers bounds concurrent account scans (0 = default).
 	Workers           int
 	regionLister      regionLister
@@ -186,6 +189,7 @@ type Summary struct {
 	SkippedAccounts       []AccountWarning  `json:"skipped_accounts,omitempty"`
 	UnclassifiedResources []ResourceWarning `json:"unclassified_resources,omitempty"`
 	BillingSelection      *BillingSelection `json:"billing_selection,omitempty"`
+	LifecycleWarnings     []string          `json:"lifecycle_warnings,omitempty"`
 }
 
 // Result is the output of Fetch.

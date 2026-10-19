@@ -50,7 +50,7 @@ func TestElastiCacheLifecycleClassification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, warning := classifyElastiCache(elastiCacheResource{id: "cache", engine: tc.engine, version: tc.version, resourceType: ResourceTypeElastiCacheCluster}, "111111111111", "us-east-1", at)
+			record, warning := classifyElastiCache(elastiCacheResource{id: "cache", engine: tc.engine, version: tc.version, resourceType: ResourceTypeElastiCacheCluster}, "111111111111", "us-east-1", at, testHealthCatalog(t))
 			if (record != nil) != tc.record {
 				t.Fatalf("record=%+v warning=%+v", record, warning)
 			}
@@ -66,7 +66,7 @@ func TestElastiCacheLifecycleClassification(t *testing.T) {
 			}
 		})
 	}
-	_, warning := classifyElastiCache(elastiCacheResource{engine: "redis", version: "5.0.6"}, "111111111111", "us-east-1", eksTestNow)
+	_, warning := classifyElastiCache(elastiCacheResource{engine: "redis", version: "5.0.6"}, "111111111111", "us-east-1", eksTestNow, testHealthCatalog(t))
 	if warning == nil || !strings.Contains(warning.Message, "identifier is missing") {
 		t.Fatal(warning)
 	}
@@ -142,7 +142,7 @@ func TestElastiCachePaginationAndPartialDiscovery(t *testing.T) {
 			return &elasticache.ListTagsForResourceOutput{TagList: []cachetypes.Tag{{Key: aws.String("team"), Value: aws.String("finops")}}}, nil
 		},
 	}
-	lister := awsElastiCacheLister{newClient: func(cfg aws.Config) ElastiCacheAPI {
+	lister := awsElastiCacheLister{catalog: testHealthCatalog(t), newClient: func(cfg aws.Config) ElastiCacheAPI {
 		if cfg.Region != "us-east-1" {
 			t.Fatal(cfg.Region)
 		}
@@ -194,7 +194,7 @@ func TestElastiCacheDiscoveryFailureDiagnostics(t *testing.T) {
 						return &elasticache.DescribeServerlessCachesOutput{NextToken: token}, err
 					}
 				}
-				result, err := (awsElastiCacheLister{newClient: func(aws.Config) ElastiCacheAPI { return client }}).ListElastiCacheExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
+				result, err := (awsElastiCacheLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) ElastiCacheAPI { return client }}).ListElastiCacheExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
 				if err != nil || len(result.Warnings) != 1 || calls > 2 || !strings.Contains(result.Warnings[0].Message, "ElastiCache.Describe") || !strings.Contains(result.Warnings[0].Message, "discovery incomplete") {
 					t.Fatalf("calls=%d result=%+v err=%v", calls, result, err)
 				}
@@ -227,7 +227,7 @@ func TestElastiCacheTagFailuresRetainResources(t *testing.T) {
 					return nil, nil
 				},
 			}
-			result, err := (awsElastiCacheLister{newClient: func(aws.Config) ElastiCacheAPI { return client }}).ListElastiCacheExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
+			result, err := (awsElastiCacheLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) ElastiCacheAPI { return client }}).ListElastiCacheExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
 			if err != nil || len(result.Records) != 1 || len(result.Warnings) != 1 || len(result.UnclassifiedResources) != 0 || !strings.Contains(result.Warnings[0].Message, "cache") || !strings.Contains(result.Warnings[0].Message, "retained without tags") {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -263,7 +263,7 @@ func TestElastiCacheCancellationStopsScan(t *testing.T) {
 					return &elasticache.ListTagsForResourceOutput{}, nil
 				},
 			}
-			_, err := (awsElastiCacheLister{newClient: func(aws.Config) ElastiCacheAPI { return client }}).ListElastiCacheExtendedSupport(ctx, aws.Config{}, "us-east-1", "111111111111", eksTestNow)
+			_, err := (awsElastiCacheLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) ElastiCacheAPI { return client }}).ListElastiCacheExtendedSupport(ctx, aws.Config{}, "us-east-1", "111111111111", eksTestNow)
 			if !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
@@ -300,7 +300,7 @@ func TestElastiCacheFetchAndRetryPreserveOtherServices(t *testing.T) {
 					},
 				}
 			}
-			q := Query{Targets: []AccountTarget{{AccountID: "111111111111"}}, Services: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache}, Now: eksTestNow, EKSVersionCatalog: catalog, regionLister: fakeRegionLister{regions: []string{"us-east-1"}}, rdsLister: fakeRDSLister{records: []Record{{AccountID: "111111111111", Region: "us-east-1", Service: ServiceRDS, ResourceID: "database"}}, err: rdsErr}, elastiCacheLister: awsElastiCacheLister{newClient: func(aws.Config) ElastiCacheAPI { return client }}}
+			q := Query{Targets: []AccountTarget{{AccountID: "111111111111"}}, Services: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache}, Now: eksTestNow, EKSVersionCatalog: catalog, HealthLifecycleCatalog: testHealthCatalog(t), regionLister: fakeRegionLister{regions: []string{"us-east-1"}}, rdsLister: fakeRDSLister{records: []Record{{AccountID: "111111111111", Region: "us-east-1", Service: ServiceRDS, ResourceID: "database"}}, err: rdsErr}, elastiCacheLister: awsElastiCacheLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) ElastiCacheAPI { return client }}}
 			result, err := Fetch(context.Background(), q)
 			wantWarnings := 1
 			if denyRDS {

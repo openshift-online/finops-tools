@@ -59,7 +59,7 @@ func TestOpenSearchLifecycleClassification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, warning := classifyOpenSearch("111111111111", "us-east-1", "domain", tc.version, at)
+			record, warning := classifyOpenSearch("111111111111", "us-east-1", "domain", tc.version, at, testHealthCatalog(t))
 			if (record != nil) != tc.record {
 				t.Fatalf("record=%+v warning=%+v", record, warning)
 			}
@@ -157,7 +157,7 @@ func TestOpenSearchRetainsFindingsAcrossDomainAndTagFailures(t *testing.T) {
 		},
 	}
 	cfg := aws.Config{Region: "us-west-2"}
-	lister := awsOpenSearchLister{newClient: func(regional aws.Config) OpenSearchAPI {
+	lister := awsOpenSearchLister{catalog: testHealthCatalog(t), newClient: func(regional aws.Config) OpenSearchAPI {
 		if regional.Region != "us-east-1" {
 			t.Fatal(regional.Region)
 		}
@@ -192,7 +192,7 @@ func TestOpenSearchEmptyAndFailedDiscovery(t *testing.T) {
 					return &opensearch.ListDomainNamesOutput{}, nil
 				}
 			}}
-			result, err := (awsOpenSearchLister{newClient: func(aws.Config) OpenSearchAPI { return client }}).ListOpenSearchExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
+			result, err := (awsOpenSearchLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) OpenSearchAPI { return client }}).ListOpenSearchExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
 			if len(result.Records) != 0 {
 				t.Fatal(result)
 			}
@@ -236,7 +236,7 @@ func TestOpenSearchMissingTagsDoNotDiscardDomains(t *testing.T) {
 					return nil, nil
 				},
 			}
-			result, err := (awsOpenSearchLister{newClient: func(aws.Config) OpenSearchAPI { return client }}).ListOpenSearchExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
+			result, err := (awsOpenSearchLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) OpenSearchAPI { return client }}).ListOpenSearchExtendedSupport(context.Background(), aws.Config{}, "us-east-1", "111111111111", eksTestNow)
 			if err != nil || len(result.Records) != 1 || len(result.Warnings) != 1 || len(result.UnclassifiedResources) != 0 || !strings.Contains(result.Warnings[0].Message, "OpenSearch.ListTags for old") {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -269,7 +269,7 @@ func TestOpenSearchCancellation(t *testing.T) {
 					return &opensearch.ListTagsOutput{}, nil
 				},
 			}
-			_, err := (awsOpenSearchLister{newClient: func(aws.Config) OpenSearchAPI { return client }}).ListOpenSearchExtendedSupport(ctx, aws.Config{}, "us-east-1", "111111111111", eksTestNow)
+			_, err := (awsOpenSearchLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) OpenSearchAPI { return client }}).ListOpenSearchExtendedSupport(ctx, aws.Config{}, "us-east-1", "111111111111", eksTestNow)
 			if !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
@@ -305,7 +305,7 @@ func TestOpenSearchWorksAlongsideOtherServicesAndOnRetry(t *testing.T) {
 				rds.records = nil
 				rds.err = errors.New("RDS denied")
 			}
-			q := Query{Targets: []AccountTarget{{AccountID: "111111111111"}}, Services: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache, ServiceOpenSearch}, Now: eksTestNow, Workers: 1, EKSVersionCatalog: catalog, regionLister: fakeRegionLister{regions: []string{"us-east-1"}}, rdsLister: rds, openSearchLister: awsOpenSearchLister{newClient: func(aws.Config) OpenSearchAPI { return osClient }}, elastiCacheLister: awsElastiCacheLister{newClient: func(aws.Config) ElastiCacheAPI {
+			q := Query{Targets: []AccountTarget{{AccountID: "111111111111"}}, Services: []Service{ServiceRDS, ServiceEKS, ServiceElastiCache, ServiceOpenSearch}, Now: eksTestNow, Workers: 1, EKSVersionCatalog: catalog, HealthLifecycleCatalog: testHealthCatalog(t), regionLister: fakeRegionLister{regions: []string{"us-east-1"}}, rdsLister: rds, openSearchLister: awsOpenSearchLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) OpenSearchAPI { return osClient }}, elastiCacheLister: awsElastiCacheLister{catalog: testHealthCatalog(t), newClient: func(aws.Config) ElastiCacheAPI {
 				return fakeElastiCacheAPI{clusters: func(context.Context, *elasticache.DescribeCacheClustersInput) (*elasticache.DescribeCacheClustersOutput, error) {
 					return &elasticache.DescribeCacheClustersOutput{CacheClusters: []cachetypes.CacheCluster{testCache("cache")}}, nil
 				}}

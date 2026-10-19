@@ -100,6 +100,19 @@ func TestWriteExtendedSupportListResultJSON(t *testing.T) {
 	}
 }
 
+func TestWriteExtendedSupportLifecycleFailuresRemainVisibleWithoutFindings(t *testing.T) {
+	result := extendedsupport.Result{Summary: extendedsupport.Summary{LifecycleWarnings: []string{"AWS Health catalog: SubscriptionRequiredException"}}}
+	for _, format := range []Format{FormatPrettyPrint, FormatJSON} {
+		var out bytes.Buffer
+		if err := WriteExtendedSupportListResult(&out, format, result); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "SubscriptionRequiredException") {
+			t.Fatal(out.String())
+		}
+	}
+}
+
 func TestWriteExtendedSupportListResultPretty(t *testing.T) {
 	buf := new(bytes.Buffer)
 	if err := WriteExtendedSupportListResult(buf, FormatPrettyPrint, fixtureExtendedSupportResult()); err != nil {

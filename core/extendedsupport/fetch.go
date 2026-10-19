@@ -28,6 +28,15 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 
 	now := q.Now.UTC()
 	serviceSet := serviceSet(q.Services)
+	if _, cache := serviceSet[ServiceElastiCache]; cache {
+		if err := q.HealthLifecycleCatalog.preload(ctx, q); err != nil {
+			return Result{}, err
+		}
+	} else if _, search := serviceSet[ServiceOpenSearch]; search {
+		if err := q.HealthLifecycleCatalog.preload(ctx, q); err != nil {
+			return Result{}, err
+		}
+	}
 	if _, ok := serviceSet[ServiceEKS]; ok {
 		if err := q.EKSVersionCatalog.preload(ctx, q); err != nil {
 			return Result{}, err
@@ -83,7 +92,13 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		return Result{}, err
 	}
 
-	return buildResult(records, warnings, unclassified, skippedAccounts), nil
+	result := buildResult(records, warnings, unclassified, skippedAccounts)
+	if _, cache := serviceSet[ServiceElastiCache]; cache {
+		result.Summary.LifecycleWarnings = q.HealthLifecycleCatalog.warnings()
+	} else if _, search := serviceSet[ServiceOpenSearch]; search {
+		result.Summary.LifecycleWarnings = q.HealthLifecycleCatalog.warnings()
+	}
+	return result, nil
 }
 
 func buildResult(records []Record, warnings []RegionWarning, unclassified []ResourceWarning, skippedAccounts []AccountWarning) Result {
@@ -117,11 +132,14 @@ func (q Query) withDefaults() Query {
 	if q.eksLister == nil {
 		q.eksLister = awsEKSLister{catalog: q.EKSVersionCatalog}
 	}
+	if q.HealthLifecycleCatalog == nil {
+		q.HealthLifecycleCatalog = NewHealthLifecycleCatalog()
+	}
 	if q.elastiCacheLister == nil {
-		q.elastiCacheLister = awsElastiCacheLister{}
+		q.elastiCacheLister = awsElastiCacheLister{catalog: q.HealthLifecycleCatalog}
 	}
 	if q.openSearchLister == nil {
-		q.openSearchLister = awsOpenSearchLister{}
+		q.openSearchLister = awsOpenSearchLister{catalog: q.HealthLifecycleCatalog}
 	}
 	return q
 }

@@ -37,6 +37,11 @@ func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result
 		}
 	}
 	label := "Resources in extended support:"
+	for _, warning := range r.Summary.LifecycleWarnings {
+		if _, err := fmt.Fprintf(w, "  Lifecycle catalog warning: %s\n\n", warning); err != nil {
+			return err
+		}
+	}
 	value := fmt.Sprintf("%d", r.Summary.TotalCount)
 	if s.enabled {
 		label = s.dim(label)

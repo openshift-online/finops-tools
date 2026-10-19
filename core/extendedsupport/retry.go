@@ -32,6 +32,9 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 		return result, nil
 	}
 	q.Targets = targets
+	if q.HealthLifecycleCatalog != nil {
+		q.HealthLifecycleCatalog.retryFailures()
+	}
 	retry, err := Fetch(ctx, q)
 	if err != nil {
 		return result, err
@@ -69,5 +72,6 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 		append(accounts, retry.Summary.SkippedAccounts...),
 	)
 	merged.Summary.BillingSelection = result.Summary.BillingSelection
+	merged.Summary.LifecycleWarnings = retry.Summary.LifecycleWarnings
 	return merged, nil
 }

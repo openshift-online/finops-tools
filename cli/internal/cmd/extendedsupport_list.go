@@ -55,14 +55,17 @@ The final skipped-account list contains only accounts that still could not be sc
 RDS support dates come from DescribeDBMajorEngineVersions. EKS version catalogs are
 preloaded by region and shared across accounts and the final retry pass. EKS clusters
 are classified using their Kubernetes version and support dates, not their upgrade policy alone.
-ElastiCache Redis OSS versions are checked against AWS's published support schedule,
-bundled with the CLI because the ElastiCache API does not expose lifecycle dates.
+ElastiCache and OpenSearch support dates come from AWS Health DescribeServiceLifecycle.
+The complete paginated catalog is loaded once using payer or direct-account
+credentials and shared across regions, accounts, and the final retry pass.
+AWS Health timestamps and regional applicability determine support status.
+Missing, ambiguous, or inaccessible lifecycle data produces warnings; there are
+no bundled support schedules or offline fallbacks.
 Node-based caches and serverless caches are checked. Replication-group member
 cache clusters are reported individually; their parent group is not counted again.
-Unknown versions produce resource warnings. Valkey and Memcached have no announced
-paid Extended Support schedule and are excluded.
+ElastiCache engine/version eligibility comes from the Health catalog.
 OpenSearch Service checks both OpenSearch and legacy Elasticsearch domains using
-ListDomainNames and DescribeDomain, with a bundled AWS lifecycle schedule.
+ListDomainNames and DescribeDomain.
 Unknown versions produce resource warnings. OpenSearch Serverless is excluded
 because its engine versions are managed by AWS.
 
@@ -80,6 +83,11 @@ Payer credentials also need sts:AssumeRole into the configured linked-account ro
 Payer-wide billing selection needs ce:GetDimensionValues and ce:GetCostAndUsage.
 Allow eks:DescribeClusterVersions on the payer to preload EKS catalogs; member
 credentials provide a fallback if the payer cannot retrieve version information.
+The catalog credential source also needs health:DescribeServiceLifecycle and an
+AWS Support plan eligible for Health API access. Payer-wide scans use the payer
+for this metadata; member roles need only resource-discovery permissions.
+Health failures are shown under summary.lifecycle_warnings and on stderr, while
+affected resources appear under Support status unknown. RDS/EKS scanning continues.
 
 Examples:
   finops extended-support list --account-alias rh-control
@@ -246,7 +254,9 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 	for _, service := range services {
 		if service == extendedsupport.ServiceEKS {
 			query.EKSVersionCatalog = extendedsupport.NewEKSVersionCatalog()
-			break
+		}
+		if (service == extendedsupport.ServiceElastiCache || service == extendedsupport.ServiceOpenSearch) && query.HealthLifecycleCatalog == nil {
+			query.HealthLifecycleCatalog = extendedsupport.NewHealthLifecycleCatalog()
 		}
 	}
 	var result extendedsupport.Result
@@ -302,5 +312,10 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 	}
 
 	result.Summary.BillingSelection = billingSelection
+	for _, warning := range result.Summary.LifecycleWarnings {
+		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning); err != nil {
+			return err
+		}
+	}
 	return output.WriteExtendedSupportListResult(out, format, result)
 }

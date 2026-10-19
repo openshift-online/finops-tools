@@ -3,7 +3,7 @@ module github.com/openshift-online/finops-tools/core
 go 1.25.0
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.45.1
+	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.63.8
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.307.0
@@ -11,6 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/elasticache v1.59.0
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing v1.38.1
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.60.1
+	github.com/aws/aws-sdk-go-v2/service/health v1.48.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.57.1
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.104.1
 	github.com/aws/aws-sdk-go-v2/service/opensearch v1.78.0
@@ -36,8 +37,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.18 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.16.15 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.1 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.1 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.4 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.4 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.19 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.1 // indirect
