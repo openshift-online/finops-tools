@@ -28,6 +28,11 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 
 	now := q.Now.UTC()
 	serviceSet := serviceSet(q.Services)
+	if _, ok := serviceSet[ServiceEKS]; ok {
+		if err := q.EKSVersionCatalog.preload(ctx, q); err != nil {
+			return Result{}, err
+		}
+	}
 
 	var (
 		mu              sync.Mutex
@@ -105,6 +110,12 @@ func (q Query) withDefaults() Query {
 	}
 	if q.rdsLister == nil {
 		q.rdsLister = awsRDSLister{}
+	}
+	if q.EKSVersionCatalog == nil {
+		q.EKSVersionCatalog = NewEKSVersionCatalog()
+	}
+	if q.eksLister == nil {
+		q.eksLister = awsEKSLister{catalog: q.EKSVersionCatalog}
 	}
 	return q
 }
@@ -205,14 +216,39 @@ func scanRegion(
 	services map[Service]struct{},
 ) (regionScanResult, error) {
 	var result regionScanResult
-	if _, ok := services[ServiceRDS]; ok {
-		rdsResult, err := q.rdsLister.ListRDSExtendedSupport(ctx, target.AWSConfig, region, accountID, now)
-		if err != nil {
-			return rdsResult, err
+	for _, service := range []Service{ServiceRDS, ServiceEKS} {
+		if _, ok := services[service]; !ok {
+			continue
 		}
-		result.Records = append(result.Records, rdsResult.Records...)
-		result.Warnings = append(result.Warnings, rdsResult.Warnings...)
-		result.UnclassifiedResources = append(result.UnclassifiedResources, rdsResult.UnclassifiedResources...)
+		var found regionScanResult
+		var err error
+		switch service {
+		case ServiceRDS:
+			found, err = q.rdsLister.ListRDSExtendedSupport(ctx, target.AWSConfig, region, accountID, now)
+		case ServiceEKS:
+			found, err = q.eksLister.ListEKSExtendedSupport(ctx, target.AWSConfig, region, accountID, now)
+		}
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return result, err
+		}
+		if err != nil {
+			found.Warnings = append(found.Warnings, RegionWarning{
+				AccountID: accountID, Region: region, Service: service,
+				Message: accountWarningMessage(err, "scanning "+string(service)+" resources"),
+			})
+		}
+		for i := range found.Warnings {
+			found.Warnings[i].Service = service
+		}
+		for i := range found.UnclassifiedResources {
+			found.UnclassifiedResources[i].Service = service
+		}
+		result.Records = append(result.Records, found.Records...)
+		result.Warnings = append(result.Warnings, found.Warnings...)
+		result.UnclassifiedResources = append(result.UnclassifiedResources, found.UnclassifiedResources...)
 	}
 	return result, nil
 }
@@ -228,6 +264,9 @@ func sortResourceWarnings(warnings []ResourceWarning) []ResourceWarning {
 		}
 		if a.Region != b.Region {
 			return a.Region < b.Region
+		}
+		if a.Service != b.Service {
+			return a.Service < b.Service
 		}
 		if a.ResourceType != b.ResourceType {
 			return a.ResourceType < b.ResourceType
@@ -336,6 +375,9 @@ func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {
 		}
 		if warnings[i].Region != warnings[j].Region {
 			return warnings[i].Region < warnings[j].Region
+		}
+		if warnings[i].Service != warnings[j].Service {
+			return warnings[i].Service < warnings[j].Service
 		}
 		return warnings[i].Message < warnings[j].Message
 	})

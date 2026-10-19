@@ -502,7 +502,7 @@ These persistent flags are available on AWS-backed commands (`account`, `snapsho
 | `--auth-method` | `saml` (default) or `profile`; when omitted, uses `defaults.aws.auth_method` from config |
 | `--config` | Path to finops config file (default: OS-specific config dir) |
 | `--credentials-file` | Path to AWS credentials file (default: `~/.aws/credentials`) |
-| `--verbose` / `-v` | Log external commands (`klist`, `curl`, …) and selected AWS API calls (STS, Organizations, EC2, RDS, Cost Explorer) to stderr |
+| `--verbose` / `-v` | Log external commands (`klist`, `curl`, …) and selected AWS API calls (STS, Organizations, EC2, RDS, EKS, Cost Explorer) to stderr |
 
 Verbose output uses two line prefixes: `+ "command" "args"` for external binaries and `+ AWS Service.Operation …` for cloud API calls. Organizations tag reads log `ListTagsForResource`; tag writes log `TagResource` (matching the AWS API operation names).
 
@@ -710,22 +710,28 @@ When Cost Explorer data is available, the summary shows **attributed** storage c
 
 ### Extended support (AWS)
 
-Find AWS resources running versions that have passed their **standard support end date** (AWS Extended Support). Today this covers **RDS DB instances and Aurora/RDS DB clusters**; EKS and ElastiCache are planned. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer.
+Find AWS resources running versions in **AWS Extended Support**. This covers **RDS DB instances, Aurora/RDS DB clusters, and EKS Kubernetes clusters**; ElastiCache is planned. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer. Both RDS and EKS are scanned by default.
 
 ```bash
 finops extended-support list --account-alias rh-control
 finops extended-support list --payer rh-control
 finops extended-support list --payer rh-control --services rds --format json
+finops extended-support list --payer rh-control --services eks --format json
+finops extended-support list --payer rh-control --services rds,eks
 finops extended-support list --payer rh-control --regions us-east-1,us-west-2
 ```
 
-A resource is reported when the standard support end date for its engine major version (from `rds:DescribeDBMajorEngineVersions`) is in the past. The output includes both the standard support end date and, when published, the extended support end date. Supported engines are MySQL, PostgreSQL, Aurora MySQL, and Aurora PostgreSQL. Version lookup includes deprecated versions, and linked-account roles are assumed when each account's scan begins.
+An RDS resource is reported when the standard support end date for its engine major version (from `rds:DescribeDBMajorEngineVersions`) is in the past. The output includes both the standard support end date and, when published, the extended support end date. Supported engines are MySQL, PostgreSQL, Aurora MySQL, and Aurora PostgreSQL. Version lookup includes deprecated versions, and linked-account roles are assumed when each account's scan begins.
+
+For EKS, the run first preloads `DescribeClusterVersions` catalogs for the payer's enabled regions (or `--regions`), including all versions and pagination. Successful regional catalogs are shared across accounts and the final retry pass. If a payer cannot load a catalog, a member role can load it during scanning; additional member-enabled regions are loaded on demand. Failed catalog requests are retained per credential source, so one denied account does not prevent another account from loading the catalog. Catalogs are kept in memory for the current command only.
+
+EKS clusters are discovered with `ListClusters` and `DescribeCluster`. Each cluster's Kubernetes version is matched against its region's catalog. A cluster is reported when the scan timestamp is at or after standard support ends and before extended support ends. An `EXTENDED` upgrade policy alone does not qualify a cluster. Unknown versions, missing support dates, failed cluster descriptions, and versions past extended support produce resource warnings. EKS records use service `eks`, resource type `eks-cluster`, engine `kubernetes`, and the Kubernetes version in the version fields; `engine_lifecycle_support` holds the cluster's upgrade policy when available. EKS Connector external clusters are excluded.
 
 Each run shares validated payer configuration and an STS client across the payer's linked accounts. Member roles are still assumed and their identities verified separately. If role assumption reports invalid or expired payer credentials, one worker reloads the payer profile and, for SAML authentication, reruns the existing login flow if needed; other workers wait for that renewal. The affected role assumption is retried once. Permission errors do not trigger login. Failed renewal is shared across dependent accounts so login is not repeated for every member. SAML renewal requires working VPN/Kerberos access. With `--auth-method profile`, the configured SDK provider/profile is reloaded; scan workers never prompt for access keys, and profiles that require an external login must be renewed externally.
 
 | Flag | Description |
 |------|-------------|
-| `--services` | Services to scan: `rds` (comma-separated; default `rds`) |
+| `--services` | Services to scan: `rds`, `eks` (comma-separated; default `rds,eks`) |
 | `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
 | `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (`--ou`/`--payer` are ACTIVE members only) |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
@@ -735,11 +741,11 @@ Each run shares validated payer configuration and an STS client across the payer
 | `--workers` | Maximum concurrent workers for multi-account AWS scans (default: `25`, max: `1000`; use `1` for sequential) |
 | `--verbose` / `-v` | Log external commands and selected AWS API calls to stderr (see [AWS global flags](#aws-global-flags)) |
 
-Required IAM permissions in each scanned account: `ec2:DescribeRegions`, `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:DescribeDBEngineVersions`, and `rds:DescribeDBMajorEngineVersions`. Payer credentials also need `sts:AssumeRole` into the configured linked-account role.
+Required IAM permissions in each scanned account: `ec2:DescribeRegions`; for RDS, `rds:DescribeDBInstances`, `rds:DescribeDBClusters`, `rds:DescribeDBEngineVersions`, and `rds:DescribeDBMajorEngineVersions`; for EKS, `eks:ListClusters`, `eks:DescribeCluster`, and `eks:DescribeClusterVersions`. Payer credentials also need `sts:AssumeRole` into the configured linked-account role. Allow `eks:DescribeClusterVersions` on the payer for catalog preloading. `eks:ListClusters` and `eks:DescribeClusterVersions` require resource `"*"`; `eks:DescribeCluster` can be scoped to cluster ARNs. Use `--services rds` or `--services eks` to limit the scan to one service.
 
 After the initial scan finishes, accounts skipped because credentials could not be loaded or enabled regions could not be discovered are retried once. The retry uses fresh payer-session state, reloads credentials, and can renew a SAML login if needed. Successful accounts are not rescanned. Recovered findings are merged into the result and totals; only accounts that still fail remain under "Skipped accounts" (`summary.skipped_accounts` in JSON), with their latest failure reason. This list is held in memory for the run and can be saved with JSON output. Region-only failures and accounts excluded during account selection are not included in this retry.
 
-Failed instance or cluster discovery is listed under "Skipped regions", including partial discovery failures. Successful discoveries from the same region are retained. An engine/version lookup failure affects only the resources that depend on that lookup.
+Failed service discovery is listed under "Skipped regions", including partial discovery failures. Warnings include the affected service in pretty-print and JSON output. A failure in RDS does not prevent EKS scanning, and an EKS failure does not discard RDS findings. Successful discoveries from the same region are retained. An engine/version lookup failure affects only the resources that depend on that lookup. Region/service failures and resource warnings are not retried by the final skipped-account retry pass.
 
 Resources with missing engine/version information, failed lifecycle lookups, or missing standard support end dates appear under "Support status unknown" in pretty-print output and `summary.unclassified_resources` in JSON. They are excluded from the Extended Support count. CSV contains only confirmed Extended Support resources. Check warnings before treating an empty result as "no resources in extended support".
 

@@ -17,6 +17,8 @@ type Service string
 const (
 	// ServiceRDS covers RDS DB instances and Aurora/RDS multi-AZ DB clusters.
 	ServiceRDS Service = "rds"
+	// ServiceEKS covers Amazon EKS Kubernetes clusters.
+	ServiceEKS Service = "eks"
 )
 
 // ParseServices parses a comma-separated --services value.
@@ -24,7 +26,7 @@ const (
 func ParseServices(s string) ([]Service, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return []Service{ServiceRDS}, nil
+		return []Service{ServiceRDS, ServiceEKS}, nil
 	}
 	var services []Service
 	seen := make(map[Service]struct{})
@@ -37,8 +39,10 @@ func ParseServices(s string) ([]Service, error) {
 		switch part {
 		case "rds":
 			service = ServiceRDS
+		case "eks":
+			service = ServiceEKS
 		default:
-			return nil, fmt.Errorf("unknown service %q (supported: rds)", part)
+			return nil, fmt.Errorf("unknown service %q (supported: rds, eks)", part)
 		}
 		if _, ok := seen[service]; ok {
 			continue
@@ -58,6 +62,7 @@ type ResourceType string
 const (
 	ResourceTypeRDSInstance ResourceType = "rds-instance"
 	ResourceTypeRDSCluster  ResourceType = "rds-cluster"
+	ResourceTypeEKSCluster  ResourceType = "eks-cluster"
 )
 
 // AccountTarget holds credentials scoped to one AWS account for a scan.
@@ -68,6 +73,11 @@ type AccountTarget struct {
 	AWSConfig    aws.Config
 	// ConfigLoader, when set, is called at scan time (linked-account assume-role).
 	ConfigLoader func(context.Context) (aws.Config, error) `json:"-"`
+	// CatalogConfigLoader optionally supplies payer credentials for preloading
+	// public version metadata without assuming member roles. CatalogAccountID
+	// identifies this credential source so it is loaded only once per pass.
+	CatalogAccountID    string
+	CatalogConfigLoader func(context.Context) (aws.Config, error) `json:"-"`
 }
 
 // AccountProgress reports completion of per-account scans.
@@ -82,10 +92,14 @@ type Query struct {
 	Regions         []string
 	AccountProgress AccountProgress
 	Now             time.Time
+	// EKSVersionCatalog is shared across accounts and may be retained for retries.
+	// If nil, Fetch creates a catalog scoped to that call.
+	EKSVersionCatalog *EKSVersionCatalog
 	// Workers bounds concurrent account scans (0 = default).
 	Workers      int
 	regionLister regionLister
 	rdsLister    rdsLister
+	eksLister    eksLister
 }
 
 // Record is one resource currently past its standard support end date.
@@ -116,11 +130,12 @@ type AccountSummary struct {
 	Count     int    `json:"count"`
 }
 
-// RegionWarning records a region that could not be scanned.
+// RegionWarning records a service discovery failure in a region.
 type RegionWarning struct {
-	AccountID string `json:"account_id"`
-	Region    string `json:"region"`
-	Message   string `json:"message"`
+	AccountID string  `json:"account_id"`
+	Region    string  `json:"region"`
+	Service   Service `json:"service,omitempty"`
+	Message   string  `json:"message"`
 }
 
 // AccountWarning records an account that could not be prepared for scanning.
@@ -134,6 +149,7 @@ type AccountWarning struct {
 type ResourceWarning struct {
 	AccountID     string       `json:"account_id"`
 	Region        string       `json:"region"`
+	Service       Service      `json:"service,omitempty"`
 	ResourceType  ResourceType `json:"resource_type"`
 	ResourceID    string       `json:"resource_id"`
 	Engine        string       `json:"engine"`

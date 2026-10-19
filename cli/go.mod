@@ -40,6 +40,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.63.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.307.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/eks v1.97.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing v1.38.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.60.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/iam v1.57.1 // indirect

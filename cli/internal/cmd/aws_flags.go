@@ -23,5 +23,5 @@ func bindAWSPersistentFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&awsFlags.CredentialsFile, "credentials-file", "",
 		"Path to AWS credentials file (default: ~/.aws/credentials)")
 	cmd.PersistentFlags().BoolVarP(&awsFlags.Verbose, "verbose", "v", false,
-		"Log external commands and AWS API calls (STS, Organizations, EC2, RDS, Cost Explorer) to stderr when -v is set")
+		"Log external commands and AWS API calls (STS, Organizations, EC2, RDS, EKS, Cost Explorer) to stderr when -v is set")
 }

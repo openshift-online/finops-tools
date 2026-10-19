@@ -26,7 +26,7 @@ func TestExtendedSupportListPreRunRejectsUnknownService(t *testing.T) {
 	extendedSupportListAccount = "123456789012"
 	extendedSupportListAccountAliases = ""
 	extendedSupportListFormat = string(output.FormatPrettyPrint)
-	extendedSupportListServices = "eks"
+	extendedSupportListServices = "elasticache"
 	t.Cleanup(func() {
 		extendedSupportListAccount = ""
 		extendedSupportListServices = "rds"
@@ -121,6 +121,11 @@ func TestPrepareExtendedSupportTargetsSharesPayerAndDefersLinkedAuthentication(t
 	}
 	if len(targets) != 2 || len(skipped) != 0 || payerSessions != 1 || assumptions != 0 {
 		t.Fatalf("targets=%v skipped=%v payerSessions=%d assumptions=%d", targets, skipped, payerSessions, assumptions)
+	}
+	for _, target := range targets {
+		if target.CatalogAccountID != "123456789012" || target.CatalogConfigLoader == nil {
+			t.Fatalf("payer catalog source not attached: %+v", target)
+		}
 	}
 	awsCfg, err := targets[0].ConfigLoader(context.Background())
 	if err != nil {
@@ -267,6 +272,7 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                            string
+		services                                                        string
 		allSkipped, preparationSkipped, noSkipped, canceled, retryError bool
 	}{
 		{name: "some accounts skipped"},
@@ -275,6 +281,7 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 		{name: "no skipped accounts", noSkipped: true},
 		{name: "canceled scan", canceled: true},
 		{name: "retry error", retryError: true},
+		{name: "RDS and EKS share catalog through retry", services: "rds,eks"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")
@@ -300,6 +307,9 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			extendedSupportListAccountAliases = "one,two,three"
 			extendedSupportListFormat = string(output.FormatJSON)
 			extendedSupportListServices = "rds"
+			if tc.services != "" {
+				extendedSupportListServices = tc.services
+			}
 			extendedSupportListRegions = "us-east-1"
 			extendedSupportListWorkers = 1
 			ctx, cancel := context.WithCancel(context.Background())
@@ -311,6 +321,7 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			cmd.SetErr(notices)
 			prepareCalls, fetchCalls, retryCalls := 0, 0, 0
 			var scanTime time.Time
+			var catalog *extendedsupport.EKSVersionCatalog
 			ensureExtendedSupportCredentials = func(_ *cobra.Command, _ configstore.File, _ []cost.AccountTarget, _, _, _ string) error { return nil }
 			prepareExtendedSupportTargets = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string, _ int, _ *progress.Bar) ([]extendedsupport.AccountTarget, []extendedsupport.AccountWarning, error) {
 				prepareCalls++
@@ -335,6 +346,10 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			extendedSupportListFetch = func(_ context.Context, q extendedsupport.Query) (extendedsupport.Result, error) {
 				fetchCalls++
 				scanTime = q.Now
+				catalog = q.EKSVersionCatalog
+				if tc.services != "" && catalog == nil {
+					t.Fatal("combined scan has no shared EKS catalog")
+				}
 				if tc.canceled {
 					cancel()
 				}
@@ -356,7 +371,11 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				if tc.allSkipped {
 					wantTargets = 3
 				}
-				if len(q.Targets) != wantTargets || len(result.Summary.SkippedAccounts) != wantTargets || q.Now.IsZero() || (!scanTime.IsZero() && !q.Now.Equal(scanTime)) || !reflect.DeepEqual(q.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(q.Services, []extendedsupport.Service{extendedsupport.ServiceRDS}) || q.Workers != 1 {
+				wantServices := []extendedsupport.Service{extendedsupport.ServiceRDS}
+				if tc.services != "" {
+					wantServices = append(wantServices, extendedsupport.ServiceEKS)
+				}
+				if len(q.Targets) != wantTargets || len(result.Summary.SkippedAccounts) != wantTargets || q.Now.IsZero() || (!scanTime.IsZero() && !q.Now.Equal(scanTime)) || !reflect.DeepEqual(q.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(q.Services, wantServices) || q.Workers != 1 || q.EKSVersionCatalog != catalog {
 					t.Fatalf("retry query = %+v, initial result = %+v", q, result)
 				}
 				for _, target := range q.Targets {

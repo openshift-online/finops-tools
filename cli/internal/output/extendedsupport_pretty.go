@@ -97,10 +97,11 @@ func writeExtendedSupportRegionWarnings(w io.Writer, s styler, warnings []extend
 	table.SetHeader([]string{
 		cell(s, s.bold, "ACCOUNT"),
 		cell(s, s.bold, "REGION"),
+		cell(s, s.bold, "SERVICE"),
 		cell(s, s.bold, "MESSAGE"),
 	})
 	for _, warning := range warnings {
-		table.Append([]string{warning.AccountID, warning.Region, warning.Message})
+		table.Append([]string{warning.AccountID, warning.Region, string(warning.Service), warning.Message})
 	}
 	table.Render()
 	return nil
@@ -151,6 +152,7 @@ func writeExtendedSupportResourceWarnings(w io.Writer, s styler, warnings []exte
 	table.SetHeader([]string{
 		cell(s, s.bold, "ACCOUNT"),
 		cell(s, s.bold, "REGION"),
+		cell(s, s.bold, "SERVICE"),
 		cell(s, s.bold, "TYPE"),
 		cell(s, s.bold, "RESOURCE ID"),
 		cell(s, s.bold, "ENGINE"),
@@ -158,7 +160,7 @@ func writeExtendedSupportResourceWarnings(w io.Writer, s styler, warnings []exte
 		cell(s, s.bold, "MESSAGE"),
 	})
 	for _, warning := range warnings {
-		table.Append([]string{warning.AccountID, warning.Region, string(warning.ResourceType), warning.ResourceID, warning.Engine, warning.EngineVersion, warning.Message})
+		table.Append([]string{warning.AccountID, warning.Region, string(warning.Service), string(warning.ResourceType), warning.ResourceID, warning.Engine, warning.EngineVersion, warning.Message})
 	}
 	table.Render()
 	return nil

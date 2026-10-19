@@ -76,6 +76,8 @@ func prepareExtendedSupportTargetsImpl(
 			DisplayAlias: target.DisplayAlias,
 		}
 		payer := payers[target.CredentialsAccountID()]
+		prepared.CatalogAccountID = target.CredentialsAccountID()
+		prepared.CatalogConfigLoader = payer.Config
 		if target.IsLinked() {
 			// Resolve the role now, but authenticate only when Fetch starts this account.
 			roleARN, err := resolveTargetLinkedRoleARN(cmd, cfg, configPath, accountID, target.DisplayAlias, flagRole)

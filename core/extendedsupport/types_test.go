@@ -12,12 +12,15 @@ func TestParseServices(t *testing.T) {
 		want    []Service
 		wantErr bool
 	}{
-		{name: "empty selects default", value: "", want: []Service{ServiceRDS}},
+		{name: "empty selects default", value: "", want: []Service{ServiceRDS, ServiceEKS}},
 		{name: "rds", value: "rds", want: []Service{ServiceRDS}},
 		{name: "case insensitive", value: " RDS ", want: []Service{ServiceRDS}},
 		{name: "deduplicates", value: "rds,rds", want: []Service{ServiceRDS}},
-		{name: "unknown", value: "eks", wantErr: true},
-		{name: "mixed unknown", value: "rds,eks", wantErr: true},
+		{name: "eks", value: "eks", want: []Service{ServiceEKS}},
+		{name: "both", value: "rds,eks", want: []Service{ServiceRDS, ServiceEKS}},
+		{name: "mixed deduplicates", value: " EKS,rds,eks ", want: []Service{ServiceEKS, ServiceRDS}},
+		{name: "unknown", value: "elasticache", wantErr: true},
+		{name: "mixed unknown", value: "rds,elasticache", wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

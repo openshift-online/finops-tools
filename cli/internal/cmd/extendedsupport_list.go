@@ -35,8 +35,8 @@ var (
 var extendedSupportListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List AWS resources running in extended support",
-	Long: `Discover RDS DB instances and Aurora/RDS DB clusters whose engine version is past
-its standard support end date (AWS Extended Support).
+	Long: `Discover RDS DB instances, Aurora/RDS DB clusters, and EKS Kubernetes clusters
+running versions in AWS Extended Support.
 
 Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone
 (--ou/--payer select ACTIVE members only). Linked member accounts are scanned using role assumption from the payer.
@@ -45,20 +45,25 @@ are skipped and listed under "Skipped accounts" or "Skipped regions" in the outp
 After the initial scan, skipped accounts are retried once using fresh payer-session state.
 The final skipped-account list contains only accounts that still could not be scanned.
 
-A resource is reported when its engine major version's standard support end date (from
-RDS DescribeDBMajorEngineVersions) is in the past.
+RDS support dates come from DescribeDBMajorEngineVersions. EKS version catalogs are
+preloaded by region and shared across accounts and the final retry pass. EKS clusters
+are classified using their Kubernetes version and support dates, not their upgrade policy alone.
 
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions
   rds:DescribeDBInstances, rds:DescribeDBClusters
   rds:DescribeDBEngineVersions, rds:DescribeDBMajorEngineVersions
+  eks:ListClusters, eks:DescribeCluster, eks:DescribeClusterVersions
 
 Payer credentials also need sts:AssumeRole into the configured linked-account role.
+Allow eks:DescribeClusterVersions on the payer to preload EKS catalogs; member
+credentials provide a fallback if the payer cannot retrieve version information.
 
 Examples:
   finops extended-support list --account-alias rh-control
   finops extended-support list --payer rh-control
   finops extended-support list --payer rh-control --services rds --format json
+  finops extended-support list --payer rh-control --services eks --format json
   finops extended-support list --payer rh-control --regions us-east-1,us-west-2`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -101,8 +106,8 @@ func init() {
 		SkipOrgCache:    &extendedSupportListSkipOrgCache,
 		RefreshOrgCache: &extendedSupportListRefreshOrgCache,
 	})
-	extendedSupportListCmd.Flags().StringVar(&extendedSupportListServices, "services", "rds",
-		"Services to scan: rds (comma-separated)")
+	extendedSupportListCmd.Flags().StringVar(&extendedSupportListServices, "services", "rds,eks",
+		"Services to scan: rds,eks (comma-separated)")
 	extendedSupportListCmd.Flags().StringVar(&extendedSupportListRegions, "regions", "",
 		"Limit scan to comma-separated AWS regions (default: all enabled regions)")
 	extendedSupportListCmd.Flags().StringVar(&extendedSupportListFormat, "format", string(output.FormatPrettyPrint),
@@ -192,6 +197,12 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 		Regions:  regions,
 		Workers:  extendedSupportListWorkers,
 		Now:      time.Now().UTC(),
+	}
+	for _, service := range services {
+		if service == extendedsupport.ServiceEKS {
+			query.EKSVersionCatalog = extendedsupport.NewEKSVersionCatalog()
+			break
+		}
 	}
 	var result extendedsupport.Result
 	if len(scanTargets) > 0 {
