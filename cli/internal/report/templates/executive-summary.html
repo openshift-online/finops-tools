@@ -1,0 +1,765 @@
+{{ define "executive-summary" }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HCP Executive Summary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-primary: #0d0f13;    --bg-secondary: #151515;  --bg-tertiary: #1f1f1f;
+  --bg-card: #292929;       --bg-elevated: #383838;
+  --text-primary: #f2f2f2;  --text-muted: #8c8c8c;     --text-dimmed: #4d4d4d;
+  --red-hat: #ee0000;       --red-dark: #a60000;       --red-light: #f56e6e;
+  --teal-primary: #37a3a3;  --teal-light: #63bdbd;     --teal-dark: #147878;
+  --orange: #f5921b;        --orange-light: #f8ae54;
+  --blue: #0066cc;          --blue-light: #4394e5;
+  --green: #63993d;         --green-light: #87bb62;
+  --purple: #5e40be;
+  --border-subtle: #383838; --border-strong: #4d4d4d;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+h1, h2, h3, .kpi-label, th { font-family: 'IBM Plex Mono', monospace; }
+.num, .kpi-value, td.num, .tick, table.heatmap td { font-family: 'JetBrains Mono', monospace; }
+a { color: var(--blue-light); }
+
+header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 1.25rem 1.5rem;
+}
+header h1 { margin: 0 0 0.35rem; font-size: 1.4rem; letter-spacing: 0.01em; }
+header .meta { color: var(--text-muted); font-size: 0.82rem; }
+
+.disclaimer-banner {
+  background: rgba(94, 64, 190, 0.12);
+  border: 1px solid var(--purple);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 1.5rem 0;
+  font-size: 0.85rem;
+}
+.disclaimer-banner strong { color: var(--purple); }
+
+.alert-banner {
+  background: rgba(238, 0, 0, 0.12);
+  border: 1px solid var(--red-hat);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 1.5rem 0;
+  font-size: 0.85rem;
+}
+.alert-banner strong { color: var(--red-light); display: block; margin-bottom: 0.35rem; }
+
+nav.tabs {
+  display: flex;
+  overflow-x: auto;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--text-muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab-btn:hover { color: var(--text-primary); }
+.tab-btn.active { color: var(--text-primary); border-bottom-color: var(--teal-primary); }
+.tab-btn.payer-production.active { border-bottom-color: var(--red-hat); }
+.tab-btn.payer-staging.active { border-bottom-color: var(--blue); }
+.tab-btn.payer-integration.active { border-bottom-color: var(--purple); }
+
+.tab-panel { display: none; padding: 1.25rem 1.5rem 2rem; }
+.tab-panel.active { display: block; }
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+.kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  position: relative;
+}
+.kpi-label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.kpi-value { font-size: 1.5rem; font-weight: 600; color: var(--text-primary); }
+.kpi-sub { color: var(--text-muted); font-size: 0.78rem; margin-top: 0.2rem; }
+
+.kpi-good { color: var(--green); }
+.kpi-warn { color: var(--orange); }
+.kpi-bad { color: var(--red-hat); }
+.kpi-blue { color: var(--blue-light); }
+.kpi-purple { color: var(--purple); }
+
+.tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  cursor: help;
+  position: relative;
+}
+.tooltip-icon .tooltip-content {
+  display: none;
+  position: absolute;
+  bottom: 140%;
+  left: 0;
+  width: 260px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.75rem;
+  font-family: 'IBM Plex Sans', sans-serif;
+  color: var(--text-primary);
+  line-height: 1.4;
+  z-index: 30;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.tooltip-icon:hover .tooltip-content { display: block; }
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.chart-card h3 { margin: 0 0 0.75rem; font-size: 0.9rem; color: var(--text-primary); }
+.chart-card canvas { max-height: 320px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  font-size: 0.82rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+th:hover { color: var(--text-primary); }
+td.num { text-align: right; }
+tbody tr:hover { background: var(--bg-tertiary); }
+
+.color-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 0.4rem; }
+.rank-badge { background: var(--bg-elevated); color: var(--orange-light); border-radius: 4px; padding: 0.05rem 0.35rem; font-size: 0.7rem; margin-right: 0.3rem; }
+
+.badge {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.badge-up { background: rgba(238,0,0,0.18); color: var(--red-light); }
+.badge-down { background: rgba(99,153,61,0.18); color: var(--green-light); }
+.badge-flat { background: var(--bg-elevated); color: var(--text-muted); }
+.badge-critical { background: var(--red-hat); color: #fff; }
+.badge-high { background: var(--orange); color: #1a1a1a; }
+.badge-medium { background: var(--blue); color: #fff; }
+.badge-realized { background: var(--green); color: #fff; }
+.badge-open { background: var(--orange); color: #1a1a1a; }
+.badge-closed { background: var(--bg-elevated); color: var(--text-muted); }
+.badge-calc { background: transparent; border: 1px solid var(--border-strong); color: var(--text-muted); }
+
+.account-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+.account-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+}
+.account-name { font-weight: 600; font-size: 0.9rem; }
+.account-service { color: var(--text-muted); font-size: 0.75rem; margin-bottom: 0.4rem; }
+.account-cost { font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; margin-bottom: 0.3rem; }
+.top-services { list-style: none; margin: 0.5rem 0 0; padding: 0; font-size: 0.75rem; color: var(--text-muted); }
+.top-services li { display: flex; justify-content: space-between; padding: 0.15rem 0; }
+
+.heatmap-controls { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.metric-toggle {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.metric-toggle.active { border-color: var(--teal-primary); color: var(--text-primary); }
+.heatmap-wrap { overflow-x: auto; margin-bottom: 0.5rem; }
+table.heatmap td, table.heatmap th { text-align: center; }
+table.heatmap .region-header { text-align: left; display: flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+.heatmap-cell { min-width: 70px; font-size: 0.78rem; cursor: default; }
+.heatmap-cell.empty { background: #fff; }
+.heatmap-cell.total-cell { border-left: 2px solid var(--border-strong); font-weight: 600; }
+.heatmap-caption { color: var(--text-muted); font-size: 0.78rem; margin: 0 0 1.5rem; }
+.sparkline { vertical-align: middle; }
+
+#heatmap-tooltip {
+  position: fixed;
+  display: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  max-width: 280px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.toggle-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.toggle-row button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.toggle-row button.off { opacity: 0.4; text-decoration: line-through; }
+
+.muted { color: var(--text-muted); }
+
+footer {
+  border-top: 1px solid var(--border-subtle);
+  padding: 1.25rem 1.5rem;
+  color: var(--text-dimmed);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 768px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .chart-grid, .account-cards { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>HCP Executive Summary</h1>
+  <div class="meta">Reporting period through {{ .PeriodEnd }} &middot; Generated {{ .GeneratedAt }}</div>
+  <div class="meta">Data sources: {{ .DataSourcesLine }}</div>
+</header>
+
+<nav class="tabs">
+{{ range $i, $tab := .Tabs }}
+  <button class="tab-btn {{ $tab.AccentClass }}{{ if eq $i 0 }} active{{ end }}" data-tab="tab-{{ $tab.ID }}">{{ $tab.Label }}</button>
+{{ end }}
+  <button class="tab-btn" data-tab="tab-hcp-efficiency">HCP Cost Efficiency</button>
+  <button class="tab-btn" data-tab="tab-cluster-growth">Cluster Growth</button>
+</nav>
+
+{{ range $i, $tab := .Tabs }}
+<section class="tab-panel{{ if eq $i 0 }} active{{ end }}" id="tab-{{ $tab.ID }}">
+
+  {{ if $tab.AlertBanner }}
+  <div class="alert-banner">
+    <strong>&#9888; High-Severity Cost Anomalies Detected</strong>
+    {{ range $tab.AlertBanner }}<div>{{ . }}</div>{{ end }}
+  </div>
+  {{ end }}
+
+  <div class="kpi-grid">
+  {{ range $tab.KPICards }}
+    <div class="kpi-card">
+      <div class="kpi-label">{{ .Label }}</div>
+      <div class="kpi-value {{ .Class }}">{{ .Value }}</div>
+      {{ if .SubText }}<div class="kpi-sub {{ .SubTextClass }}">{{ .SubText }}</div>{{ end }}
+    </div>
+  {{ end }}
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>Cost by Category</h3>
+      <canvas id="{{ $tab.CategoryChart.CanvasID }}"></canvas>
+    </div>
+  </div>
+
+  <table class="sortable">
+    <thead>
+      <tr>
+        <th>Service</th>
+        {{ range $tab.CategoryMonths }}<th>{{ . }}</th>{{ end }}
+        <th>MoM &Delta;</th>
+      </tr>
+    </thead>
+    <tbody>
+    {{ range $tab.CategoryTable }}
+      <tr>
+        <td><span class="color-dot" style="background:{{ .Color }}"></span>{{ if .Rank }}<span class="rank-badge">{{ .Rank }}</span>{{ end }}{{ .ServiceName }}</td>
+        {{ range .MonthCosts }}<td class="num">{{ . }}</td>{{ end }}
+        <td class="num {{ .DeltaClass }}">{{ .DeltaFormatted }}</td>
+      </tr>
+    {{ end }}
+    </tbody>
+  </table>
+
+  {{ if $tab.GrowingAccounts }}
+  <h3>Top 5 Growing Accounts</h3>
+  <div class="account-cards">
+  {{ range $tab.GrowingAccounts }}
+    <div class="account-card">
+      <div class="account-name">{{ .AccountName }}</div>
+      <div class="account-service">{{ .ServiceName }}</div>
+      <div class="account-cost">{{ .LastMonthCostFormatted }}</div>
+      <span class="badge {{ .DeltaClass }}">{{ .DeltaFormatted }}</span>
+      <ul class="top-services">
+      {{ range .TopServices }}<li><span>{{ .Service }}</span><span>{{ .CostFormatted }}</span></li>{{ end }}
+      </ul>
+    </div>
+  {{ end }}
+  </div>
+  {{ end }}
+
+  <h3>Cost Anomalies</h3>
+  {{ if $tab.HasAnomalies }}
+  <table class="sortable">
+    <thead>
+      <tr><th>Payer</th><th>Service</th><th>Month</th><th>Impact</th><th>Severity</th><th>Method</th><th>Detail</th></tr>
+    </thead>
+    <tbody>
+    {{ range $tab.AnomalyRows }}
+      <tr>
+        <td>{{ .Payer }}</td>
+        <td>{{ .Service }}</td>
+        <td>{{ .Month }}</td>
+        <td class="num">{{ if .Direction }}<span class="{{ .DirectionClass }}">{{ .Direction }}</span> {{ end }}{{ .ImpactFormatted }}</td>
+        <td><span class="badge {{ .Severity.Class }}">{{ .Severity.Label }}</span></td>
+        <td><span class="badge {{ .Method.Class }}">{{ .Method.Label }}</span></td>
+        <td class="muted">{{ .ExtraDetail }}</td>
+      </tr>
+    {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <p class="muted">No anomalies detected in the reporting window.</p>
+  {{ end }}
+
+  {{ if $tab.HasSPData }}
+  <h3>Savings Plan Trend</h3>
+  <p>Total Net Savings (window): <span class="kpi-good">{{ $tab.SPTrend.TotalNetSavingsFormatted }}</span></p>
+  <div class="chart-grid">
+    <div class="chart-card"><canvas id="{{ $tab.SPTrend.CoverageUtilChart.CanvasID }}"></canvas></div>
+    <div class="chart-card"><canvas id="{{ $tab.SPTrend.NetSavingsChart.CanvasID }}"></canvas></div>
+  </div>
+  {{ end }}
+
+</section>
+{{ end }}
+
+<section class="tab-panel" id="tab-hcp-efficiency">
+  <div class="disclaimer-banner">
+    <strong>NOTE: CALCULATED REVENUE</strong>
+    <p>Revenue values are <strong>calculated estimates</strong> based on vCPU hours &times; standard ROSA HCP rate ($0.04275/hr). These are KPIs for performance tracking, not actual billed revenue from finance systems.</p>
+  </div>
+
+  <div class="kpi-grid">
+  {{ range .HCPEfficiency.KPICards }}
+    <div class="kpi-card">
+      <div class="kpi-label">{{ .Label }}{{ if .Tooltip }}<span class="tooltip-icon">?<span class="tooltip-content">{{ .Tooltip }}</span></span>{{ end }}</div>
+      <div class="kpi-value {{ .Class }}">{{ .Value }}</div>
+      {{ if .SubText }}<div class="kpi-sub {{ .SubTextClass }}">{{ .SubText }}</div>{{ end }}
+      {{ if .SubText2 }}<div class="kpi-sub {{ .SubText2Class }}">{{ .SubText2 }}</div>{{ end }}
+    </div>
+  {{ end }}
+  </div>
+
+  <h3>Regional Performance Heatmap</h3>
+  <div class="heatmap-controls">
+    <button class="metric-toggle active" data-metric="net_revenue">Net Revenue</button>
+    <button class="metric-toggle" data-metric="total_vcpu">Total vCPU Hours</button>
+    <button class="metric-toggle" data-metric="ext_vcpu">External vCPU Hours</button>
+    <button class="metric-toggle" data-metric="int_vcpu">Internal vCPU Hours</button>
+  </div>
+  <div class="heatmap-wrap">
+  <table class="heatmap">
+    <thead>
+      <tr><th>Region</th>{{ range .HCPEfficiency.Months }}<th>{{ . }}</th>{{ end }}<th>Total</th></tr>
+    </thead>
+    <tbody>
+    {{ range $row := .HCPEfficiency.HeatmapRows }}
+      <tr>
+        <td class="region-header">{{ $row.Region }} {{ $row.SparklineSVG }}</td>
+        {{ range $row.Cells }}
+          {{ if .Empty }}
+          <td class="heatmap-cell empty"></td>
+          {{ else }}
+          <td class="heatmap-cell"
+              style="background:{{ .BgColor }};color:{{ .TextColor }}"
+              data-region="{{ $row.Region }}" data-month="{{ .Month }}"
+              data-net_revenue="{{ .NetRevenue }}" data-total_vcpu="{{ .TotalVCPU }}"
+              data-ext_vcpu="{{ .ExtVCPU }}" data-int_vcpu="{{ .IntVCPU }}"
+              data-revenue="{{ .Revenue }}" data-mc_cost="{{ .MCCost }}" data-sc_cost="{{ .SCCost }}"
+              data-network_cost="{{ .NetworkCost }}" data-infra_cost="{{ .InfraCost }}" data-total_cost="{{ .TotalCost }}"
+              data-cost_per_vcpu="{{ .CostPerVCPU }}" data-revenue_per_vcpu="{{ .RevenuePerVCPU }}" data-margin_per_vcpu="{{ .MarginPerVCPU }}"
+              data-cluster_count="{{ .ClusterCount }}" data-ext_cluster_count="{{ .ExtClusterCount }}"></td>
+          {{ end }}
+        {{ end }}
+        <td class="heatmap-cell total-cell"
+            style="background:{{ $row.Total.BgColor }};color:{{ $row.Total.TextColor }}"
+            data-region="{{ $row.Region }}" data-month="Total"
+            data-net_revenue="{{ $row.Total.NetRevenue }}" data-total_vcpu="{{ $row.Total.TotalVCPU }}"
+            data-ext_vcpu="{{ $row.Total.ExtVCPU }}" data-int_vcpu="{{ $row.Total.IntVCPU }}"
+            data-revenue="{{ $row.Total.Revenue }}" data-mc_cost="{{ $row.Total.MCCost }}" data-sc_cost="{{ $row.Total.SCCost }}"
+            data-network_cost="{{ $row.Total.NetworkCost }}" data-infra_cost="{{ $row.Total.InfraCost }}" data-total_cost="{{ $row.Total.TotalCost }}"
+            data-cost_per_vcpu="{{ $row.Total.CostPerVCPU }}" data-revenue_per_vcpu="{{ $row.Total.RevenuePerVCPU }}" data-margin_per_vcpu="{{ $row.Total.MarginPerVCPU }}"
+            data-cluster_count="{{ $row.Total.ClusterCount }}" data-ext_cluster_count="{{ $row.Total.ExtClusterCount }}"></td>
+      </tr>
+    {{ end }}
+    </tbody>
+  </table>
+  </div>
+  <p class="heatmap-caption" id="heatmap-caption">Net Revenue ($K) &middot; Hover cells for detailed breakdown</p>
+
+  <h3>Management Cluster Cost Summary</h3>
+  <table class="sortable">
+    <thead>
+      <tr><th>Management Cluster</th><th>Service Cluster</th><th>Region</th><th>MC Cost</th><th>Customer Clusters</th><th>Internal</th><th>vCPU Hours</th></tr>
+    </thead>
+    <tbody>
+    {{ range .HCPEfficiency.MCSummaryRows }}
+      <tr>
+        <td>{{ .MCName }}</td>
+        <td>{{ .SCName }}</td>
+        <td>{{ .Region }}</td>
+        <td class="num">{{ .MCCostFormatted }}</td>
+        <td class="num">{{ .CustomerCount }}</td>
+        <td class="num">{{ .InternalCount }}</td>
+        <td class="num">{{ .VCPUHoursFormatted }}</td>
+      </tr>
+    {{ end }}
+    </tbody>
+  </table>
+
+  <h3>Customer Cluster Detail</h3>
+  <table class="sortable">
+    <thead>
+      <tr><th>Cluster</th><th>Management Cluster</th><th>Region</th><th>Classification</th><th>Organization</th><th>Billing Model</th><th>vCPU Hours</th><th>Revenue</th></tr>
+    </thead>
+    <tbody>
+    {{ range .HCPEfficiency.ClusterDetailRows }}
+      <tr>
+        <td>{{ .ClusterID }}</td>
+        <td>{{ .MCName }}</td>
+        <td>{{ .Region }}</td>
+        <td><span class="badge {{ .Classification.Class }}">{{ .Classification.Label }}</span></td>
+        <td>{{ .Organization }}</td>
+        <td>{{ .BillingModel }}</td>
+        <td class="num">{{ .VCPUHoursFormatted }}</td>
+        <td class="num">{{ .RevenueFormatted }}</td>
+      </tr>
+    {{ end }}
+    </tbody>
+  </table>
+</section>
+
+<section class="tab-panel" id="tab-cluster-growth">
+  <div class="kpi-grid">
+  {{ range .ClusterGrowth.ProductCards }}
+    <div class="kpi-card" style="border-top:3px solid {{ .Color }}">
+      <div class="kpi-label">{{ .ProductType }}</div>
+      <div class="kpi-value">{{ .CumulativeFormatted }}</div>
+      <div class="kpi-sub {{ .DeltaClass }}">MoM: {{ .DeltaFormatted }}</div>
+    </div>
+  {{ end }}
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>Cumulative Cluster Count</h3>
+      <div class="toggle-row" id="{{ .ClusterGrowth.TrendChart.CanvasID }}-toggles"></div>
+      <canvas id="{{ .ClusterGrowth.TrendChart.CanvasID }}"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Net-New Clusters per Month</h3>
+      <canvas id="{{ .ClusterGrowth.DeltaChart.CanvasID }}"></canvas>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Generated by finops-tools &middot; Data sources: {{ .DataSourcesLine }} &middot; {{ .GeneratedAt }}
+</footer>
+
+<div id="heatmap-tooltip"></div>
+
+<script>{{ .ChartJS }}</script>
+<script>
+(function () {
+  "use strict";
+
+  // ---- Tab switching (spec 8.2: simple show/hide, not client-side routing) ----
+  document.querySelectorAll(".tab-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var target = btn.getAttribute("data-tab");
+      document.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.remove("active"); });
+      document.querySelectorAll(".tab-panel").forEach(function (p) { p.classList.remove("active"); });
+      btn.classList.add("active");
+      var panel = document.getElementById(target);
+      if (panel) { panel.classList.add("active"); }
+    });
+  });
+
+  // ---- Click-to-sort tables (spec 8.2) ----
+  function cellSortValue(text) {
+    var stripped = text.replace(/[$,%+#]/g, "").trim();
+    var n = parseFloat(stripped);
+    if (!isNaN(n) && stripped !== "") { return n; }
+    return text.trim().toLowerCase();
+  }
+  document.querySelectorAll("table.sortable").forEach(function (table) {
+    var headers = table.querySelectorAll("thead th");
+    headers.forEach(function (th, colIndex) {
+      var baseLabel = th.textContent;
+      th.addEventListener("click", function () {
+        var asc = th.getAttribute("data-sort-dir") !== "asc";
+        headers.forEach(function (h) { h.removeAttribute("data-sort-dir"); h.textContent = h.textContent.replace(/ [\u2191\u2193]$/, ""); });
+        th.setAttribute("data-sort-dir", asc ? "asc" : "desc");
+        th.textContent = baseLabel + (asc ? " \u2191" : " \u2193");
+
+        var tbody = table.querySelector("tbody");
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+        rows.sort(function (r1, r2) {
+          var c1 = r1.children[colIndex], c2 = r2.children[colIndex];
+          if (!c1 || !c2) { return 0; }
+          var v1 = cellSortValue(c1.textContent), v2 = cellSortValue(c2.textContent);
+          if (typeof v1 === "number" && typeof v2 === "number") {
+            return asc ? v1 - v2 : v2 - v1;
+          }
+          if (v1 < v2) { return asc ? -1 : 1; }
+          if (v1 > v2) { return asc ? 1 : -1; }
+          return 0;
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+      });
+    });
+  });
+
+  // ---- Chart.js bootstrap (spec 8.3) ----
+  var CHART_SPECS = {{ .ChartSpecsJS }};
+
+  var CHART_DEFAULTS_APPLIED = false;
+  function applyChartDefaults() {
+    if (CHART_DEFAULTS_APPLIED || typeof Chart === "undefined") { return; }
+    Chart.defaults.color = "#8c8c8c";
+    Chart.defaults.borderColor = "#383838";
+    Chart.defaults.font.family = "'IBM Plex Sans', sans-serif";
+    CHART_DEFAULTS_APPLIED = true;
+  }
+
+  function tickFormatter(format) {
+    return function (value) {
+      if (format === "dollarK") { return "$" + Math.round(value / 1000) + "K"; }
+      if (format === "percent") { return value + "%"; }
+      if (format === "signed") { return (value > 0 ? "+" : "") + value; }
+      return value;
+    };
+  }
+
+  function buildDataset(ds, spec, index) {
+    var isLine = spec.type === "line";
+    return {
+      label: ds.label,
+      data: ds.data,
+      backgroundColor: isLine ? ds.color + "33" : ds.color,
+      borderColor: ds.color,
+      borderWidth: isLine ? 2 : 0,
+      spanGaps: !!spec.spanGaps,
+      pointRadius: spec.pointRadius != null ? spec.pointRadius : 3,
+      tension: isLine ? 0.2 : 0,
+      fill: false,
+      stack: spec.stacked ? "stack0" : undefined
+    };
+  }
+
+  function renderCharts() {
+    if (typeof Chart === "undefined") { return; }
+    applyChartDefaults();
+    CHART_SPECS.forEach(function (spec) {
+      var canvas = document.getElementById(spec.canvasId);
+      if (!canvas) { return; }
+      var datasets = spec.datasets.map(function (ds, i) { return buildDataset(ds, spec, i); });
+      var yOptions = {
+        ticks: { callback: tickFormatter(spec.yTickFormat), font: { family: "'JetBrains Mono', monospace" } },
+        stacked: !!spec.stacked,
+        grid: { color: "#383838" }
+      };
+      if (spec.yMin != null) { yOptions.min = spec.yMin; }
+      if (spec.yMax != null) { yOptions.max = spec.yMax; }
+
+      var chart = new Chart(canvas.getContext("2d"), {
+        type: spec.type,
+        data: { labels: spec.labels, datasets: datasets },
+        options: {
+          responsive: true,
+          interaction: { mode: "index", intersect: false },
+          scales: {
+            x: { stacked: !!spec.stacked, grid: { color: "#383838" }, ticks: { font: { family: "'JetBrains Mono', monospace" } } },
+            y: yOptions
+          },
+          plugins: {
+            legend: { labels: { font: { family: "'IBM Plex Sans', sans-serif" } } },
+            tooltip: { titleFont: { family: "'IBM Plex Mono', monospace" }, bodyFont: { family: "'JetBrains Mono', monospace" } }
+          }
+        }
+      });
+
+      if (spec.toggleable) {
+        var container = document.getElementById(spec.canvasId + "-toggles");
+        if (container) {
+          datasets.forEach(function (ds, i) {
+            var btn = document.createElement("button");
+            btn.textContent = ds.label;
+            btn.style.borderColor = ds.borderColor;
+            container.appendChild(btn);
+            btn.addEventListener("click", function () {
+              var meta = chart.getDatasetMeta(i);
+              meta.hidden = meta.hidden === null ? !chart.data.datasets[i].hidden : !meta.hidden;
+              btn.classList.toggle("off", !!meta.hidden);
+              chart.update();
+            });
+          });
+        }
+      }
+    });
+  }
+  renderCharts();
+
+  // ---- Regional Performance Heatmap: client-side metric toggle (spec 8.4) ----
+  var HEATMAP_METRIC_ATTR = { net_revenue: "net_revenue", total_vcpu: "total_vcpu", ext_vcpu: "ext_vcpu", int_vcpu: "int_vcpu" };
+  var HEATMAP_LABELS = { net_revenue: "Net Revenue ($K)", total_vcpu: "Total vCPU Hours (K)", ext_vcpu: "External vCPU Hours (K)", int_vcpu: "Internal vCPU Hours (K)" };
+
+  function lerpChannel(c0, c1, ratio) { return Math.round(c0 + ratio * (c1 - c0)); }
+  function lerpColor(ratio, c0, c1) {
+    var r = lerpChannel(c0[0], c1[0], ratio), g = lerpChannel(c0[1], c1[1], ratio), b = lerpChannel(c0[2], c1[2], ratio);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+  var WHITE = [255, 255, 255], GREEN = [99, 153, 61], RED = [238, 0, 0];
+
+  function recolorHeatmap(metric) {
+    var cells = document.querySelectorAll(".heatmap-cell:not(.empty)");
+    var maxPos = 0, maxNeg = 0;
+    cells.forEach(function (cell) {
+      var v = parseFloat(cell.getAttribute("data-" + metric)) || 0;
+      if (v >= 0) { maxPos = Math.max(maxPos, v); } else { maxNeg = Math.max(maxNeg, -v); }
+    });
+    cells.forEach(function (cell) {
+      var v = parseFloat(cell.getAttribute("data-" + metric)) || 0;
+      var ratio, bg;
+      if (v >= 0) {
+        ratio = maxPos > 0 ? Math.min(1, v / maxPos) : 0;
+        bg = lerpColor(ratio, WHITE, GREEN);
+      } else {
+        ratio = maxNeg > 0 ? Math.min(1, -v / maxNeg) : 0;
+        bg = lerpColor(ratio, WHITE, RED);
+      }
+      cell.style.background = bg;
+      cell.style.color = ratio > 0.55 ? "#ffffff" : "#1a1a1a";
+    });
+    var caption = document.getElementById("heatmap-caption");
+    if (caption) { caption.textContent = HEATMAP_LABELS[metric] + " \u00b7 Hover cells for detailed breakdown"; }
+  }
+
+  document.querySelectorAll(".metric-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.querySelectorAll(".metric-toggle").forEach(function (b) { b.classList.remove("active"); });
+      btn.classList.add("active");
+      recolorHeatmap(btn.getAttribute("data-metric"));
+    });
+  });
+
+  // ---- Heatmap hover tooltip (spec 8.4) ----
+  var tooltipEl = document.getElementById("heatmap-tooltip");
+  function fmtDollar(v) { return "$" + Math.round(v).toLocaleString(); }
+  function fmtK(v) { return (v / 1000).toFixed(1) + "K"; }
+  document.querySelectorAll(".heatmap-cell:not(.empty)").forEach(function (cell) {
+    cell.addEventListener("mousemove", function (e) {
+      var d = cell.dataset;
+      var netRev = parseFloat(d.net_revenue) || 0;
+      var margin = parseFloat(d.margin_per_vcpu) || 0;
+      tooltipEl.innerHTML =
+        "<strong>" + d.region + " &middot; " + d.month + "</strong><br>" +
+        "<span style='color:" + (netRev >= 0 ? "#87bb62" : "#f56e6e") + "'>Net Revenue: " + fmtDollar(netRev) + "</span><br>" +
+        "Total vCPU hrs: " + fmtK(parseFloat(d.total_vcpu) || 0) + "<hr style='border-color:#383838'>" +
+        "<span style='color:#f8ae54'>Cost/vCPU-hr: $" + (parseFloat(d.cost_per_vcpu) || 0).toFixed(4) + "</span><br>" +
+        "<span style='color:#87bb62'>Revenue/vCPU-hr: $" + (parseFloat(d.revenue_per_vcpu) || 0).toFixed(4) + "</span><br>" +
+        "<span style='color:" + (margin >= 0 ? "#87bb62" : "#f56e6e") + "'>Margin/vCPU-hr: $" + margin.toFixed(4) + "</span><br>" +
+        "External vCPU: " + fmtK(parseFloat(d.ext_vcpu) || 0) + " hrs<br>" +
+        "<span style='color:#8c8c8c'>Internal vCPU: " + fmtK(parseFloat(d.int_vcpu) || 0) + " hrs</span><hr style='border-color:#383838'>" +
+        "MC Cost: " + fmtDollar(parseFloat(d.mc_cost) || 0) + "<br>" +
+        "SC Cost: " + fmtDollar(parseFloat(d.sc_cost) || 0) + "<br>" +
+        "Network Cost: " + fmtDollar(parseFloat(d.network_cost) || 0) + "<hr style='border-color:#383838'>" +
+        "Clusters: " + (d.cluster_count || 0) + " total | " + (d.ext_cluster_count || 0) + " external";
+      tooltipEl.style.display = "block";
+      tooltipEl.style.left = (e.clientX + 16) + "px";
+      tooltipEl.style.top = (e.clientY + 16) + "px";
+    });
+    cell.addEventListener("mouseleave", function () { tooltipEl.style.display = "none"; });
+  });
+})();
+</script>
+</body>
+</html>
+{{ end }}

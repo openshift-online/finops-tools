@@ -42,3 +42,46 @@ func TestFormatChartMoney(t *testing.T) {
 		t.Errorf("small chart label = %q", got)
 	}
 }
+
+func TestFormatDollarCompact(t *testing.T) {
+	tests := []struct {
+		amount float64
+		want   string
+	}{
+		{0, "$0"},
+		{999, "$999"},
+		{1500, "$1,500"}, // non-short mode: full comma format even in the thousands
+		{45000, "$45,000"},
+		{999999, "$999,999"},
+		{1_000_000, "$1.00M"},
+		{2_500_000, "$2.50M"},
+		{-1500, "-$1,500"},
+		{-2_500_000, "-$2.50M"},
+	}
+	for _, tc := range tests {
+		if got := FormatDollarCompact(tc.amount); got != tc.want {
+			t.Errorf("FormatDollarCompact(%v) = %q, want %q", tc.amount, got, tc.want)
+		}
+	}
+}
+
+func TestFormatDollarCompactShort(t *testing.T) {
+	tests := []struct {
+		amount float64
+		want   string
+	}{
+		{0, "$0"},
+		{999, "$999"},
+		{1500, "$1.5K"},
+		{45000, "$45.0K"},
+		{1_000_000, "$1.00M"},
+		{2_500_000, "$2.50M"},
+		{-1500, "-$1.5K"},
+		{-45000, "-$45.0K"},
+	}
+	for _, tc := range tests {
+		if got := FormatDollarCompactShort(tc.amount); got != tc.want {
+			t.Errorf("FormatDollarCompactShort(%v) = %q, want %q", tc.amount, got, tc.want)
+		}
+	}
+}

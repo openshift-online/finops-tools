@@ -3,6 +3,7 @@ package costanomalies
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -45,8 +46,8 @@ func (f *fakeAnomaliesClient) GetAnomalies(
 
 func makeAnomaly(id, service, start, end string, impact, actual, expected, pct, score float64, causes []types.RootCause) types.Anomaly {
 	a := types.Anomaly{
-		AnomalyId:      aws.String(id),
-		DimensionValue: aws.String(service),
+		AnomalyId:        aws.String(id),
+		DimensionValue:   aws.String(service),
 		AnomalyStartDate: aws.String(start),
 		AnomalyEndDate:   aws.String(end),
 		AnomalyScore:     &types.AnomalyScore{CurrentScore: score, MaxScore: score},
@@ -64,6 +65,15 @@ func makeAnomaly(id, service, start, end string, impact, actual, expected, pct, 
 var testDateRange = cost.DateRange{
 	Start: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 	End:   time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+}
+
+// TestMain fixes timeNow for the whole package so clamp behavior in buildWith
+// doesn't depend on the wall clock at test-run time (testDateRange above is a
+// fixed historical window; without this, clampAnomalyLookback would silently
+// rewrite it once the real clock moves more than 90 days past June 2026).
+func TestMain(m *testing.M) {
+	timeNow = func() time.Time { return time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC) }
+	os.Exit(m.Run())
 }
 
 func payerTarget(id string) cost.AccountTarget {
@@ -374,5 +384,72 @@ func TestParseAnomalies_SortedByImpactDesc(t *testing.T) {
 	}
 	if result[0].ID != "high" || result[1].ID != "mid" || result[2].ID != "low" {
 		t.Errorf("wrong sort order: %s, %s, %s", result[0].ID, result[1].ID, result[2].ID)
+	}
+}
+
+func TestClampAnomalyLookback_NoClampWithinWindow(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	dr := cost.DateRange{
+		Start: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), // 30 days back, within 90
+		End:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	got := clampAnomalyLookback(dr, now)
+
+	if !got.Start.Equal(dr.Start) {
+		t.Errorf("Start = %v, want unchanged %v", got.Start, dr.Start)
+	}
+	if !got.End.Equal(dr.End) {
+		t.Errorf("End = %v, want unchanged %v", got.End, dr.End)
+	}
+}
+
+func TestClampAnomalyLookback_ClampsWhenBeyondAWSLimit(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	dr := cost.DateRange{
+		Start: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), // ~183 days back, exceeds 90
+		End:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	got := clampAnomalyLookback(dr, now)
+
+	wantStart := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC) // matches AWS's own reported limit
+	if !got.Start.Equal(wantStart) {
+		t.Errorf("Start = %v, want clamped to %v", got.Start, wantStart)
+	}
+	if !got.End.Equal(dr.End) {
+		t.Errorf("End = %v, want unchanged %v", got.End, dr.End)
+	}
+}
+
+func TestClampAnomalyLookback_ExactlyAtLimitIsNotClamped(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	dr := cost.DateRange{
+		Start: now.AddDate(0, 0, -maxAnomalyLookbackDays),
+		End:   now,
+	}
+
+	got := clampAnomalyLookback(dr, now)
+
+	if !got.Start.Equal(dr.Start) {
+		t.Errorf("Start = %v, want unchanged %v (exactly at the limit)", got.Start, dr.Start)
+	}
+}
+
+func TestBuildWith_ClampsWideDateRangeToAWSLimit(t *testing.T) {
+	fake := &fakeAnomaliesClient{pages: [][]types.Anomaly{{}}}
+	wideRange := cost.DateRange{
+		Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), // far more than 90 days before the fixed timeNow
+		End:   time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
+	}
+
+	report, err := buildWith(context.Background(), fakeFactory(fake), []cost.AccountTarget{payerTarget("123456789012")}, wideRange)
+	if err != nil {
+		t.Fatalf("buildWith returned error: %v", err)
+	}
+
+	wantStart := timeNow().AddDate(0, 0, -maxAnomalyLookbackDays).Format("2006-01-02")
+	if report.StartDate != wantStart {
+		t.Errorf("StartDate = %q, want clamped %q", report.StartDate, wantStart)
 	}
 }

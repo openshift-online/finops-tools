@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openshift-online/finops-tools/core/cost"
 	corereport "github.com/openshift-online/finops-tools/core/report"
 	coresp "github.com/openshift-online/finops-tools/core/report/savingsplans"
-	"github.com/openshift-online/finops-tools/core/cost"
 )
 
 func TestRenderCostsHTML(t *testing.T) {
@@ -209,9 +209,9 @@ func TestRenderSavingsPlansHTML_linkedOmitsStatusColumn(t *testing.T) {
 		StartDate:   "2026-01-01",
 		EndDate:     "2026-03-31",
 		Accounts: []coresp.AccountReport{{
-			AccountName: "Linked Member",
-			IsLinked:    true,
-			CoverageAverage: coresp.PeriodAverage{Percentage: 72.0, OK: true},
+			AccountName:        "Linked Member",
+			IsLinked:           true,
+			CoverageAverage:    coresp.PeriodAverage{Percentage: 72.0, OK: true},
 			UtilizationAverage: coresp.PeriodAverage{Percentage: 88.0, OK: true},
 			Coverage: []coresp.MonthlyMetric{
 				{Month: "2026-01", Percentage: 72.0},

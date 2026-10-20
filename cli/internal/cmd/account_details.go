@@ -398,7 +398,7 @@ func enrichAccountDetailsOpenShift(
 	}
 
 	status.Step("Looking up OpenShift clusters in Snowflake…")
-	querier, err := openSnowflakeMartQuerier(ctx, cfg, snowflakeAlias)
+	querier, err := openSnowflakeMartQuerier(ctx, cfg, snowflakeAlias, hcmFinOpsDatabase, hcmFinOpsSchema)
 	if err != nil {
 		status.Step("Skipping OpenShift clusters: " + err.Error())
 		accountreview.ApplyOpenShiftClustersError(reports, err)
