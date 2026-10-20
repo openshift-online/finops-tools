@@ -81,12 +81,12 @@ func openSnowflakeQuerierFor(ctx context.Context, cfgPath, snowflakeAlias, db, s
 	if err != nil {
 		return nil, err
 	}
-	return openSnowflakeMartQuerier(ctx, cfg, snowflakeAlias)
+	return openSnowflakeMartQuerier(ctx, cfg, snowflakeAlias, db, schema)
 }
 
-// openSnowflakeMartQuerier opens a Dataverse OAuth connection to HCMFINOPS_DB.MARTS
-// for the resolved Snowflake account alias.
-func openSnowflakeMartQuerier(ctx context.Context, cfg configstore.File, snowflakeAlias string) (hcphierarchy.SnowflakeQueryer, error) {
+// openSnowflakeMartQuerier opens a Dataverse OAuth connection to the given
+// db.schema for the resolved Snowflake account alias.
+func openSnowflakeMartQuerier(ctx context.Context, cfg configstore.File, snowflakeAlias, db, schema string) (hcphierarchy.SnowflakeQueryer, error) {
 	alias, acct, err := cfg.ResolveSnowflakeAccountAlias(snowflakeAlias)
 	if err != nil {
 		return nil, err
