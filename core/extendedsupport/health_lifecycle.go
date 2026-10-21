@@ -15,7 +15,7 @@ func normalizeLifecycleName(value string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", " ", "_").Replace(strings.TrimSpace(value)))
 }
 
-func (c *HealthLifecycleCatalog) lookup(service Service, engine, version, region string) (healthLifecycle, error) {
+func (c *HealthLifecycleCatalog) lookup(service Service, engine, version, region string, now time.Time) (healthLifecycle, error) {
 	if c == nil {
 		return healthLifecycle{}, fmt.Errorf("AWS Health lifecycle catalog was not loaded")
 	}
@@ -38,10 +38,27 @@ func (c *HealthLifecycleCatalog) lookup(service Service, engine, version, region
 			versions = append(versions, parts[0])
 		}
 	}
+	var failures []string
 	for _, candidate := range versions {
 		if events, exists := entries[healthVersionKey{service: service, engine: engine, version: candidate}]; exists {
-			return parseHealthLifecycle(events, region)
+			lifecycle, err := parseHealthLifecycle(events, region)
+			// A future standard-support end (or extended-support start) is enough
+			// to classify a version as not yet in extended support. Once those
+			// boundaries are reached, an extended-support end is required too.
+			if err == nil && lifecycle.extendedEnd == nil && !now.Before(*lifecycle.standardEnd) &&
+				(lifecycle.extendedStart == nil || !now.Before(*lifecycle.extendedStart)) {
+				err = fmt.Errorf("AWS Health extended support end date is missing")
+			}
+			if err == nil {
+				return lifecycle, nil
+			}
+			// An existing but unusable entry must not hide a usable broader
+			// version entry. Each candidate must supply its own valid schedule.
+			failures = append(failures, fmt.Sprintf("version %s (%v)", candidate, err))
 		}
+	}
+	if len(failures) > 0 {
+		return healthLifecycle{}, fmt.Errorf("AWS Health lifecycle information for %s %s %s is unusable in region %s; %s", service, engine, version, region, strings.Join(failures, "; "))
 	}
 	return healthLifecycle{}, fmt.Errorf("AWS Health lifecycle information for %s %s %s is missing", service, engine, version)
 }
@@ -142,7 +159,7 @@ func parseHealthLifecycle(events []healthtypes.LifecycleEvent, region string) (h
 }
 
 func classifyHealthSupport(catalog *HealthLifecycleCatalog, warning ResourceWarning, now time.Time) (*Record, *ResourceWarning) {
-	lifecycle, err := catalog.lookup(warning.Service, warning.Engine, warning.EngineVersion, warning.Region)
+	lifecycle, err := catalog.lookup(warning.Service, warning.Engine, warning.EngineVersion, warning.Region, now)
 	if err != nil {
 		warning.Message = warningMessage(err)
 		return nil, &warning
@@ -152,10 +169,6 @@ func classifyHealthSupport(catalog *HealthLifecycleCatalog, warning ResourceWarn
 	}
 	if lifecycle.extendedStart != nil && now.Before(*lifecycle.extendedStart) {
 		return nil, nil
-	}
-	if lifecycle.extendedEnd == nil {
-		warning.Message = "AWS Health extended support end date is missing"
-		return nil, &warning
 	}
 	if !now.Before(*lifecycle.extendedEnd) {
 		warning.Message = "engine version is past extended support according to AWS Health"
