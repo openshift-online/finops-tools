@@ -178,6 +178,25 @@ func TestHealthCatalogSharesConcurrentLoadsAndRetriesFailures(t *testing.T) {
 	}
 }
 
+func TestHealthLookupRecoversAfterCatalogLoad(t *testing.T) {
+	catalog := NewHealthLifecycleCatalog()
+	if _, err := catalog.lookup(ServiceElastiCache, "redis", "5.0.6", "us-east-1", eksTestNow); err == nil {
+		t.Fatal("lookup succeeded without a catalog")
+	}
+	catalog.newClient = func(aws.Config) HealthAPI {
+		return fakeHealthAPI(func(context.Context, *health.DescribeServiceLifecycleInput) (*health.DescribeServiceLifecycleOutput, error) {
+			return &health.DescribeServiceLifecycleOutput{ServiceLifecycles: testHealthEntries()}, nil
+		})
+	}
+	if err := catalog.load(context.Background(), aws.Config{}, "111111111111"); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle, err := catalog.lookup(ServiceElastiCache, "redis", "5.0.6", "us-east-1", eksTestNow)
+	if err != nil || lifecycle.standardEnd == nil || lifecycle.extendedEnd == nil {
+		t.Fatalf("lookup retained the pre-load failure: lifecycle=%+v err=%v", lifecycle, err)
+	}
+}
+
 func TestHealthPreloadUsesCatalogCredentialsOnceWithoutAssumingMembers(t *testing.T) {
 	catalog := NewHealthLifecycleCatalog()
 	apiCalls, payerLoads, memberLoads := 0, 0, 0
@@ -259,7 +278,7 @@ func TestHealthMilestonesUseAPIInstantsAndRegionalOverrides(t *testing.T) {
 	end := start.AddDate(2, 0, 0)
 	for _, region := range []string{"us-east-1", "us-west-2"} {
 		events := []healthtypes.LifecycleEvent{healthEvent("STANDARD_SUPPORT_END", start, "all"), healthEvent("EXTENDED_SUPPORT_END", end, "all"), healthEvent("STANDARD_SUPPORT_END", start.AddDate(1, 0, 0), "us-west-2")}
-		lifecycle, err := parseHealthLifecycle(events, region)
+		lifecycle, err := parseHealthLifecycle(events, region, start)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -299,7 +318,7 @@ func TestHealthRejectsMissingAmbiguousAndConflictingMilestones(t *testing.T) {
 		{"reversed", []healthtypes.LifecycleEvent{healthEvent("END_OF_STANDARD_SUPPORT", end, "all"), healthEvent("END_OF_EXTENDED_SUPPORT", start, "all")}, "inconsistent"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseHealthLifecycle(tc.events, "us-east-1")
+			_, err := parseHealthLifecycle(tc.events, "us-east-1", start)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error=%v want=%s", err, tc.want)
 			}
@@ -315,8 +334,12 @@ func TestHealthGenericMilestonesRequireContext(t *testing.T) {
 		{healthEvent("END_OF_STANDARD_SUPPORT", start, "all"), healthEvent("END_OF_SUPPORT", end, "all")},
 		{{LifecycleEventType: aws.String("END_OF_SUPPORT"), Date: &start, ImpactRisks: []string{"BILLING"}, Regions: []string{"all"}}, healthEvent("END_OF_LIFE", end, "all")},
 	} {
-		lifecycle, err := parseHealthLifecycle(events, "us-east-1")
-		if err != nil || !lifecycle.standardEnd.Equal(start) || !lifecycle.extendedEnd.Equal(end) {
+		lifecycle, err := parseHealthLifecycle(events, "us-east-1", start)
+		terminal := lifecycle.extendedEnd
+		if terminal == nil {
+			terminal = lifecycle.endOfLife
+		}
+		if err != nil || lifecycle.standardEnd == nil || !lifecycle.standardEnd.Equal(start) || terminal == nil || !terminal.Equal(end) {
 			t.Fatal(lifecycle, err)
 		}
 	}
@@ -329,7 +352,18 @@ func TestHealthEntryIdentifiers(t *testing.T) {
 		{"ELASTICACHE", "valkey/8.2", "", "valkey", "8.2"},
 		{"OPENSEARCH", "OpenSearch_2.19", "", "opensearch", "2.19"},
 		{"ES", "elasticsearch/7.10", "", "elasticsearch", "7.10"},
+		{"ES", "es/7.10", "Amazon OpenSearch Elasticsearch 7.10", "elasticsearch", "7.10"},
+		{"ES", "es/7.10", "", "elasticsearch", "7.10"},
+		{"ES", " ES/7.10 ", "", "elasticsearch", "7.10"},
+		{"OPENSEARCH", "es_7.10", "", "elasticsearch", "7.10"},
+		{"OPENSEARCH_SERVICE", "es:7.10", "", "elasticsearch", "7.10"},
 		{"OPENSEARCH", "7.10", "Amazon Elasticsearch 7.10", "elasticsearch", "7.10"},
+		{"ES", "7.10", "Amazon OpenSearch Elasticsearch 7.10", "elasticsearch", "7.10"},
+		{"ES", "os/2.11", "Amazon OpenSearch 2.11", "opensearch", "2.11"},
+		{"ES", "os/2.11", "", "opensearch", "2.11"},
+		{"ES", " OS/2.11 ", "", "opensearch", "2.11"},
+		{"OPENSEARCH", "os_2.11", "", "opensearch", "2.11"},
+		{"OPENSEARCH_SERVICE", "os:2.11", "", "opensearch", "2.11"},
 	} {
 		t.Run(fmt.Sprint(tc), func(t *testing.T) {
 			key, ok := healthEntryKey(healthtypes.ServiceLifecycle{Service: aws.String(tc.service), Version: aws.String(tc.version), Title: aws.String(tc.title)})

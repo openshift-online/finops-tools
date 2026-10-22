@@ -54,6 +54,7 @@ func TestEKSClassifiesClustersUsingVersionDates(t *testing.T) {
 		name    string
 		change  func(*ekstypes.Cluster, *ekstypes.ClusterVersionInformation)
 		record  bool
+		past    bool
 		warning string
 	}{
 		{name: "extended support", record: true},
@@ -68,10 +69,14 @@ func TestEKSClassifiesClustersUsingVersionDates(t *testing.T) {
 		{name: "standard end boundary", record: true, change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) {
 			v.EndOfStandardSupportDate = &eksTestNow
 		}},
-		{name: "extended end boundary", warning: "past extended support", change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) {
+		{name: "extended end boundary", past: true, change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) {
 			v.EndOfExtendedSupportDate = &eksTestNow
 		}},
-		{name: "unsupported", warning: "past extended support", change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) {
+		{name: "unsupported with expired date", past: true, change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) {
+			v.EndOfExtendedSupportDate = aws.Time(eksTestNow.Add(-time.Hour))
+			v.VersionStatus = ekstypes.VersionStatusUnsupported
+		}},
+		{name: "unsupported", warning: "marked unsupported", change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) {
 			v.VersionStatus = ekstypes.VersionStatusUnsupported
 		}},
 		{name: "missing standard date", warning: "standard support end date is missing", change: func(_ *ekstypes.Cluster, v *ekstypes.ClusterVersionInformation) { v.EndOfStandardSupportDate = nil }},
@@ -129,6 +134,13 @@ func TestEKSClassifiesClustersUsingVersionDates(t *testing.T) {
 			}
 			if catalogCalls != 1 || len(result.Records) != wantRecords || result.Summary.TotalCount != wantRecords {
 				t.Fatalf("catalogCalls=%d result=%+v", catalogCalls, result)
+			}
+			if tc.past {
+				if len(result.Summary.PastExtendedSupportResources) != 1 || result.Summary.PastExtendedSupportResources[0].ResourceID != "test-cluster" || !result.Summary.PastExtendedSupportResources[0].ExtendedSupportEndDate.Equal(*version.EndOfExtendedSupportDate) {
+					t.Fatalf("past extended support = %+v", result.Summary.PastExtendedSupportResources)
+				}
+			} else if len(result.Summary.PastExtendedSupportResources) != 0 {
+				t.Fatalf("unexpected past extended support = %+v", result.Summary.PastExtendedSupportResources)
 			}
 			if tc.warning != "" {
 				if len(result.Summary.UnclassifiedResources) != 1 || !strings.Contains(result.Summary.UnclassifiedResources[0].Message, tc.warning) || result.Summary.UnclassifiedResources[0].Service != ServiceEKS {

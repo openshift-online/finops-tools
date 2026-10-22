@@ -167,6 +167,21 @@ func TestListRDSExtendedSupportWithClient(t *testing.T) {
 	if second.Tags["owner"] != "jdoe" {
 		t.Fatalf("tags = %v", second.Tags)
 	}
+	// Published extended-support end dates separate expired databases at the
+	// boundary; resources without a published end retain their classification.
+	for _, at := range []time.Time{extendedEnd.Add(-time.Nanosecond), extendedEnd, extendedEnd.Add(time.Hour)} {
+		classified := buildResult(result.Records, nil, nil, nil, at)
+		wantCurrent := 1
+		if at.Before(extendedEnd) {
+			wantCurrent = 2
+		}
+		if classified.Summary.TotalCount != wantCurrent || len(classified.Summary.PastExtendedSupportResources) != 2-wantCurrent || len(classified.Summary.UnclassifiedResources) != 0 {
+			t.Fatalf("at %s: %+v", at, classified)
+		}
+		if past := classified.Summary.PastExtendedSupportResources; len(past) > 0 && (past[0].ResourceID != "db-old" || past[0].Tags["owner"] != "jdoe") {
+			t.Fatalf("past extended support = %+v", past)
+		}
+	}
 }
 
 func TestListRDSExtendedSupportSurfacesInstanceError(t *testing.T) {

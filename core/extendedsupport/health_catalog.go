@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/health"
@@ -23,13 +24,26 @@ type healthVersionKey struct {
 	engine, version string
 }
 
+type healthLookupKey struct {
+	version healthVersionKey
+	region  string
+	now     time.Time
+}
+
+type healthLookupResult struct {
+	lifecycle healthLifecycle
+	err       error
+}
+
 // HealthLifecycleCatalog caches one complete, immutable catalog for a command run.
-// It is shared across accounts, regions, and the skipped-account retry. Failed
+// It is shared across accounts, regions, and the skipped-account retry. Resolved
+// lookups are cached by version, region, and scan timestamp. Failed catalog
 // requests are cached by credential source so member accounts do not each repeat
 // a denied payer request. The zero value is usable; do not copy after first use.
 type HealthLifecycleCatalog struct {
 	mu        sync.Mutex
 	entries   map[healthVersionKey][]healthtypes.LifecycleEvent
+	lookups   map[healthLookupKey]healthLookupResult
 	pending   chan struct{}
 	failures  map[string]error
 	err       error
@@ -161,6 +175,16 @@ func healthEntryKey(entry healthtypes.ServiceLifecycle) (healthVersionKey, bool)
 	}
 	if engine == "redis-oss" || engine == "redisoss" {
 		engine = "redis"
+	}
+	// Health puts both engines under service ES, using es/ and os/ prefixes.
+	// Normalize the engine separately so each matches domain discovery.
+	if service == ServiceOpenSearch {
+		switch engine {
+		case "es":
+			engine = "elasticsearch"
+		case "os":
+			engine = "opensearch"
+		}
 	}
 	if service == ServiceElastiCache && engine != "redis" && engine != "valkey" && engine != "memcached" {
 		return healthVersionKey{}, false

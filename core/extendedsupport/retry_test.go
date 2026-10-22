@@ -49,6 +49,8 @@ func TestRetrySkippedAccountsAfterInitialScan(t *testing.T) {
 			records: []Record{
 				{AccountID: success, Region: "us-east-1", Service: ServiceRDS, ResourceID: "original"},
 				{AccountID: recoverCredentials, Region: "us-east-1", Service: ServiceRDS, ResourceID: "recovered"},
+				{AccountID: success, Region: "us-east-1", Service: ServiceRDS, ResourceID: "past-original", EndOfLifeDate: aws.Time(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))},
+				{AccountID: recoverCredentials, Region: "us-east-1", Service: ServiceRDS, ResourceID: "past-recovered", ExtendedSupportEndDate: aws.Time(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))},
 			},
 			warnings: []RegionWarning{{AccountID: success, Region: "us-east-1", Message: "partial discovery"}},
 			unclassified: []ResourceWarning{
@@ -78,6 +80,7 @@ func TestRetrySkippedAccountsAfterInitialScan(t *testing.T) {
 	}
 	initial.Summary.SkippedAccounts = append(initial.Summary.SkippedAccounts, AccountWarning{AccountID: missingTarget, Message: "no retry target"})
 	initial.Summary.BillingSelection = &BillingSelection{PayerAccountID: "123456789012", SelectedAccountCount: 5}
+	initial.Summary.PastExtendedSupportResources = append(initial.Summary.PastExtendedSupportResources, Record{AccountID: recoverCredentials, ResourceID: "outdated-retry-finding"})
 	before, _ := json.Marshal(initial)
 	// A repeated target must still be attempted only once in the retry pass.
 	q.Targets = append(q.Targets, q.Targets[1])
@@ -93,6 +96,9 @@ func TestRetrySkippedAccountsAfterInitialScan(t *testing.T) {
 	}
 	if result.Records[0].ResourceID != "original" || result.Records[1].ResourceID != "recovered" {
 		t.Fatalf("records = %+v", result.Records)
+	}
+	if past := result.Summary.PastExtendedSupportResources; len(past) != 2 || past[0].ResourceID != "past-original" || past[0].EndOfLifeDate == nil || past[1].ResourceID != "past-recovered" {
+		t.Fatalf("past extended support = %+v", past)
 	}
 	if result.Summary.BillingSelection != initial.Summary.BillingSelection {
 		t.Fatal("retry lost the billing selection metadata")

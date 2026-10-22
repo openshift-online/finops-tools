@@ -32,6 +32,7 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 		return result, nil
 	}
 	q.Targets = targets
+	q = q.withDefaults()
 	if q.HealthLifecycleCatalog != nil {
 		q.HealthLifecycleCatalog.retryFailures()
 	}
@@ -43,6 +44,11 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 	// Build new slices so merging does not mutate the original result.
 	var records []Record
 	for _, record := range result.Records {
+		if !retried[record.AccountID] {
+			records = append(records, record)
+		}
+	}
+	for _, record := range result.Summary.PastExtendedSupportResources {
 		if !retried[record.AccountID] {
 			records = append(records, record)
 		}
@@ -66,10 +72,11 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 		}
 	}
 	merged := buildResult(
-		append(records, retry.Records...),
+		append(append(records, retry.Records...), retry.Summary.PastExtendedSupportResources...),
 		append(regions, retry.Summary.SkippedRegions...),
 		append(resources, retry.Summary.UnclassifiedResources...),
 		append(accounts, retry.Summary.SkippedAccounts...),
+		q.Now,
 	)
 	merged.Summary.BillingSelection = result.Summary.BillingSelection
 	merged.Summary.LifecycleWarnings = retry.Summary.LifecycleWarnings

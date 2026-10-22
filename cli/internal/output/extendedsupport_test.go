@@ -73,6 +73,101 @@ func TestWriteExtendedSupportReportsUnknownResources(t *testing.T) {
 	}
 }
 
+func TestWriteExtendedSupportSeparatesPastSupportFromUnknown(t *testing.T) {
+	for _, current := range []bool{false, true} {
+		t.Run(map[bool]string{false: "no current findings", true: "with current findings"}[current], func(t *testing.T) {
+			r := fixtureExtendedSupportResult()
+			past := r.Records[0]
+			past.ResourceID = "db-expired"
+			r.Summary.PastExtendedSupportResources = []extendedsupport.Record{past}
+			r.Summary.UnclassifiedResources = []extendedsupport.ResourceWarning{{
+				AccountID: past.AccountID, Region: past.Region, Service: past.Service, ResourceType: past.ResourceType,
+				ResourceID: "db-unknown", Message: "lifecycle information is missing",
+			}}
+			if !current {
+				r.Records = nil
+				r.Summary.TotalCount = 0
+				r.Summary.ByService = nil
+				r.Summary.ByAccount = nil
+			}
+			var pretty bytes.Buffer
+			if err := WriteExtendedSupportListResult(&pretty, FormatPrettyPrint, r); err != nil {
+				t.Fatal(err)
+			}
+			parts := strings.Split(pretty.String(), "\nPast extended support\n")
+			if len(parts) != 2 || !strings.Contains(parts[0], "Support status unknown") || !strings.Contains(parts[0], "db-unknown") || strings.Contains(parts[0], "db-expired") || !strings.Contains(parts[1], "db-expired") || strings.Contains(parts[1], "db-unknown") {
+				t.Fatalf("expired and unknown resources are not separated:\n%s", &pretty)
+			}
+			for _, want := range []string{"Resources past extended support:  1", "EXT SUPPORT ENDS", "2026-12-31"} {
+				if !strings.Contains(pretty.String(), want) {
+					t.Fatalf("missing %q:\n%s", want, &pretty)
+				}
+			}
+			var encoded bytes.Buffer
+			if err := WriteExtendedSupportListResult(&encoded, FormatJSON, r); err != nil {
+				t.Fatal(err)
+			}
+			var decoded extendedsupport.Result
+			if err := json.Unmarshal(encoded.Bytes(), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(encoded.String(), `"past_extended_support_resources"`) || len(decoded.Summary.PastExtendedSupportResources) != 1 || decoded.Summary.PastExtendedSupportResources[0].ResourceID != "db-expired" || !decoded.Summary.PastExtendedSupportResources[0].ExtendedSupportEndDate.Equal(*past.ExtendedSupportEndDate) || len(decoded.Summary.UnclassifiedResources) != 1 || decoded.Summary.TotalCount != len(r.Records) {
+				t.Fatalf("JSON = %s", &encoded)
+			}
+			var csv bytes.Buffer
+			if err := WriteExtendedSupportListResult(&csv, FormatCSV, r); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(csv.String(), "db-expired") || strings.Contains(csv.String(), "db-unknown") || strings.Contains(csv.String(), "db-old") != current {
+				t.Fatalf("CSV must contain only current extended-support findings: %s", &csv)
+			}
+		})
+	}
+}
+
+func TestWriteExtendedSupportEndOfLifeWithoutSupportDates(t *testing.T) {
+	endOfLife := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	r := extendedsupport.Result{Summary: extendedsupport.Summary{
+		PastExtendedSupportResources: []extendedsupport.Record{{
+			AccountID: "111111111111", Region: "us-east-1", Service: extendedsupport.ServiceOpenSearch,
+			ResourceType: extendedsupport.ResourceTypeOpenSearchDomain, ResourceID: "domain-eol",
+			Engine: "elasticsearch", EngineVersion: "5.1", EndOfLifeDate: &endOfLife,
+		}},
+	}}
+	var pretty bytes.Buffer
+	if err := WriteExtendedSupportListResult(&pretty, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Past extended support", "domain-eol", "END OF LIFE", "2026-10-22", "—"} {
+		if !strings.Contains(pretty.String(), want) {
+			t.Fatalf("missing %q in %s", want, &pretty)
+		}
+	}
+	if strings.Contains(pretty.String(), "0001-01-01") || strings.Contains(pretty.String(), "Support status unknown") {
+		t.Fatalf("end of life resource has invalid output: %s", &pretty)
+	}
+	var encoded bytes.Buffer
+	if err := WriteExtendedSupportListResult(&encoded, FormatJSON, r); err != nil {
+		t.Fatal(err)
+	}
+	var decoded extendedsupport.Result
+	if err := json.Unmarshal(encoded.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	past := decoded.Summary.PastExtendedSupportResources
+	if len(past) != 1 || past[0].EndOfLifeDate == nil || !past[0].EndOfLifeDate.Equal(endOfLife) || decoded.Summary.TotalCount != 0 || len(decoded.Summary.UnclassifiedResources) != 0 {
+		t.Fatalf("JSON = %s", &encoded)
+	}
+	for _, unwanted := range []string{"standard_support_end_date", "extended_support_end_date", "0001-01-01"} {
+		if strings.Contains(encoded.String(), unwanted) {
+			t.Fatalf("JSON fabricated %q: %s", unwanted, &encoded)
+		}
+	}
+	if !strings.Contains(encoded.String(), `"end_of_life_date"`) {
+		t.Fatal(encoded.String())
+	}
+}
+
 func TestWriteExtendedSupportListResultCSV(t *testing.T) {
 	buf := new(bytes.Buffer)
 	if err := WriteExtendedSupportListResult(buf, FormatCSV, fixtureExtendedSupportResult()); err != nil {

@@ -61,6 +61,8 @@ credentials and shared across regions, accounts, and the final retry pass.
 AWS Health timestamps and regional applicability determine support status.
 Missing, ambiguous, or inaccessible lifecycle data produces warnings; there are
 no bundled support schedules or offline fallbacks.
+Versions with only applicable supported lifecycle events are treated as supported
+without requiring cutoff dates and omitted from findings and unknown-status warnings.
 Node-based caches and serverless caches are checked. Replication-group member
 cache clusters are reported individually; their parent group is not counted again.
 ElastiCache engine/version eligibility comes from the Health catalog.
@@ -68,6 +70,13 @@ OpenSearch Service checks both OpenSearch and legacy Elasticsearch domains using
 ListDomainNames and DescribeDomain.
 Unknown versions produce resource warnings. OpenSearch Serverless is excluded
 because its engine versions are managed by AWS.
+Resources at or past a known extended-support end date appear in a separate
+"Past extended support" section and summary.past_extended_support_resources in JSON.
+They are excluded from the current Extended Support count and Support status unknown.
+CSV contains only resources currently in Extended Support.
+AWS Health end_of_life events also qualify for Past extended support once their
+regional date is reached, even without standard or extended support dates.
+The end-of-life date is shown separately in the table and end_of_life_date in JSON.
 
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions

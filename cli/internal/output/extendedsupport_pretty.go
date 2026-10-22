@@ -23,10 +23,15 @@ func writeExtendedSupportPretty(w io.Writer, r extendedsupport.Result) error {
 	if err := writeExtendedSupportResourceWarnings(w, s, r.Summary.UnclassifiedResources); err != nil {
 		return err
 	}
+	if len(r.Summary.PastExtendedSupportResources) > 0 {
+		if err := writeExtendedSupportResourceTable(w, s, "Past extended support", r.Summary.PastExtendedSupportResources); err != nil {
+			return err
+		}
+	}
 	if len(r.Records) == 0 {
 		return nil
 	}
-	return writeExtendedSupportDetailTable(w, s, r.Records)
+	return writeExtendedSupportResourceTable(w, s, "Resources in extended support", r.Records)
 }
 
 func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result) error {
@@ -49,6 +54,11 @@ func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result
 	}
 	if _, err := fmt.Fprintf(w, "  %-*s  %s\n", len("Resources in extended support:"), label, value); err != nil {
 		return err
+	}
+	if count := len(r.Summary.PastExtendedSupportResources); count > 0 {
+		if _, err := fmt.Fprintf(w, "  Resources past extended support:  %d\n", count); err != nil {
+			return err
+		}
 	}
 
 	if len(r.Summary.ByService) > 0 {
@@ -177,11 +187,10 @@ func writeExtendedSupportResourceWarnings(w io.Writer, s styler, warnings []exte
 	return nil
 }
 
-func writeExtendedSupportDetailTable(w io.Writer, s styler, records []extendedsupport.Record) error {
+func writeExtendedSupportResourceTable(w io.Writer, s styler, title string, records []extendedsupport.Record) error {
 	if _, err := fmt.Fprintln(w); err != nil {
 		return err
 	}
-	title := "Resources in extended support"
 	if s.enabled {
 		title = s.bold(s.cyan(title))
 	}
@@ -190,7 +199,7 @@ func writeExtendedSupportDetailTable(w io.Writer, s styler, records []extendedsu
 	}
 
 	table := newExtendedSupportTable(w)
-	table.SetHeader([]string{
+	headers := []string{
 		cell(s, s.bold, "ACCOUNT"),
 		cell(s, s.bold, "REGION"),
 		cell(s, s.bold, "SERVICE"),
@@ -200,13 +209,28 @@ func writeExtendedSupportDetailTable(w io.Writer, s styler, records []extendedsu
 		cell(s, s.bold, "VERSION"),
 		cell(s, s.bold, "STD SUPPORT ENDED"),
 		cell(s, s.bold, "EXT SUPPORT ENDS"),
-	})
+	}
+	showEndOfLife := false
 	for _, rec := range records {
+		if rec.EndOfLifeDate != nil {
+			showEndOfLife = true
+			break
+		}
+	}
+	if showEndOfLife {
+		headers = append(headers, cell(s, s.bold, "END OF LIFE"))
+	}
+	table.SetHeader(headers)
+	for _, rec := range records {
+		standardEnd := "—"
+		if !rec.StandardSupportEndDate.IsZero() {
+			standardEnd = rec.StandardSupportEndDate.Format("2006-01-02")
+		}
 		extendedEnd := "—"
 		if rec.ExtendedSupportEndDate != nil {
 			extendedEnd = rec.ExtendedSupportEndDate.Format("2006-01-02")
 		}
-		table.Append([]string{
+		row := []string{
 			rec.AccountID,
 			rec.Region,
 			string(rec.Service),
@@ -214,9 +238,17 @@ func writeExtendedSupportDetailTable(w io.Writer, s styler, records []extendedsu
 			rec.ResourceID,
 			rec.Engine,
 			rec.EngineVersion,
-			rec.StandardSupportEndDate.Format("2006-01-02"),
+			standardEnd,
 			extendedEnd,
-		})
+		}
+		if showEndOfLife {
+			endOfLife := "—"
+			if rec.EndOfLifeDate != nil {
+				endOfLife = rec.EndOfLifeDate.Format("2006-01-02")
+			}
+			row = append(row, endOfLife)
+		}
+		table.Append(row)
 	}
 	table.Render()
 	return nil

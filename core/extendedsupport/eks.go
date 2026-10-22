@@ -87,8 +87,8 @@ func (l awsEKSLister) ListEKSExtendedSupport(ctx context.Context, cfg aws.Config
 				warning.Message = "extended support end date is missing"
 			case version.EndOfExtendedSupportDate != nil && !version.EndOfExtendedSupportDate.After(*version.EndOfStandardSupportDate):
 				warning.Message = "EKS support dates are inconsistent"
-			case version.VersionStatus == ekstypes.VersionStatusUnsupported || (version.EndOfExtendedSupportDate != nil && !now.Before(*version.EndOfExtendedSupportDate)):
-				warning.Message = "Kubernetes version is past extended support"
+			case version.VersionStatus == ekstypes.VersionStatusUnsupported && (version.EndOfExtendedSupportDate == nil || now.Before(*version.EndOfExtendedSupportDate)):
+				warning.Message = "Kubernetes version is marked unsupported without a passed extended support end date"
 			case now.Before(*version.EndOfStandardSupportDate):
 				continue
 			case version.EndOfExtendedSupportDate == nil || version.EndOfExtendedSupportDate.IsZero():

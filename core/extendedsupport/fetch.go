@@ -92,7 +92,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 		return Result{}, err
 	}
 
-	result := buildResult(records, warnings, unclassified, skippedAccounts)
+	result := buildResult(records, warnings, unclassified, skippedAccounts, now)
 	if _, cache := serviceSet[ServiceElastiCache]; cache {
 		result.Summary.LifecycleWarnings = q.HealthLifecycleCatalog.warnings()
 	} else if _, search := serviceSet[ServiceOpenSearch]; search {
@@ -101,19 +101,34 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	return result, nil
 }
 
-func buildResult(records []Record, warnings []RegionWarning, unclassified []ResourceWarning, skippedAccounts []AccountWarning) Result {
+func buildResult(records []Record, warnings []RegionWarning, unclassified []ResourceWarning, skippedAccounts []AccountWarning, now time.Time) Result {
+	var current, past []Record
+	for _, record := range records {
+		if dateReached(now, record.ExtendedSupportEndDate) || dateReached(now, record.EndOfLifeDate) {
+			past = append(past, record)
+		} else {
+			current = append(current, record)
+		}
+	}
+	records = current
 	sortRecords(records)
+	sortRecords(past)
 	return Result{
 		Records: records,
 		Summary: Summary{
-			TotalCount:            len(records),
-			ByService:             summarizeByService(records),
-			ByAccount:             summarizeByAccount(records),
-			SkippedRegions:        sortRegionWarnings(warnings),
-			SkippedAccounts:       sortAccountWarnings(skippedAccounts),
-			UnclassifiedResources: sortResourceWarnings(unclassified),
+			TotalCount:                   len(records),
+			ByService:                    summarizeByService(records),
+			ByAccount:                    summarizeByAccount(records),
+			SkippedRegions:               sortRegionWarnings(warnings),
+			SkippedAccounts:              sortAccountWarnings(skippedAccounts),
+			UnclassifiedResources:        sortResourceWarnings(unclassified),
+			PastExtendedSupportResources: past,
 		},
 	}
+}
+
+func dateReached(now time.Time, date *time.Time) bool {
+	return date != nil && !date.IsZero() && !now.Before(*date)
 }
 
 func (q Query) withDefaults() Query {

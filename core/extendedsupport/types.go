@@ -118,7 +118,7 @@ type Query struct {
 	openSearchLister  openSearchLister
 }
 
-// Record is one resource currently past its standard support end date.
+// Record is one resource past standard support or at end of life.
 type Record struct {
 	AccountID              string            `json:"account_id"`
 	Region                 string            `json:"region"`
@@ -128,8 +128,9 @@ type Record struct {
 	Engine                 string            `json:"engine"`
 	EngineVersion          string            `json:"engine_version"`
 	MajorEngineVersion     string            `json:"major_engine_version"`
-	StandardSupportEndDate time.Time         `json:"standard_support_end_date"`
+	StandardSupportEndDate time.Time         `json:"standard_support_end_date,omitzero"`
 	ExtendedSupportEndDate *time.Time        `json:"extended_support_end_date,omitempty"`
+	EndOfLifeDate          *time.Time        `json:"end_of_life_date,omitempty"`
 	EngineLifecycleSupport string            `json:"engine_lifecycle_support,omitempty"`
 	Tags                   map[string]string `json:"tags,omitempty"`
 }
@@ -190,6 +191,10 @@ type Summary struct {
 	UnclassifiedResources []ResourceWarning `json:"unclassified_resources,omitempty"`
 	BillingSelection      *BillingSelection `json:"billing_selection,omitempty"`
 	LifecycleWarnings     []string          `json:"lifecycle_warnings,omitempty"`
+
+	// PastExtendedSupportResources have reached a known extended-support end or end-of-life date.
+	// They are excluded from TotalCount, ByService, ByAccount, and UnclassifiedResources.
+	PastExtendedSupportResources []Record `json:"past_extended_support_resources,omitempty"`
 }
 
 // Result is the output of Fetch.

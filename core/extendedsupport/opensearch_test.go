@@ -2,6 +2,7 @@ package extendedsupport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,9 +14,108 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go-v2/service/elasticache"
 	cachetypes "github.com/aws/aws-sdk-go-v2/service/elasticache/types"
+	"github.com/aws/aws-sdk-go-v2/service/health"
+	healthtypes "github.com/aws/aws-sdk-go-v2/service/health/types"
 	"github.com/aws/aws-sdk-go-v2/service/opensearch"
 	ostypes "github.com/aws/aws-sdk-go-v2/service/opensearch/types"
 )
+
+func TestOpenSearchMatchesHealthEnginePrefixes(t *testing.T) {
+	// Keep the actual Health entry spelling, title, event order, and UTC offsets.
+	const response = `{
+		"service": "ES",
+		"version": "es/7.10",
+		"title": "Amazon OpenSearch Elasticsearch 7.10",
+		"lifecycleEvents": [
+			{
+				"lifecycleEventType": "EXTENDED_SUPPORT_END",
+				"date": "2030-11-06T19:00:00-05:00",
+				"regions": ["all"],
+				"impactRisks": ["END_OF_SUPPORT", "AVAILABILITY"],
+				"description": "Extended support ends — version no longer available"
+			},
+			{
+				"lifecycleEventType": "STANDARD_SUPPORT_END",
+				"date": "2027-11-06T20:00:00-04:00",
+				"regions": ["all"],
+				"impactRisks": ["END_OF_SUPPORT", "BILLING"],
+				"description": "Standard support ends — extended support charges begin"
+			}
+		]
+	}`
+	var entry healthtypes.ServiceLifecycle
+	if err := json.Unmarshal([]byte(response), &entry); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise both real Health header formats against the same date boundaries.
+	// The OpenSearch variant reuses the fixture dates; they are not published dates for 2.11.
+	for _, header := range []struct {
+		catalogVersion, title, resourceVersion, engine, version string
+	}{
+		{"es/7.10", "Amazon OpenSearch Elasticsearch 7.10", "Elasticsearch_7.10", "elasticsearch", "7.10"},
+		{"os/2.11", "Amazon OpenSearch 2.11", "OpenSearch_2.11", "opensearch", "2.11"},
+	} {
+		t.Run(header.catalogVersion, func(t *testing.T) {
+			catalogEntry := entry
+			catalogEntry.Version = aws.String(header.catalogVersion)
+			catalogEntry.Title = aws.String(header.title)
+			catalog := NewHealthLifecycleCatalog()
+			catalogCalls := 0
+			catalog.newClient = func(aws.Config) HealthAPI {
+				return fakeHealthAPI(func(context.Context, *health.DescribeServiceLifecycleInput) (*health.DescribeServiceLifecycleOutput, error) {
+					catalogCalls++
+					return &health.DescribeServiceLifecycleOutput{ServiceLifecycles: []healthtypes.ServiceLifecycle{catalogEntry}}, nil
+				})
+			}
+			client := fakeOpenSearchAPI{
+				list: func(context.Context, *opensearch.ListDomainNamesInput) (*opensearch.ListDomainNamesOutput, error) {
+					return &opensearch.ListDomainNamesOutput{DomainNames: []ostypes.DomainInfo{{DomainName: aws.String("elasticsearch-domain")}}}, nil
+				},
+				describe: func(context.Context, *opensearch.DescribeDomainInput) (*opensearch.DescribeDomainOutput, error) {
+					return &opensearch.DescribeDomainOutput{DomainStatus: testOpenSearchDomain("elasticsearch-domain", header.resourceVersion)}, nil
+				},
+			}
+			standard := time.Date(2027, 11, 7, 0, 0, 0, 0, time.UTC)
+			extended := time.Date(2030, 11, 7, 0, 0, 0, 0, time.UTC)
+			for _, tc := range []struct {
+				name          string
+				at            time.Time
+				current, past int
+			}{
+				{name: "standard-support", at: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)},
+				{name: "before-standard-end", at: standard.Add(-time.Nanosecond)},
+				{name: "standard-end-boundary", at: standard, current: 1},
+				{name: "before-extended-end", at: extended.Add(-time.Nanosecond), current: 1},
+				{name: "extended-end-boundary", at: extended, past: 1},
+				{name: "past-extended-support", at: extended.Add(time.Hour), past: 1},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result, err := Fetch(context.Background(), Query{
+						Targets: []AccountTarget{{AccountID: "111111111111"}}, Services: []Service{ServiceOpenSearch}, Now: tc.at,
+						HealthLifecycleCatalog: catalog, regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
+						openSearchLister: awsOpenSearchLister{catalog: catalog, newClient: func(aws.Config) OpenSearchAPI { return client }},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if result.Summary.TotalCount != tc.current || len(result.Records) != tc.current || len(result.Summary.PastExtendedSupportResources) != tc.past || len(result.Summary.UnclassifiedResources)+len(result.Summary.SkippedRegions)+len(result.Summary.LifecycleWarnings) != 0 {
+						t.Fatalf("result=%+v", result)
+					}
+					for _, records := range [][]Record{result.Records, result.Summary.PastExtendedSupportResources} {
+						for _, record := range records {
+							if record.Engine != header.engine || record.EngineVersion != header.version || !record.StandardSupportEndDate.Equal(standard) || record.ExtendedSupportEndDate == nil || !record.ExtendedSupportEndDate.Equal(extended) {
+								t.Fatalf("incorrect version or support dates: %+v", record)
+							}
+						}
+					}
+				})
+			}
+			if catalogCalls != 1 {
+				t.Fatalf("catalog requests=%d, want 1", catalogCalls)
+			}
+		})
+	}
+}
 
 func TestOpenSearchLifecycleClassification(t *testing.T) {
 	for _, tc := range []struct {
@@ -33,9 +133,9 @@ func TestOpenSearchLifecycleClassification(t *testing.T) {
 		{"OpenSearch_1.2", "2025-11-08T00:00:00Z", true, "", 2027},
 		{"OpenSearch_1.2", "2026-11-08T00:00:00Z", true, "", 2027},
 		{"OpenSearch_1.2", "2027-11-07T23:59:59Z", true, "", 2027},
-		{"OpenSearch_1.2", "2027-11-08T00:00:00Z", false, "past extended support", 0},
+		{"OpenSearch_1.2", "2027-11-08T00:00:00Z", true, "", 2027},
 		{"Elasticsearch_5.6", "2028-11-07T23:59:59Z", true, "", 2028},
-		{"Elasticsearch_5.6", "2028-11-08T00:00:00Z", false, "past extended support", 0},
+		{"Elasticsearch_5.6", "2028-11-08T00:00:00Z", true, "", 2028},
 		{"OpenSearch_2.9", "2025-11-07T20:00:00-05:00", true, "", 2027},
 		{"OpenSearch_2.11", "2026-10-19T00:00:00Z", false, "", 0},
 		{"OpenSearch_2.11", "2027-11-08T00:00:00Z", true, "", 2028},
