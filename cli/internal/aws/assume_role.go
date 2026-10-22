@@ -42,9 +42,37 @@ func AssumeRole(ctx context.Context, payerSession ProfileSession, roleARN, sessi
 	if err != nil {
 		return ProfileSession{}, fmt.Errorf("load AWS config for assume role: %w", err)
 	}
+	return NewRoleAssumer(cfg).AssumeRole(ctx, roleARN, sessionName)
+}
 
+// RoleAssumer obtains member credentials using a reusable, authenticated STS client.
+type RoleAssumer interface {
+	AssumeRole(context.Context, string, string) (ProfileSession, error)
+}
+
+type roleAssumer struct {
+	client *sts.Client
+	region string
+}
+
+// NewRoleAssumer reuses cfg's credentials provider and STS client across member accounts.
+func NewRoleAssumer(cfg aws.Config) RoleAssumer {
+	if cfg.Region == "" {
+		cfg.Region = "us-east-1"
+	}
+	return &roleAssumer{client: sts.NewFromConfig(cfg), region: cfg.Region}
+}
+
+func (r *roleAssumer) AssumeRole(ctx context.Context, roleARN, sessionName string) (ProfileSession, error) {
+	roleARN = strings.TrimSpace(roleARN)
+	if roleARN == "" {
+		return ProfileSession{}, fmt.Errorf("role ARN is required")
+	}
+	if sessionName == "" {
+		sessionName = "finops-linked"
+	}
 	apilog.Log(ctx, fmt.Sprintf("STS.AssumeRole role=%s", roleARN))
-	out, err := sts.NewFromConfig(cfg).AssumeRole(ctx, &sts.AssumeRoleInput{
+	out, err := r.client.AssumeRole(ctx, &sts.AssumeRoleInput{
 		RoleArn:         aws.String(roleARN),
 		RoleSessionName: aws.String(sessionName),
 	})
@@ -59,7 +87,7 @@ func AssumeRole(ctx context.Context, payerSession ProfileSession, roleARN, sessi
 		AccessKeyID:     aws.ToString(out.Credentials.AccessKeyId),
 		SecretAccessKey: aws.ToString(out.Credentials.SecretAccessKey),
 		SessionToken:    aws.ToString(out.Credentials.SessionToken),
-		Region:          region,
+		Region:          r.region,
 	}
 	if !sess.complete() {
 		return ProfileSession{}, fmt.Errorf("assume role %q: incomplete credentials", roleARN)

@@ -12,6 +12,8 @@ type rdsAPI interface {
 	DescribeDBClusters(context.Context, *rds.DescribeDBClustersInput, ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error)
 	DescribeDBSnapshots(context.Context, *rds.DescribeDBSnapshotsInput, ...func(*rds.Options)) (*rds.DescribeDBSnapshotsOutput, error)
 	DescribeDBClusterSnapshots(context.Context, *rds.DescribeDBClusterSnapshotsInput, ...func(*rds.Options)) (*rds.DescribeDBClusterSnapshotsOutput, error)
+	DescribeDBEngineVersions(context.Context, *rds.DescribeDBEngineVersionsInput, ...func(*rds.Options)) (*rds.DescribeDBEngineVersionsOutput, error)
+	DescribeDBMajorEngineVersions(context.Context, *rds.DescribeDBMajorEngineVersionsInput, ...func(*rds.Options)) (*rds.DescribeDBMajorEngineVersionsOutput, error)
 }
 
 type loggingRDS struct {
@@ -60,6 +62,24 @@ func (l loggingRDS) DescribeDBClusterSnapshots(
 ) (*rds.DescribeDBClusterSnapshotsOutput, error) {
 	Log(ctx, formatRDSCall("RDS.DescribeDBClusterSnapshots", params.Marker))
 	return l.inner.DescribeDBClusterSnapshots(ctx, params, optFns...)
+}
+
+func (l loggingRDS) DescribeDBEngineVersions(
+	ctx context.Context,
+	params *rds.DescribeDBEngineVersionsInput,
+	optFns ...func(*rds.Options),
+) (*rds.DescribeDBEngineVersionsOutput, error) {
+	Log(ctx, formatRDSCall("RDS.DescribeDBEngineVersions", params.Marker))
+	return l.inner.DescribeDBEngineVersions(ctx, params, optFns...)
+}
+
+func (l loggingRDS) DescribeDBMajorEngineVersions(
+	ctx context.Context,
+	params *rds.DescribeDBMajorEngineVersionsInput,
+	optFns ...func(*rds.Options),
+) (*rds.DescribeDBMajorEngineVersionsOutput, error) {
+	Log(ctx, formatRDSCall("RDS.DescribeDBMajorEngineVersions", params.Marker))
+	return l.inner.DescribeDBMajorEngineVersions(ctx, params, optFns...)
 }
 
 func formatRDSCall(op string, marker *string) string {
