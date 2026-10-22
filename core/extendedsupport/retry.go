@@ -33,6 +33,9 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 	}
 	q.Targets = targets
 	q = q.withDefaults()
+	if q.EKSVersionCatalog != nil {
+		q.EKSVersionCatalog.retryFailures()
+	}
 	if q.HealthLifecycleCatalog != nil {
 		q.HealthLifecycleCatalog.retryFailures()
 	}

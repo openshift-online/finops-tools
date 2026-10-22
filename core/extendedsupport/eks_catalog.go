@@ -36,6 +36,17 @@ type EKSVersionCatalog struct {
 	newClient func(aws.Config) EKSAPI
 }
 
+// retryFailures permits another attempt with fresh credentials.
+// Call after the previous scan has completed.
+func (c *EKSVersionCatalog) retryFailures() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, region := range c.regions {
+		clear(region.failures)
+	}
+}
+
 // NewEKSVersionCatalog creates a catalog that can be shared with the retry pass.
 func NewEKSVersionCatalog() *EKSVersionCatalog {
 	return &EKSVersionCatalog{}
