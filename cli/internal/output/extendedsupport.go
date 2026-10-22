@@ -26,8 +26,8 @@ func WriteExtendedSupportListResult(w io.Writer, format Format, r extendedsuppor
 
 func writeExtendedSupportJSON(w io.Writer, r extendedsupport.Result) error {
 	if r.Records == nil {
-+		r.Records = []extendedsupport.Record{}
-+	}
+		r.Records = []extendedsupport.Record{}
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)

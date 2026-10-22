@@ -335,13 +335,13 @@ func warningMessage(err error) string {
 		return ""
 	}
 	var apiErr smithy.APIError
-+	if errors.As(err, &apiErr) {
-+		code, msg := apiErr.ErrorCode(), strings.TrimSpace(apiErr.ErrorMessage())
-+		if msg == "" {
-+			return code
-+		}
-+		return code + ": " + msg
-+	}
+	if errors.As(err, &apiErr) {
+		code, msg := apiErr.ErrorCode(), strings.TrimSpace(apiErr.ErrorMessage())
+		if msg == "" {
+			return code
+		}
+		return code + ": " + msg
+	}
 	msg := err.Error()
 	if idx := strings.LastIndex(msg, ": "); idx >= 0 {
 		tail := strings.TrimSpace(msg[idx+2:])
