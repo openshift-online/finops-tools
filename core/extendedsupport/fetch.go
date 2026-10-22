@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/smithy-go"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
