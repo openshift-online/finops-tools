@@ -271,3 +271,112 @@ func TestCachedConfigLoaderCachesError(t *testing.T) {
 		t.Fatalf("calls = %d, want 1", calls.Load())
 	}
 }
+
+func TestValidateAccountDetailsEmailTemplateFlags(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		send    bool
+		flags   accountDetailsEmailTemplateFlags
+		wantMsg string
+	}{
+		{name: "nothing set without send", send: false},
+		{name: "nothing set with send", send: true},
+		{
+			name:    "intro without send",
+			send:    false,
+			flags:   accountDetailsEmailTemplateFlags{intro: "hi", introSet: true},
+			wantMsg: "--email-intro requires --send",
+		},
+		{
+			name:    "deadline without send",
+			send:    false,
+			flags:   accountDetailsEmailTemplateFlags{deadline: "by {date}", deadlineSet: true},
+			wantMsg: "--email-deadline requires --send",
+		},
+		{
+			name:    "email-reply-by-days without send",
+			send:    false,
+			flags:   accountDetailsEmailTemplateFlags{replyByDays: 14, replyByDaysSet: true},
+			wantMsg: "--email-reply-by-days requires --send",
+		},
+		{
+			name:    "blank subject prefix",
+			send:    true,
+			flags:   accountDetailsEmailTemplateFlags{subjectPrefix: "  ", subjectPrefixSet: true},
+			wantMsg: "--email-subject-prefix was set but is empty",
+		},
+		{
+			name:    "blank email option",
+			send:    true,
+			flags:   accountDetailsEmailTemplateFlags{options: []string{"Keep", " "}, optionsSet: true},
+			wantMsg: "--email-option was set but is empty",
+		},
+		{
+			name: "email-reply-by-days without deadline",
+			send: true,
+			flags: accountDetailsEmailTemplateFlags{
+				replyByDays: 14, replyByDaysSet: true,
+			},
+			wantMsg: "--email-reply-by-days requires --email-deadline",
+		},
+		{
+			name: "email-reply-by-days not positive",
+			send: true,
+			flags: accountDetailsEmailTemplateFlags{
+				deadline: "by {date}", deadlineSet: true,
+				replyByDays: 0, replyByDaysSet: true,
+			},
+			wantMsg: "--email-reply-by-days must be positive",
+		},
+		{
+			name:    "unknown intro placeholder",
+			send:    true,
+			flags:   accountDetailsEmailTemplateFlags{intro: "review {acount}", introSet: true},
+			wantMsg: "unknown placeholder {acount} in email intro (supported: account, account_id, count)",
+		},
+		{
+			name:    "unknown deadline placeholder",
+			send:    true,
+			flags:   accountDetailsEmailTemplateFlags{deadline: "by {data}", deadlineSet: true},
+			wantMsg: "unknown placeholder {data} in email deadline (supported: date)",
+		},
+		{
+			name: "full valid set",
+			send: true,
+			flags: accountDetailsEmailTemplateFlags{
+				subjectPrefix: "X: ", subjectPrefixSet: true,
+				actionTitle: "T", actionTitleSet: true,
+				intro: "{account}", introSet: true,
+				options: []string{"Keep"}, optionsSet: true,
+				deadline: "by {date}", deadlineSet: true,
+				replyByDays: 21, replyByDaysSet: true,
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateAccountDetailsEmailTemplateFlags(tc.send, tc.flags)
+			if tc.wantMsg == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.wantMsg {
+				t.Fatalf("error = %v, want %q", err, tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestAccountDetailsEmailTemplateFlagsRegistered(t *testing.T) {
+	for _, name := range []string{"email-subject-prefix", "email-action-title", "email-intro", "email-option", "email-deadline", "email-reply-by-days"} {
+		if accountDetailsCmd.Flags().Lookup(name) == nil {
+			t.Fatalf("missing --%s", name)
+		}
+	}
+}

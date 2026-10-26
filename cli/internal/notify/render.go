@@ -5,6 +5,8 @@ package notify
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,15 +14,22 @@ import (
 	"github.com/openshift-online/finops-tools/core/accountreview"
 )
 
-const responseDeadlineWeeks = 2
+// defaultReplyByDays is the built-in response window used for the {date}
+// placeholder when a deadline sentence is requested without --email-reply-by-days.
+const defaultReplyByDays = 14
 
 const actionRequiredSubjectPrefix = "⚠️ Action required: "
 
+const actionRequiredTitle = "Action required"
+
 const actionRequiredIntroSuffix = " Based on the information below, please reply to this email and tell us whether you want to:"
 
-const actionRequiredOptions = `- Keep the account
-- Delete the account
-- Request modifications (describe what you need)`
+// actionRequiredOptionList is the built-in reply options list.
+var actionRequiredOptionList = []string{
+	"Keep the account",
+	"Delete the account",
+	"Request modifications (describe what you need)",
+}
 
 const generatedBy = "Red Hat Hybrid Platform FinOps"
 
@@ -41,7 +50,96 @@ const (
 	htmlH4Style     = `margin:.75rem 0 .35rem;font-size:.9rem;font-weight:600;color:#656d76`
 )
 
-func actionRequiredIntro(details []accountreview.AccountDetails) string {
+// RenderOptions customizes rendered owner notification emails. The zero value
+// renders the built-in template with no deadline sentence: deletion is not the
+// default outcome, so a reply deadline is only shown when DeadlineText is set.
+type RenderOptions struct {
+	// SubjectPrefix overrides the built-in subject prefix (used verbatim,
+	// including any trailing space).
+	SubjectPrefix string
+	// ActionTitle overrides the "Action required" section heading.
+	ActionTitle string
+	// Intro overrides the whole intro paragraph, including the reply
+	// instruction. Placeholders: {account}, {account_id}, {count}.
+	Intro string
+	// Options overrides the reply options list.
+	Options []string
+	// DeadlineText adds a deadline sentence with a {date} placeholder.
+	// Empty omits the deadline sentence (and the reply-by date) entirely.
+	DeadlineText string
+	// ReplyByDays sets the {date} offset in days from report generation.
+	// Zero falls back to the built-in default of 14 days.
+	ReplyByDays int
+}
+
+func (o RenderOptions) subjectPrefix() string {
+	if o.SubjectPrefix != "" {
+		return o.SubjectPrefix
+	}
+	return actionRequiredSubjectPrefix
+}
+
+func (o RenderOptions) title() string {
+	if o.ActionTitle != "" {
+		return o.ActionTitle
+	}
+	return actionRequiredTitle
+}
+
+func (o RenderOptions) optionList() []string {
+	if len(o.Options) > 0 {
+		return o.Options
+	}
+	return actionRequiredOptionList
+}
+
+// ValidateIntroTemplate returns an error when intro contains a placeholder
+// other than {account}, {account_id}, or {count}. An empty intro is valid.
+func ValidateIntroTemplate(intro string) error {
+	return validatePlaceholders("email intro", intro, "account", "account_id", "count")
+}
+
+// ValidateDeadlineTemplate returns an error when text contains a placeholder
+// other than {date}. An empty text is valid.
+func ValidateDeadlineTemplate(text string) error {
+	return validatePlaceholders("email deadline", text, "date")
+}
+
+// placeholderPattern matches {token} template placeholders.
+var placeholderPattern = regexp.MustCompile(`\{([^{}]*)\}`)
+
+// validatePlaceholders rejects {token} occurrences outside the allowed set so
+// placeholder typos fail before any AWS work or email send.
+func validatePlaceholders(where, s string, allowed ...string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, a := range allowed {
+		allowedSet[a] = true
+	}
+	for _, m := range placeholderPattern.FindAllStringSubmatch(s, -1) {
+		if !allowedSet[m[1]] {
+			return fmt.Errorf("unknown placeholder {%s} in %s (supported: %s)", m[1], where, strings.Join(allowed, ", "))
+		}
+	}
+	return nil
+}
+
+// expandPlaceholders replaces {token} placeholders with values. Unknown tokens
+// are left untouched; the CLI validates templates before rendering.
+func expandPlaceholders(s string, values map[string]string) string {
+	repl := make([]string, 0, 2*len(values))
+	for k, v := range values {
+		repl = append(repl, "{"+k+"}", v)
+	}
+	return strings.NewReplacer(repl...).Replace(s)
+}
+
+func actionRequiredIntro(details []accountreview.AccountDetails, opts RenderOptions) string {
+	if opts.Intro != "" {
+		return expandPlaceholders(opts.Intro, introPlaceholderValues(details))
+	}
 	switch len(details) {
 	case 1:
 		d := details[0]
@@ -60,27 +158,50 @@ func actionRequiredIntro(details []accountreview.AccountDetails) string {
 	}
 }
 
-func actionRequiredDeadlineText(accountCount int, generated time.Time) string {
-	phrase := "this AWS account"
-	if accountCount > 1 {
-		phrase = "these AWS accounts"
+// introPlaceholderValues maps the intro placeholders: {account} is the account
+// reference ("AWS account name (id)" for a single-account email, "the N AWS
+// accounts below" otherwise), {account_id} is the account ID (empty for
+// grouped emails), and {count} is the number of accounts in the email.
+func introPlaceholderValues(details []accountreview.AccountDetails) map[string]string {
+	if len(details) == 1 {
+		d := details[0]
+		return map[string]string{
+			"account":    fmt.Sprintf("AWS account %s (%s)", d.AccountName, d.AccountID),
+			"account_id": d.AccountID,
+			"count":      "1",
+		}
 	}
-	return fmt.Sprintf(
-		"If we do not hear from you by %s, we will proceed with deleting %s.",
-		replyByDate(generated).Format("2 January 2006"),
-		phrase,
-	)
+	return map[string]string{
+		"account":    fmt.Sprintf("the %d AWS accounts below", len(details)),
+		"account_id": "",
+		"count":      strconv.Itoa(len(details)),
+	}
 }
 
-func replyByDate(generated time.Time) time.Time {
-	return generated.UTC().AddDate(0, 0, responseDeadlineWeeks*7)
+// actionRequiredDeadlineText renders the configured deadline sentence. ok is
+// false when no deadline is configured; callers omit the sentence entirely.
+func actionRequiredDeadlineText(generated time.Time, opts RenderOptions) (string, bool) {
+	if opts.DeadlineText == "" {
+		return "", false
+	}
+	return expandPlaceholders(opts.DeadlineText, map[string]string{
+		"date": replyByDate(generated, opts).Format("2 January 2006"),
+	}), true
 }
 
-func groupReviewSubject(n int) string {
+func replyByDate(generated time.Time, opts RenderOptions) time.Time {
+	days := opts.ReplyByDays
+	if days <= 0 {
+		days = defaultReplyByDays
+	}
+	return generated.UTC().AddDate(0, 0, days)
+}
+
+func groupReviewSubject(n int, opts RenderOptions) string {
 	if n == 1 {
-		return actionRequiredSubjectPrefix + "AWS account review: 1 AWS account"
+		return opts.subjectPrefix() + "AWS account review: 1 AWS account"
 	}
-	return actionRequiredSubjectPrefix + fmt.Sprintf("AWS account review: %d AWS accounts", n)
+	return opts.subjectPrefix() + fmt.Sprintf("AWS account review: %d AWS accounts", n)
 }
 
 type Message struct {
@@ -96,32 +217,32 @@ type Message struct {
 }
 
 // RenderAccountEmail renders a single-account notification.
-func RenderAccountEmail(d accountreview.AccountDetails) Message {
-	subject := actionRequiredSubjectPrefix + fmt.Sprintf("AWS account review: %s (%s)", d.AccountName, d.AccountID)
+func RenderAccountEmail(d accountreview.AccountDetails, opts RenderOptions) Message {
+	subject := opts.subjectPrefix() + fmt.Sprintf("AWS account review: %s (%s)", d.AccountName, d.AccountID)
 	return Message{
 		To:         d.OwnerEmail,
 		IntendedTo: d.OwnerEmail,
 		Subject:    subject,
-		TextBody:   renderTextBody([]accountreview.AccountDetails{d}),
-		HTMLBody:   renderHTMLBody([]accountreview.AccountDetails{d}),
+		TextBody:   renderTextBody([]accountreview.AccountDetails{d}, opts),
+		HTMLBody:   renderHTMLBody([]accountreview.AccountDetails{d}, opts),
 	}
 }
 
 // RenderOwnerGroupEmail renders a multi-account notification for one owner.
-func RenderOwnerGroupEmail(ownerEmail string, details []accountreview.AccountDetails) Message {
+func RenderOwnerGroupEmail(ownerEmail string, details []accountreview.AccountDetails, opts RenderOptions) Message {
 	return Message{
 		To:         ownerEmail,
 		IntendedTo: ownerEmail,
-		Subject:    groupReviewSubject(len(details)),
-		TextBody:   renderTextBody(details),
-		HTMLBody:   renderHTMLBody(details),
+		Subject:    groupReviewSubject(len(details), opts),
+		TextBody:   renderTextBody(details, opts),
+		HTMLBody:   renderHTMLBody(details, opts),
 	}
 }
 
-func renderTextBody(details []accountreview.AccountDetails) string {
+func renderTextBody(details []accountreview.AccountDetails, opts RenderOptions) string {
 	var b strings.Builder
 	generated := generatedAt(details)
-	writeActionRequiredText(&b, details, generated)
+	writeActionRequiredText(&b, details, generated, opts)
 	if len(details) > 1 {
 		b.WriteString("\n")
 		writeOverviewText(&b, details)
@@ -260,19 +381,30 @@ func writeOpenShiftText(b *strings.Builder, d accountreview.AccountDetails) {
 	}
 }
 
-func writeActionRequiredText(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time) {
-	b.WriteString("Action required\n\n")
-	b.WriteString(actionRequiredIntro(details))
+func writeActionRequiredText(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time, opts RenderOptions) {
+	fmt.Fprintf(b, "%s\n\n", opts.title())
+	b.WriteString(actionRequiredIntro(details, opts))
 	b.WriteString("\n\n")
-	b.WriteString(actionRequiredOptions)
-	b.WriteString("\n\n")
-	b.WriteString(actionRequiredDeadlineText(len(details), generated))
+	b.WriteString(optionListText(opts))
+	if text, ok := actionRequiredDeadlineText(generated, opts); ok {
+		b.WriteString("\n\n")
+		b.WriteString(text)
+	}
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("=", 48))
 	b.WriteString("\n")
 }
 
-func renderHTMLBody(details []accountreview.AccountDetails) string {
+func optionListText(opts RenderOptions) string {
+	options := opts.optionList()
+	lines := make([]string, len(options))
+	for i, o := range options {
+		lines[i] = "- " + o
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderHTMLBody(details []accountreview.AccountDetails, opts RenderOptions) string {
 	var b strings.Builder
 	generated := generatedAt(details)
 	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -290,7 +422,7 @@ th{color:#656d76}.amount{text-align:right;white-space:nowrap}.meta{color:#656d76
 footer{margin-top:1rem;color:#656d76;font-size:.85rem;text-align:center}
 </style></head><body><div class="container">`)
 	fmt.Fprintf(&b, `<header><h1>AWS account review</h1><p class="meta" style="%s">Generated %s</p></header>`, htmlMetaStyle, generated.Format("2006-01-02 15:04 UTC"))
-	writeActionRequiredHTML(&b, details, generated)
+	writeActionRequiredHTML(&b, details, generated, opts)
 	if len(details) > 1 {
 		writeOverviewHTML(&b, details)
 	}
@@ -501,12 +633,20 @@ func writeResourceTable(b *strings.Builder, table accountreview.ResourceTable) {
 	b.WriteString(`</tbody></table>`)
 }
 
-func writeActionRequiredHTML(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time) {
-	fmt.Fprintf(b, `<section class="action" style="%s"><h2>Action required</h2><p>`, htmlActionStyle)
-	b.WriteString(htmlEscape(actionRequiredIntro(details)))
-	b.WriteString(`</p><ul><li>Keep the account</li><li>Delete the account</li><li>Request modifications (describe what you need)</li></ul><p><strong>`)
-	b.WriteString(htmlEscape(actionRequiredDeadlineText(len(details), generated)))
-	b.WriteString(`</strong></p></section>`)
+func writeActionRequiredHTML(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time, opts RenderOptions) {
+	fmt.Fprintf(b, `<section class="action" style="%s"><h2>%s</h2><p>`, htmlActionStyle, htmlEscape(opts.title()))
+	b.WriteString(htmlEscape(actionRequiredIntro(details, opts)))
+	b.WriteString(`</p><ul>`)
+	for _, opt := range opts.optionList() {
+		fmt.Fprintf(b, `<li>%s</li>`, htmlEscape(opt))
+	}
+	if text, ok := actionRequiredDeadlineText(generated, opts); ok {
+		b.WriteString(`</ul><p><strong>`)
+		b.WriteString(htmlEscape(text))
+		b.WriteString(`</strong></p></section>`)
+		return
+	}
+	b.WriteString(`</ul></section>`)
 }
 
 func writeHTMLTableOpen(b *strings.Builder) {

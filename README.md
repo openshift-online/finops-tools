@@ -624,6 +624,8 @@ The owner email is derived from the Organizations `owner` tag, appending `@redha
 
 By default the command prints details and does not send email. To email owners via **Gmail**, pass `--send` with either `--yes` (owner addresses) or `--redirect-prefix` (test delivery to `PREFIX+<owner>@redhat.com`). `--group-by` only affects how emails are batched; stdout is always one record per account. When sending, a delivery summary is written to stderr (pretty-print) so JSON/CSV stdout stays a pure details payload.
 
+Owner notification email content is customizable per run (send only): `--email-subject-prefix`, `--email-action-title`, `--email-intro` (placeholders `{account}`, `{account_id}`, `{count}`), `--email-option` (repeatable), `--email-deadline` (placeholder `{date}`), and `--email-reply-by-days`. By default the email asks the owner to keep, delete, or request modifications and states **no deadline**; pass `--email-deadline` to add a reply-by sentence (`{date}` = report generation + `--email-reply-by-days`, default `14` days).
+
 A Cost Explorer, inventory, or owner-tag failure on one account is recorded for that account and does not stop the rest of the run. OpenShift cluster lookup uses Dataverse Snowflake OAuth (`--snowflake-alias`, default `snowflake.account_alias`). An unknown or incomplete `--snowflake-alias` fails before AWS work. If the flag is omitted and no Snowflake account is configured, or the lookup fails after connect, AWS cost/inventory still succeed and the OpenShift section records a soft error (owner email shows a generic incomplete-lookup note).
 
 Gmail uses existing gcloud Application Default Credentials. finops does **not** modify `~/.config/gcloud/application_default_credentials.json`. API quota is billed to `hcmfinops` via client options.
@@ -652,6 +654,10 @@ finops account details --payer rh-control --account-id 111111111111 --send --red
 
 # Production send to owner addresses
 finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes
+
+# Production send with an explicit reply deadline (opt-in)
+finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes \
+  --email-deadline 'If we do not hear from you by {date}, we will proceed with deletion.'
 ```
 
 | Flag | Description |
@@ -663,6 +669,12 @@ finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner
 | `--yes` | With `--send`, deliver to resolved owner emails |
 | `--redirect-prefix` | With `--send`, deliver to `PREFIX+<owner>@redhat.com` (test mode) |
 | `--group-by` | `account` (default) or `owner` — one email per account or per owner (send only) |
+| `--email-subject-prefix` | With `--send`, override the email subject prefix (default: `⚠️ Action required: `) |
+| `--email-action-title` | With `--send`, override the `Action required` section heading |
+| `--email-intro` | With `--send`, override the email intro paragraph (placeholders: `{account}`, `{account_id}`, `{count}`) |
+| `--email-option` | With `--send`, override a reply option (repeatable; default: Keep the account / Delete the account / Request modifications) |
+| `--email-deadline` | With `--send`, add a deadline sentence (placeholder: `{date}`); omitted means no deadline |
+| `--email-reply-by-days` | With `--email-deadline`, days after report generation for `{date}` (default: `14`) |
 | `--months` | Calendar months of cost history to include (default: `6`) |
 | `--exclude-recent-days` | Omit the last N UTC days from the cost end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
@@ -676,7 +688,7 @@ JSON and CSV keep raw numbers (no thousands separators). CSV columns are `accoun
 
 When `inventory_error` is set, the AWS inventory scan was incomplete: JSON omits zero `resource_counts` fields, and CSV omits zero `count` rows. Check `inventory_error` before treating missing resources as confirmed unused. Pretty-print and owner email do the same for AWS inventory (no “None found” line for AWS types after a partial scan). Assume-role failures are recorded as inventory errors and still included in owner email with a generic incomplete-scan note. When `openshift_clusters_error` / `openshift_error` is set, OpenShift lookup was skipped or failed; owner email shows a generic incomplete-lookup note without raw Snowflake errors.
 
-`--group-by` and `--redirect-prefix` require `--send`.
+`--group-by`, `--redirect-prefix`, and the owner-email template flags (`--email-subject-prefix`, `--email-action-title`, `--email-intro`, `--email-option`, `--email-deadline`, `--email-reply-by-days`) require `--send`.
 
 Gmail API quota/billing defaults to the `hcmfinops` GCP project (via API client options, not by changing ADC). Override with `FINOPS_GMAIL_QUOTA_PROJECT`.
 
