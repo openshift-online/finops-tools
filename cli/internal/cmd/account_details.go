@@ -20,6 +20,10 @@ import (
 var (
 	detailsAccount           string
 	detailsAccountAliases    string
+	detailsActionTitle       string
+	detailsEmailDeadline     string
+	detailsEmailIntro        string
+	detailsEmailOptions      []string
 	detailsFormat            string
 	detailsGroupBy           string
 	detailsMonths            int
@@ -29,11 +33,13 @@ var (
 	detailsPayer             string
 	detailsQuiet             bool
 	detailsRedirectPrefix    string
+	detailsReplyByDays       int
 	detailsRole              string
 	detailsSend              bool
 	detailsSkipOrgCache      bool
 	detailsRefreshOrgCache   bool
 	detailsSnowflakeAlias    string
+	detailsSubjectPrefix     string
 	detailsTag               string
 	detailsWorkers           int
 	detailsYes               bool
@@ -59,6 +65,13 @@ via Gmail, pass --send with either --yes (owner addresses) or --redirect-prefix
 (PREFIX+<owner>@redhat.com test delivery). --group-by applies only to email
 batching; stdout is always one record per account.
 
+Owner email content is customizable per run: --email-subject-prefix,
+--email-action-title, --email-intro ({account}, {account_id}, {count}
+placeholders), --email-option (repeatable), --email-deadline ({date}
+placeholder), and --email-reply-by-days. By default the email asks the owner to
+keep, delete, or request modifications and states no deadline; pass
+--email-deadline to add one.
+
 A Cost Explorer, inventory, or owner-tag failure on one account is recorded for
 that account and does not stop the rest of the run. Incomplete inventory (including
 assume-role failures) is shown as an inventory warning and still included in owner
@@ -80,7 +93,9 @@ Examples:
   finops account details --payer rh-control --ou 'ou-abcd-12345678/*' --format json -o review.json
   finops account details --account-alias my-linked --snowflake-alias rhprod
   finops account details --account-alias my-linked --send --redirect-prefix finops
-  finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes`,
+  finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes
+  finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes \
+    --email-deadline 'If we do not hear from you by {date}, we will proceed with deletion.'`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
 		sel, err := parseCostTargetSelector(
@@ -112,9 +127,12 @@ Examples:
 		if err := validateOrgCacheFlags(detailsSkipOrgCache, detailsRefreshOrgCache); err != nil {
 			return err
 		}
-		return validateAccountDetailsSendFlags(
+		if err := validateAccountDetailsSendFlags(
 			detailsSend, detailsYes, detailsRedirectPrefix, cmd.Flags().Changed("group-by"),
-		)
+		); err != nil {
+			return err
+		}
+		return validateAccountDetailsEmailTemplateFlags(detailsSend, accountDetailsEmailTemplateFlagsFromCmd(cmd))
 	},
 	RunE: runAccountDetails,
 }
@@ -135,6 +153,18 @@ func init() {
 	accountDetailsCmd.Flags().StringVar(&detailsRedirectPrefix, "redirect-prefix", "",
 		"With --send, deliver to PREFIX+<owner>@redhat.com instead of owner addresses")
 	accountDetailsCmd.Flags().StringVar(&detailsGroupBy, "group-by", string(accountreview.GroupByAccount), "Group emails by account or owner (send only)")
+	accountDetailsCmd.Flags().StringVar(&detailsSubjectPrefix, "email-subject-prefix", "",
+		`With --send, override the email subject prefix (default "⚠️ Action required: ")`)
+	accountDetailsCmd.Flags().StringVar(&detailsActionTitle, "email-action-title", "",
+		`With --send, override the "Action required" section heading`)
+	accountDetailsCmd.Flags().StringVar(&detailsEmailIntro, "email-intro", "",
+		"With --send, override the email intro paragraph (placeholders: {account}, {account_id}, {count})")
+	accountDetailsCmd.Flags().StringArrayVar(&detailsEmailOptions, "email-option", nil,
+		"With --send, override a reply option (repeatable; default: Keep the account / Delete the account / Request modifications)")
+	accountDetailsCmd.Flags().StringVar(&detailsEmailDeadline, "email-deadline", "",
+		"With --send, add a deadline sentence (placeholder: {date}); omitted means no deadline")
+	accountDetailsCmd.Flags().IntVar(&detailsReplyByDays, "email-reply-by-days", 14,
+		"With --email-deadline, days after report generation for {date}")
 	accountDetailsCmd.Flags().IntVar(&detailsMonths, "months", 6, "Number of calendar months of cost history to include")
 	accountDetailsCmd.Flags().IntVar(&detailsExcludeRecentDays, "exclude-recent-days", 0,
 		"Omit the last N UTC days from the cost end anchor (AWS CE lag; default 0, or defaults.cost.exclude_recent_days)")
@@ -175,6 +205,96 @@ func validateAccountDetailsSendFlags(send, yes bool, redirectPrefix string, grou
 		return nil
 	}
 	return fmt.Errorf("refusing to send: pass --yes for owner addresses or --redirect-prefix PREFIX for test delivery")
+}
+
+// accountDetailsEmailTemplateFlags carries the owner-email template flag values
+// plus whether each was explicitly set, so validation stays testable without
+// cobra flag state.
+type accountDetailsEmailTemplateFlags struct {
+	subjectPrefix    string
+	actionTitle      string
+	intro            string
+	options          []string
+	deadline         string
+	replyByDays      int
+	subjectPrefixSet bool
+	actionTitleSet   bool
+	introSet         bool
+	optionsSet       bool
+	deadlineSet      bool
+	replyByDaysSet   bool
+}
+
+func accountDetailsEmailTemplateFlagsFromCmd(cmd *cobra.Command) accountDetailsEmailTemplateFlags {
+	return accountDetailsEmailTemplateFlags{
+		subjectPrefix:    detailsSubjectPrefix,
+		actionTitle:      detailsActionTitle,
+		intro:            detailsEmailIntro,
+		options:          detailsEmailOptions,
+		deadline:         detailsEmailDeadline,
+		replyByDays:      detailsReplyByDays,
+		subjectPrefixSet: cmd.Flags().Changed("email-subject-prefix"),
+		actionTitleSet:   cmd.Flags().Changed("email-action-title"),
+		introSet:         cmd.Flags().Changed("email-intro"),
+		optionsSet:       cmd.Flags().Changed("email-option"),
+		deadlineSet:      cmd.Flags().Changed("email-deadline"),
+		replyByDaysSet:   cmd.Flags().Changed("email-reply-by-days"),
+	}
+}
+
+// validateAccountDetailsEmailTemplateFlags enforces the owner-email template
+// flag rules so a bad combination or placeholder typo fails before any AWS
+// work: the flags only apply with --send, must not be blank, --email-reply-by-days
+// requires --email-deadline and a positive value, and only known placeholders
+// are accepted.
+func validateAccountDetailsEmailTemplateFlags(send bool, f accountDetailsEmailTemplateFlags) error {
+	stringFlags := []struct {
+		name  string
+		set   bool
+		value string
+	}{
+		{"--email-subject-prefix", f.subjectPrefixSet, f.subjectPrefix},
+		{"--email-action-title", f.actionTitleSet, f.actionTitle},
+		{"--email-intro", f.introSet, f.intro},
+		{"--email-deadline", f.deadlineSet, f.deadline},
+	}
+	for _, fl := range stringFlags {
+		if !fl.set {
+			continue
+		}
+		if !send {
+			return fmt.Errorf("%s requires --send", fl.name)
+		}
+		if strings.TrimSpace(fl.value) == "" {
+			return fmt.Errorf("%s was set but is empty", fl.name)
+		}
+	}
+	if f.optionsSet {
+		if !send {
+			return fmt.Errorf("--email-option requires --send")
+		}
+		for _, opt := range f.options {
+			if strings.TrimSpace(opt) == "" {
+				return fmt.Errorf("--email-option was set but is empty")
+			}
+		}
+	}
+	if f.replyByDaysSet && !send {
+		return fmt.Errorf("--email-reply-by-days requires --send")
+	}
+	if !send {
+		return nil
+	}
+	if f.replyByDaysSet && strings.TrimSpace(f.deadline) == "" {
+		return fmt.Errorf("--email-reply-by-days requires --email-deadline")
+	}
+	if f.replyByDaysSet && f.replyByDays <= 0 {
+		return fmt.Errorf("--email-reply-by-days must be positive")
+	}
+	if err := notify.ValidateIntroTemplate(f.intro); err != nil {
+		return err
+	}
+	return notify.ValidateDeadlineTemplate(f.deadline)
 }
 
 func runAccountDetails(cmd *cobra.Command, _ []string) error {
@@ -290,13 +410,22 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 
 	groups, deliveryResults := accountreview.GroupReports(buildResult.Reports, groupBy)
 
+	renderOpts := notify.RenderOptions{
+		SubjectPrefix: detailsSubjectPrefix,
+		ActionTitle:   detailsActionTitle,
+		Intro:         detailsEmailIntro,
+		Options:       detailsEmailOptions,
+		DeadlineText:  detailsEmailDeadline,
+		ReplyByDays:   detailsReplyByDays,
+	}
+
 	var messages []notify.Message
 	for _, group := range groups {
 		groupDetails := accountreview.DetailsFromReports(group.Reports)
 		if len(groupDetails) == 1 {
-			messages = append(messages, notify.RenderAccountEmail(groupDetails[0]))
+			messages = append(messages, notify.RenderAccountEmail(groupDetails[0], renderOpts))
 		} else {
-			messages = append(messages, notify.RenderOwnerGroupEmail(group.OwnerEmail, groupDetails))
+			messages = append(messages, notify.RenderOwnerGroupEmail(group.OwnerEmail, groupDetails, renderOpts))
 		}
 	}
 

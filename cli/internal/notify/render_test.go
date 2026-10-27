@@ -29,7 +29,7 @@ func TestRenderAccountEmail(t *testing.T) {
 				Region:    "us-east-1",
 			}},
 		},
-	}))
+	}), RenderOptions{})
 	if msg.To != "jdoe@redhat.com" {
 		t.Fatalf("To = %q", msg.To)
 	}
@@ -51,11 +51,11 @@ func TestRenderAccountEmail(t *testing.T) {
 	if !strings.Contains(msg.TextBody, "AWS account test-account (111111111111)") {
 		t.Fatalf("text intro should name the account: %s", msg.TextBody)
 	}
-	if !strings.Contains(msg.TextBody, "29 January 2026") {
-		t.Fatalf("text body missing reply-by date: %s", msg.TextBody)
+	if strings.Contains(msg.TextBody, "29 January 2026") {
+		t.Fatalf("default text body should not render a reply-by date: %s", msg.TextBody)
 	}
-	if strings.Contains(msg.TextBody, "2 weeks") {
-		t.Fatalf("text body should use a calendar date, not '2 weeks': %s", msg.TextBody)
+	if strings.Contains(msg.TextBody, "If we do not hear from you by") {
+		t.Fatalf("default text body should not state a deadline: %s", msg.TextBody)
 	}
 	if !strings.Contains(msg.TextBody, "reply to this email") {
 		t.Fatalf("text body missing reply instruction")
@@ -122,7 +122,7 @@ func TestRenderAccountEmailEscapesHTML(t *testing.T) {
 		AccountID:   "111111111111",
 		AccountName: `<script>alert("x")</script>`,
 		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
-	})
+	}, RenderOptions{})
 	if strings.Contains(msg.HTMLBody, "<script>") {
 		t.Fatalf("html should escape account name: %s", msg.HTMLBody)
 	}
@@ -136,7 +136,7 @@ func TestRenderAccountEmailNoMonthlyData(t *testing.T) {
 		AccountID:   "111111111111",
 		AccountName: "test-account",
 		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
-	})
+	}, RenderOptions{})
 	if !strings.Contains(msg.TextBody, "(no data)") {
 		t.Fatalf("text missing no-data: %s", msg.TextBody)
 	}
@@ -159,7 +159,7 @@ func TestRenderAccountEmailKeepsMonthsWhenTopServicesFail(t *testing.T) {
 			Total:            1234.5,
 			TopServicesError: "service breakdown denied",
 		},
-	}))
+	}), RenderOptions{})
 	if !strings.Contains(msg.TextBody, "2026-01") {
 		t.Fatalf("text body missing month: %s", msg.TextBody)
 	}
@@ -182,7 +182,7 @@ func TestRenderAccountEmailListsEmptyInventory(t *testing.T) {
 		ResourceCounts: accountreview.ResourceCounts{
 			VPCs: 3,
 		},
-	})
+	}, RenderOptions{})
 	if !strings.Contains(msg.TextBody, "VPCs: 3") {
 		t.Fatalf("nonzero count should be present: %s", msg.TextBody)
 	}
@@ -213,7 +213,7 @@ func TestRenderAccountEmailEmptyResources(t *testing.T) {
 		AccountID:   "111111111111",
 		AccountName: "test-account",
 		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
-	})
+	}, RenderOptions{})
 	if !strings.Contains(msg.TextBody, "Resources:") {
 		t.Fatalf("resources section should remain: %s", msg.TextBody)
 	}
@@ -236,7 +236,7 @@ func TestRenderAccountEmailShowsOwnerError(t *testing.T) {
 		AccountName: "test-account",
 		OwnerError:  "owner tag is empty",
 		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
-	})
+	}, RenderOptions{})
 	if !strings.Contains(msg.TextBody, "Owner: owner tag is empty") {
 		t.Fatalf("text should show owner error: %s", msg.TextBody)
 	}
@@ -252,7 +252,7 @@ func TestRenderAccountEmailOmitsInventoryWarnings(t *testing.T) {
 		GeneratedAt:    time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
 		InventoryError: "me-south-1: scan timed out after 45s",
 		ResourceCounts: accountreview.ResourceCounts{VPCs: 3},
-	})
+	}, RenderOptions{})
 	if strings.Contains(msg.TextBody, "Inventory warnings") || strings.Contains(msg.HTMLBody, "Inventory warnings") {
 		t.Fatalf("email should omit inventory warnings:\ntext=%s\nhtml=%s", msg.TextBody, msg.HTMLBody)
 	}
@@ -282,9 +282,9 @@ func TestRenderAccountEmailOmitsInventoryWarnings(t *testing.T) {
 
 func TestRenderAccountEmailIncludesOpenShiftClusters(t *testing.T) {
 	msg := RenderAccountEmail(accountreview.AccountDetails{
-		AccountID:   "111111111111",
-		AccountName: "test-account",
-		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		AccountID:      "111111111111",
+		AccountName:    "test-account",
+		GeneratedAt:    time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
 		ResourceCounts: accountreview.ResourceCounts{VPCs: 3},
 		OpenShiftClusters: []accountreview.OpenShiftClusterDetail{{
 			Environment: "Stage",
@@ -294,7 +294,7 @@ func TestRenderAccountEmailIncludesOpenShiftClusters(t *testing.T) {
 			State:       "ready",
 			Region:      "us-west-2",
 		}},
-	})
+	}, RenderOptions{})
 	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
 		if !strings.Contains(body, "OpenShift clusters") || !strings.Contains(body, "stage-cluster") {
 			t.Fatalf("email missing OpenShift clusters:\n%s", body)
@@ -316,7 +316,7 @@ func TestRenderAccountEmailOmitsOpenShiftLookupDetails(t *testing.T) {
 		AccountName:            "test-account",
 		GeneratedAt:            time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
 		OpenShiftClustersError: "token expired for alias rhprod",
-	})
+	}, RenderOptions{})
 	if strings.Contains(msg.TextBody, "token expired") || strings.Contains(msg.HTMLBody, "token expired") {
 		t.Fatalf("email should omit raw OpenShift lookup errors:\n%s", msg.TextBody)
 	}
@@ -365,7 +365,7 @@ func TestRenderOwnerGroupEmail(t *testing.T) {
 			},
 		},
 	}
-	msg := RenderOwnerGroupEmail("jdoe@redhat.com", details)
+	msg := RenderOwnerGroupEmail("jdoe@redhat.com", details, RenderOptions{})
 	if msg.To != "jdoe@redhat.com" {
 		t.Fatalf("To = %q", msg.To)
 	}
@@ -378,8 +378,8 @@ func TestRenderOwnerGroupEmail(t *testing.T) {
 	if !strings.Contains(msg.TextBody, "111111111111") || !strings.Contains(msg.TextBody, "222222222222") {
 		t.Fatalf("text missing accounts: %s", msg.TextBody)
 	}
-	if !strings.Contains(msg.TextBody, "these AWS accounts") {
-		t.Fatalf("deadline should be plural: %s", msg.TextBody)
+	if strings.Contains(msg.TextBody, "these AWS accounts") {
+		t.Fatalf("default group email should not state a deadline: %s", msg.TextBody)
 	}
 	if !strings.Contains(msg.TextBody, "the 2 AWS accounts below") {
 		t.Fatalf("intro should mention account count: %s", msg.TextBody)
@@ -401,5 +401,195 @@ func TestRenderOwnerGroupEmail(t *testing.T) {
 	}
 	if !strings.Contains(msg.HTMLBody, "Accounts in this review") {
 		t.Fatalf("html missing overview heading")
+	}
+}
+
+func TestRenderAccountEmailNoDeadlineByDefault(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{})
+	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
+		if strings.Contains(body, "If we do not hear from you by") {
+			t.Fatalf("default email should not state a deadline:\n%s", body)
+		}
+		if strings.Contains(body, "29 January 2026") {
+			t.Fatalf("default email should not render a reply-by date:\n%s", body)
+		}
+	}
+	if !strings.Contains(msg.TextBody, "- Keep the account\n- Delete the account\n- Request modifications (describe what you need)") {
+		t.Fatalf("default reply options should remain: %s", msg.TextBody)
+	}
+}
+
+func TestRenderAccountEmailDeadlineOptIn(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{
+		DeadlineText: "If we do not hear from you by {date}, we will proceed with deletion.",
+	})
+	want := "If we do not hear from you by 29 January 2026, we will proceed with deletion."
+	if !strings.Contains(msg.TextBody, want) {
+		t.Fatalf("text missing deadline sentence: %s", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>"+want+"</strong>") {
+		t.Fatalf("html missing deadline sentence: %s", msg.HTMLBody)
+	}
+}
+
+func TestRenderAccountEmailDeadlineReplyByDays(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{
+		DeadlineText: "If we do not hear from you by {date}, we will proceed with deletion.",
+		ReplyByDays:  21,
+	})
+	if !strings.Contains(msg.TextBody, "5 February 2026") {
+		t.Fatalf("deadline should use the configured reply window: %s", msg.TextBody)
+	}
+	if strings.Contains(msg.TextBody, "29 January 2026") {
+		t.Fatalf("deadline should not use the default reply window: %s", msg.TextBody)
+	}
+}
+
+func TestRenderOwnerGroupEmailDeadline(t *testing.T) {
+	generated := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	msg := RenderOwnerGroupEmail("jdoe@redhat.com", []accountreview.AccountDetails{
+		{AccountID: "111111111111", AccountName: "a", GeneratedAt: generated},
+		{AccountID: "222222222222", AccountName: "b", GeneratedAt: generated},
+	}, RenderOptions{
+		DeadlineText: "If we do not hear from you by {date}, we will proceed with deletion.",
+	})
+	if !strings.Contains(msg.TextBody, "If we do not hear from you by 29 January 2026, we will proceed with deletion.") {
+		t.Fatalf("group email missing deadline sentence: %s", msg.TextBody)
+	}
+}
+
+func TestRenderAccountEmailCustomSubjectPrefixAndTitle(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{SubjectPrefix: "🔔 Review: ", ActionTitle: "Your response is needed"})
+	if msg.Subject != "🔔 Review: AWS account review: test-account (111111111111)" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+	if !strings.Contains(msg.TextBody, "Your response is needed\n") {
+		t.Fatalf("text missing custom section title: %s", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<h2>Your response is needed</h2>") {
+		t.Fatalf("html missing custom section title: %s", msg.HTMLBody)
+	}
+}
+
+func TestRenderOwnerGroupEmailCustomSubjectPrefix(t *testing.T) {
+	msg := RenderOwnerGroupEmail("jdoe@redhat.com", []accountreview.AccountDetails{
+		{AccountID: "111111111111", AccountName: "a"},
+		{AccountID: "222222222222", AccountName: "b"},
+	}, RenderOptions{SubjectPrefix: "🔔 Review: "})
+	if msg.Subject != "🔔 Review: AWS account review: 2 AWS accounts" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+}
+
+func TestRenderAccountEmailCustomIntro(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{Intro: "Please review {account} (ID {account_id}); {count} account in this email."})
+	want := "Please review AWS account test-account (111111111111) (ID 111111111111); 1 account in this email."
+	if !strings.Contains(msg.TextBody, want) {
+		t.Fatalf("text missing expanded intro:\nwant: %s\n got: %s", want, msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, want) {
+		t.Fatalf("html missing expanded intro: %s", msg.HTMLBody)
+	}
+	if strings.Contains(msg.TextBody, "We are reviewing AWS account") {
+		t.Fatalf("custom intro should replace the built-in intro: %s", msg.TextBody)
+	}
+}
+
+func TestRenderOwnerGroupEmailCustomIntroPlaceholders(t *testing.T) {
+	msg := RenderOwnerGroupEmail("jdoe@redhat.com", []accountreview.AccountDetails{
+		{AccountID: "111111111111", AccountName: "a"},
+		{AccountID: "222222222222", AccountName: "b"},
+	}, RenderOptions{Intro: "We are reviewing {account} ({count} total)."})
+	if !strings.Contains(msg.TextBody, "We are reviewing the 2 AWS accounts below (2 total).") {
+		t.Fatalf("group intro placeholders expanded wrong: %s", msg.TextBody)
+	}
+}
+
+func TestRenderAccountEmailCustomOptions(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{Options: []string{"Keep it", "Archive it"}})
+	if !strings.Contains(msg.TextBody, "- Keep it\n- Archive it") {
+		t.Fatalf("text missing custom options: %s", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<li>Keep it</li><li>Archive it</li>") {
+		t.Fatalf("html missing custom options: %s", msg.HTMLBody)
+	}
+	if strings.Contains(msg.TextBody, "Keep the account") {
+		t.Fatalf("custom options should replace the defaults: %s", msg.TextBody)
+	}
+}
+
+func TestRenderAccountEmailEscapesTemplateTextHTML(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{
+		ActionTitle:  `<script>title</script>`,
+		Intro:        "intro & more",
+		Options:      []string{"<b>opt</b>"},
+		DeadlineText: "deadline <by> {date}",
+	})
+	if strings.Contains(msg.HTMLBody, "<script>") || strings.Contains(msg.HTMLBody, "<b>opt</b>") || strings.Contains(msg.HTMLBody, "deadline <by>") {
+		t.Fatalf("html should escape template text: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "&lt;b&gt;opt&lt;/b&gt;") {
+		t.Fatalf("html should contain the escaped option: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "intro &amp; more") {
+		t.Fatalf("html should escape the intro ampersand: %s", msg.HTMLBody)
+	}
+}
+
+func TestValidateIntroTemplate(t *testing.T) {
+	if err := ValidateIntroTemplate(""); err != nil {
+		t.Fatalf("empty intro: %v", err)
+	}
+	if err := ValidateIntroTemplate("Review {account} ({account_id}), {count} total."); err != nil {
+		t.Fatalf("valid intro: %v", err)
+	}
+	err := ValidateIntroTemplate("Review {acount}.")
+	if err == nil || !strings.Contains(err.Error(), "{acount}") {
+		t.Fatalf("unknown placeholder should fail: %v", err)
+	}
+}
+
+func TestValidateDeadlineTemplate(t *testing.T) {
+	if err := ValidateDeadlineTemplate(""); err != nil {
+		t.Fatalf("empty deadline: %v", err)
+	}
+	if err := ValidateDeadlineTemplate("Reply by {date}."); err != nil {
+		t.Fatalf("valid deadline: %v", err)
+	}
+	err := ValidateDeadlineTemplate("Reply by {data}.")
+	if err == nil || !strings.Contains(err.Error(), "{data}") {
+		t.Fatalf("unknown placeholder should fail: %v", err)
+	}
+	err = ValidateDeadlineTemplate("Reply by {accounts}.")
+	if err == nil || !strings.Contains(err.Error(), "{accounts}") {
+		t.Fatalf("{accounts} should be rejected: %v", err)
 	}
 }
