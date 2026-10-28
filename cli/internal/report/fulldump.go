@@ -1,3 +1,5 @@
+package report
+
 // fulldump.go implements "finops report create executive-summary
 // --data-dump-out": a JSON export of every computed field of the
 // executive-summary report, grouped into separate JSON sections rather than
@@ -6,7 +8,6 @@
 // sections against committed golden dumps. Merge 0 (this skeleton) writes
 // only the report metadata (window, months); later merges extend the dump
 // with their sections as those computations land.
-package report
 
 import (
 	"encoding/json"

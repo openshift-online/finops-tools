@@ -73,10 +73,27 @@ func TestApplyExecutiveSummaryMonthsDefault(t *testing.T) {
 				}
 			}
 
-			applyExecutiveSummaryMonthsDefault(cmd, tc.template)
+			applyExecutiveSummaryMonthsDefault(tc.template)
 			if periodFlags.months != tc.wantMonths {
 				t.Errorf("periodFlags.months = %d, want %d", periodFlags.months, tc.wantMonths)
 			}
 		})
+	}
+}
+
+func TestApplyExecutiveSummaryMonthsDefaultRespectsOtherPeriodModes(t *testing.T) {
+	// A configured defaults.cost.days (applied by applyCostPeriodDefaults
+	// before this default runs) must win: injecting months=5 on top would
+	// turn the config default into a hard "only one period mode" error.
+	orig := periodFlags
+	t.Cleanup(func() { periodFlags = orig })
+
+	cmd := &cobra.Command{Use: "test"}
+	addPeriodFlags(cmd)
+	periodFlags.days = 30
+
+	applyExecutiveSummaryMonthsDefault(reportpkg.TemplateExecutiveSummary)
+	if periodFlags.months != 0 {
+		t.Errorf("periodFlags.months = %d, want 0 when another period mode is already set", periodFlags.months)
 	}
 }

@@ -94,7 +94,7 @@ func init() {
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
 	reportCreateCmd.Flags().StringVar(&reportCreateMappingCSV, "mapping-csv", "", "Path to the account-taxonomy mapping CSV (executive-summary template only, required)")
 	reportCreateCmd.Flags().BoolVar(&reportCreateNoAnomalies, "no-anomalies", false, "Skip ML and statistical anomaly detection (executive-summary template only)")
-	reportCreateCmd.Flags().StringVar(&reportCreateDataDumpOut, "data-dump-out", "", "Optional path to additionally write every computed field as JSON (executive-summary template only; validation tooling for golden-dump diffs)")
+	reportCreateCmd.Flags().StringVar(&reportCreateDataDumpOut, "data-dump-out", "", "Path to write every computed field as JSON (executive-summary template only; required until HTML rendering lands, validation tooling for golden-dump diffs)")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
@@ -123,10 +123,10 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	applyExecutiveSummaryMonthsDefault(cmd, templateName)
 	if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
 		return err
 	}
+	applyExecutiveSummaryMonthsDefault(templateName)
 
 	status := progress.New(cmd.ErrOrStderr(), reportGenerateQuiet)
 
@@ -233,15 +233,17 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 
 // applyExecutiveSummaryMonthsDefault defaults --months to 5 for the
 // executive-summary template (golang-executive-summary-spec.md's default
-// reporting window) when the user hasn't selected any period mode
-// explicitly. Applied before applyCostPeriodDefaults so a configured
-// defaults.cost.months (or any other period flag) still takes precedence.
-func applyExecutiveSummaryMonthsDefault(cmd *cobra.Command, templateName string) {
+// reporting window) when no period mode is selected at all. Applied after
+// applyCostPeriodDefaults so any configured period default
+// (defaults.cost.days, defaults.cost.months, or defaults.cost.from) and any
+// explicit period flag still takes precedence -- injecting months=5 on top
+// of another mode would fail period validation with "only one period mode
+// allowed".
+func applyExecutiveSummaryMonthsDefault(templateName string) {
 	if templateName != reportpkg.TemplateExecutiveSummary {
 		return
 	}
-	if cmd.Flags().Changed("days") || cmd.Flags().Changed("months") ||
-		cmd.Flags().Changed("from") || cmd.Flags().Changed("to") {
+	if periodFlags.days != 0 || periodFlags.months != 0 || periodFlags.from != "" {
 		return
 	}
 	periodFlags.months = 5
