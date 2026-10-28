@@ -20,9 +20,13 @@ The two dimensions are orthogonal: any account selection can be combined with an
 period. Both are validated **before** any AWS API call is made, so an invalid
 combination fails fast with a clear error.
 
-These selectors are shared by `finops account get-cost`, `finops report create`,
-`finops snapshot list`, and `finops account details` (see the
-[command matrix](#command-matrix) for per-command differences).
+The **account selection** dimension is shared by `finops account get-cost`,
+`finops report create`, `finops snapshot list`, and `finops account details`.
+Two scoping caveats: the `hcp-hierarchy` report template is Snowflake-based
+(`--snowflake-alias`) and rejects AWS selector flags, and `finops snapshot list`
+uses an `--older-than-days` age cutoff instead of a period window. The
+**time selection** dimension applies to the cost query commands only. See the
+[command matrix](#command-matrix) for per-command differences.
 
 ---
 
@@ -441,10 +445,12 @@ Jan 1                                                     Mar 31   ‖   Apr 1
 
 Key subtleties:
 
-- `--months N` always covers **N complete preceding months plus the current
+- `--months N` normally covers **N complete preceding months plus the current
   month-to-date** (e.g. `--months 3` on Oct 28 covers Jul 1 – Oct 27). On the
   1st of a month the anchor month shifts to the previous month, so the window
-  still starts on a clean month boundary.
+  excludes the just-started month entirely: `--months 3` on 2026-10-01 UTC
+  resolves to `[2026-06-01, 2026-10-01)` — June through September, four
+  complete months with no month-to-date.
 - `--from` without `--to` runs **through the end anchor** — with
   `--exclude-recent-days 2` and today Oct 28 it stops at Oct 25, not Oct 27.
 - `--to` must not exceed `lastIncludable` (today − N − 1): a future or
@@ -455,11 +461,17 @@ Key subtleties:
 ### Config defaults (`defaults.cost.*`)
 
 When a period flag is omitted, the matching value is read from the finops config
-(`config default set` / `config.yaml`). Precedence:
+(`config default set` / `config.yaml`). Precedence applies **per key**:
 
 ```
-CLI flag  >  defaults.cost.*  >  built-in default (last 30 calendar days)
+CLI flag  >  matching defaults.cost.* key  >  built-in default (last 30 calendar days)
 ```
+
+Because defaults fill in per flag, a CLI flag for one mode does **not** override
+a configured default for a different mode — the two combine and fail validation.
+For example, `--days 7` with `cost.months: "3"` in the config results in
+`only one period mode allowed (use one of --days, --months, or --from/--to)`.
+Keep the config to a single mode and override it with that mode's flag.
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -493,9 +505,9 @@ These defaults apply to `finops account get-cost` and `finops report create`;
 | Command | Account selection modes | `--include-closed-accounts` | Org cache flags | Time selection |
 |---------|--------------------------|:---:|:---:|----------------|
 | `finops account get-cost` | All 4 | ✓ | ✓ | `--days` / `--months` / `--from`/`--to` + `--exclude-recent-days`, with `defaults.cost.*` |
-| `finops report create` | All 4 | · | ✓ | Same period flags and defaults as `get-cost` |
-| `finops snapshot list` | All 4 (ACTIVE members only) | · | ✓ | n/a — uses an `--older-than` age cutoff, not a CE query window |
-| `finops account details` | All 4 (ACTIVE members only) | · | ✓ | `--months` (default `6`, monthly cost-history buckets) + `--exclude-recent-days` |
+| `finops report create` | All 4 — `costs`, `savings-plans`, `cost-anomalies` templates (`hcp-hierarchy` uses `--snowflake-alias` and rejects AWS selector flags) | · | ✓ | Same period flags and defaults as `get-cost` |
+| `finops snapshot list` | All 4 (ACTIVE-only default applies to `--payer`/`--ou`; see [account states](#account-states-by-mode)) | · | ✓ | n/a — uses an `--older-than-days` age cutoff (default `365`), not a CE query window |
+| `finops account details` | All 4 (ACTIVE-only default applies to `--payer`/`--ou`; see [account states](#account-states-by-mode)) | · | ✓ | `--months` (default `6`, monthly cost-history buckets) + `--exclude-recent-days` |
 | `finops tag list` / `add` / `update` | Single explicit account (`--account-alias` or `--account-id`, optional `--payer` credential hint) | · | · | n/a |
 | `finops aws list-ous` | `--payer` | · | · | n/a |
 
