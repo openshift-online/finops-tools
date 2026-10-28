@@ -44,6 +44,24 @@ func TestFormatGetCostAndUsage(t *testing.T) {
 	}
 }
 
+func TestLogGetDimensionValuesIncludesWindowAndPagination(t *testing.T) {
+	var lines []string
+	ctx := WithLog(context.Background(), func(line string) { lines = append(lines, line) })
+	LogGetDimensionValues(ctx, nil)
+	LogGetDimensionValues(ctx, &costexplorer.GetDimensionValuesInput{
+		Dimension: types.DimensionUsageType, Context: types.ContextCostAndUsage,
+		TimePeriod: &types.DateInterval{Start: aws.String("2026-09-20"), End: aws.String("2026-10-20")}, NextPageToken: aws.String("next"),
+	})
+	if len(lines) != 1 {
+		t.Fatalf("logs = %v", lines)
+	}
+	for _, want := range []string{"CostExplorer.GetDimensionValues", "dimension=USAGE_TYPE", "context=COST_AND_USAGE", "start=2026-09-20", "end=2026-10-20", "page=next"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("log missing %q: %s", want, lines[0])
+		}
+	}
+}
+
 func TestFormatCEFilterOr(t *testing.T) {
 	got := formatCEFilter(&types.Expression{
 		Or: []types.Expression{
