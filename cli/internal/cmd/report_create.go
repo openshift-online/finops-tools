@@ -25,6 +25,9 @@ var (
 	reportGenerateSkipOrgCache    bool
 	reportGenerateRefreshOrgCache bool
 	reportCreateSnowflakeAlias    string
+	reportCreateMappingCSV        string
+	reportCreateNoAnomalies       bool
+	reportCreateDataDumpOut       string
 	reportGenerateWorkers         int
 )
 
@@ -89,6 +92,9 @@ func init() {
 	})
 	reportCreateCmd.Flags().StringVar(&reportGenerateFormat, "format", reportpkg.FormatHTML, "Output format (supported: html)")
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
+	reportCreateCmd.Flags().StringVar(&reportCreateMappingCSV, "mapping-csv", "", "Path to the account-taxonomy mapping CSV (executive-summary template only, required)")
+	reportCreateCmd.Flags().BoolVar(&reportCreateNoAnomalies, "no-anomalies", false, "Skip ML and statistical anomaly detection (executive-summary template only)")
+	reportCreateCmd.Flags().StringVar(&reportCreateDataDumpOut, "data-dump-out", "", "Optional path to additionally write every computed field as JSON (executive-summary template only; validation tooling for golden-dump diffs)")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
@@ -117,6 +123,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	applyExecutiveSummaryMonthsDefault(cmd, templateName)
 	if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
 		return err
 	}
@@ -138,6 +145,16 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	switch targetMode {
 	case reportpkg.AccountTargetsSnowflake:
 		snowflakeAlias = strings.TrimSpace(reportCreateSnowflakeAlias)
+	case reportpkg.AccountTargetsRequiredAndSnowflake:
+		snowflakeAlias = strings.TrimSpace(reportCreateSnowflakeAlias)
+		targets, err = resolveCostTargets(
+			cmd, cfg, &sel,
+			awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
+			status,
+		)
+		if err != nil {
+			return err
+		}
 	default:
 		targets, err = resolveCostTargets(
 			cmd, cfg, &sel,
@@ -164,6 +181,10 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		SnowflakeAlias:  snowflakeAlias,
 		Workers:         reportGenerateWorkers,
 		SelectionRootID: sel.SelectionRootID,
+
+		MappingCSVPath:  strings.TrimSpace(reportCreateMappingCSV),
+		NoAnomalies:     reportCreateNoAnomalies,
+		DataDumpOutPath: strings.TrimSpace(reportCreateDataDumpOut),
 	}
 	if err := gen.Validate(in); err != nil {
 		return err
@@ -208,4 +229,20 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+// applyExecutiveSummaryMonthsDefault defaults --months to 5 for the
+// executive-summary template (golang-executive-summary-spec.md's default
+// reporting window) when the user hasn't selected any period mode
+// explicitly. Applied before applyCostPeriodDefaults so a configured
+// defaults.cost.months (or any other period flag) still takes precedence.
+func applyExecutiveSummaryMonthsDefault(cmd *cobra.Command, templateName string) {
+	if templateName != reportpkg.TemplateExecutiveSummary {
+		return
+	}
+	if cmd.Flags().Changed("days") || cmd.Flags().Changed("months") ||
+		cmd.Flags().Changed("from") || cmd.Flags().Changed("to") {
+		return
+	}
+	periodFlags.months = 5
 }

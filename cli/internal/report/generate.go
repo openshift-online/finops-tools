@@ -27,6 +27,19 @@ type GenerateInput struct {
 	SnowflakeAlias   string
 	Workers          int
 	SelectionRootID  string
+
+	// MappingCSVPath is the path to the executive-summary report's required
+	// external account-taxonomy mapping CSV (golang-executive-summary-spec.md
+	// section 3.4). Empty for reports that don't use it.
+	MappingCSVPath string
+	// NoAnomalies skips the executive-summary report's ML and statistical
+	// anomaly detection/fetch (spec 7.4), e.g. to speed up iteration.
+	NoAnomalies bool
+	// DataDumpOutPath, when non-empty, makes the executive-summary report
+	// additionally write every computed field as JSON to this path -- see
+	// fulldump.go. This is the report's validation tooling (golden-dump
+	// diffs), not a product feature. Ignored by every other report template.
+	DataDumpOutPath string
 }
 
 // SnowflakeMartOpener opens a Snowflake connection for mart-backed reports.
@@ -52,6 +65,9 @@ func GeneratorFor(name string) (Generator, error) {
 	if name == TemplateHCPHierarchy {
 		return newHCPHierarchyGenerator(snowflakeMartOpener), nil
 	}
+	if name == TemplateExecutiveSummary {
+		return newExecutiveSummaryGenerator(snowflakeMartOpener), nil
+	}
 	g, ok := generators[name]
 	if !ok {
 		return nil, fmt.Errorf("unsupported template %q", name)
@@ -73,6 +89,10 @@ const (
 	AccountTargetsRequired AccountTargetMode = iota
 	// AccountTargetsSnowflake uses --snowflake-alias, not AWS targets.
 	AccountTargetsSnowflake
+	// AccountTargetsRequiredAndSnowflake needs both AWS account targets
+	// (e.g. --account-alias rh-control) and --snowflake-alias
+	// (executive-summary only, which joins both in memory).
+	AccountTargetsRequiredAndSnowflake
 )
 
 // AccountTargetModeFor returns how a template uses account targeting flags.
@@ -80,6 +100,8 @@ func AccountTargetModeFor(templateName string) AccountTargetMode {
 	switch templateName {
 	case TemplateHCPHierarchy:
 		return AccountTargetsSnowflake
+	case TemplateExecutiveSummary:
+		return AccountTargetsRequiredAndSnowflake
 	default:
 		return AccountTargetsRequired
 	}
