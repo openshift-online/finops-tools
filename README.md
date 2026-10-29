@@ -556,6 +556,8 @@ STS validation must report the **linked** account ID. This registers credentials
 
 Fetch **Net Amortized Cost** from AWS Cost Explorer for a configurable date range (default: last 30 calendar days, or `defaults.cost.*` in config). Payer and linked account aliases are supported; linked accounts query Cost Explorer through the registered payer.
 
+Cost queries are parameterized along two dimensions — **account selection** and **time selection**. See [`docs/query-selectors.md`](docs/query-selectors.md) for an in-depth guide to both: the four account selection modes, OU scope suffixes, the period modes and Cost Explorer lag handling, with decision flowcharts, org-tree diagrams, and worked date-range examples.
+
 **Account selection uses exactly one mode** (combining modes is an error):
 
 | Mode | Flags |
