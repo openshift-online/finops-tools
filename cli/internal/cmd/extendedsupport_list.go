@@ -22,6 +22,7 @@ var (
 	extendedSupportListPayer           string
 	extendedSupportListQuiet           bool
 	extendedSupportListRegions         string
+	extendedSupportListSkipRegions     []string
 	extendedSupportListRole            string
 	extendedSupportListServices        string
 	extendedSupportListSkipOrgCache    bool
@@ -130,6 +131,9 @@ Examples:
 		if _, err := extendedsupport.ParseRegions(extendedSupportListRegions); err != nil {
 			return err
 		}
+		if _, err := skipRegionsForCommand(cmd, extendedSupportListSkipRegions); err != nil {
+			return err
+		}
 		if err := validateWorkers(extendedSupportListWorkers); err != nil {
 			return err
 		}
@@ -143,6 +147,7 @@ Examples:
 
 func init() {
 	extendedSupportCmd.AddCommand(extendedSupportListCmd)
+	bindSkipRegionsFlag(extendedSupportListCmd, &extendedSupportListSkipRegions)
 	bindAWSTargetFlags(extendedSupportListCmd, awsTargetFlagRefs{
 		Account:         &extendedSupportListAccount,
 		AccountAliases:  &extendedSupportListAccountAliases,
@@ -179,6 +184,10 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	regions, err := extendedsupport.ParseRegions(extendedSupportListRegions)
+	if err != nil {
+		return err
+	}
+	skipRegions, err := skipRegionsForCommand(cmd, extendedSupportListSkipRegions)
 	if err != nil {
 		return err
 	}
@@ -231,7 +240,7 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 
 	if len(costTargets) == 0 {
 		return output.WriteExtendedSupportListResult(out, format, extendedsupport.Result{
-			Summary: extendedsupport.Summary{BillingSelection: billingSelection},
+			Summary: extendedsupport.Summary{BillingSelection: billingSelection, ExcludedRegions: skipRegions},
 		})
 	}
 
@@ -254,11 +263,12 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	query := extendedsupport.Query{
-		Targets:  scanTargets,
-		Services: services,
-		Regions:  regions,
-		Workers:  extendedSupportListWorkers,
-		Now:      scanNow,
+		Targets:     scanTargets,
+		Services:    services,
+		Regions:     regions,
+		SkipRegions: skipRegions,
+		Workers:     extendedSupportListWorkers,
+		Now:         scanNow,
 	}
 	for _, service := range services {
 		if service == extendedsupport.ServiceEKS {
@@ -321,6 +331,7 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 	}
 
 	result.Summary.BillingSelection = billingSelection
+	result.Summary.ExcludedRegions = skipRegions
 	for _, warning := range result.Summary.LifecycleWarnings {
 		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning); err != nil {
 			return err

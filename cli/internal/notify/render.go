@@ -323,6 +323,9 @@ func writeAccountText(b *strings.Builder, d accountreview.AccountDetails) {
 
 func writeInventoryText(b *strings.Builder, d accountreview.AccountDetails) {
 	b.WriteString("\nResources:\n")
+	if note := d.InventoryScopeNote(); note != "" {
+		fmt.Fprintf(b, "  %s\n", note)
+	}
 	tables := d.NonemptyInventoryTables()
 	counts := d.NonzeroInventoryCounts()
 	for _, table := range tables {
@@ -539,6 +542,9 @@ func writeAccountHTML(b *strings.Builder, d accountreview.AccountDetails) {
 
 func writeInventoryHTML(b *strings.Builder, d accountreview.AccountDetails) {
 	b.WriteString(`<h3>Resources</h3>`)
+	if note := d.InventoryScopeNote(); note != "" {
+		fmt.Fprintf(b, `<p class="meta" style="%s">%s</p>`, htmlMetaStyle, htmlEscape(note))
+	}
 	tables := d.NonemptyInventoryTables()
 	counts := d.NonzeroInventoryCounts()
 	for _, table := range tables {

@@ -23,6 +23,8 @@ type BuildInput struct {
 	CostTargets []cost.AccountTarget
 	// InventoryTargets, when empty, skips inventory.Scan entirely (cost-only reports).
 	InventoryTargets []inventory.AccountTarget
+	// SkipRegions limits regional AWS inventory only; costs and global inventory remain account-wide.
+	SkipRegions []string
 	// EmailDomain is appended when the owner tag has no '@' (default @redhat.com).
 	EmailDomain       string
 	Months            int
@@ -79,10 +81,11 @@ func Build(ctx context.Context, in BuildInput) (BuildResult, error) {
 			onInventoryProgress = in.Progress.Step
 		}
 		invResult, scanErr := in.scanInventory(ctx, inventory.Query{
-			Targets:    in.InventoryTargets,
-			Workers:    in.Workers,
-			Now:        in.Now,
-			OnProgress: onInventoryProgress,
+			Targets:     in.InventoryTargets,
+			SkipRegions: in.SkipRegions,
+			Workers:     in.Workers,
+			Now:         in.Now,
+			OnProgress:  onInventoryProgress,
 		})
 		if scanErr != nil {
 			return BuildResult{}, fmt.Errorf("scan inventory: %w", scanErr)

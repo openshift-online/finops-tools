@@ -101,6 +101,7 @@ type Query struct {
 	Targets         []AccountTarget
 	Services        []Service
 	Regions         []string
+	SkipRegions     []string // Excluded from regional discovery and EKS catalog preloading.
 	AccountProgress AccountProgress
 	Now             time.Time
 	// EKSVersionCatalog is shared across accounts and may be retained for retries.
@@ -187,6 +188,7 @@ type Summary struct {
 	ByService             []ServiceSummary  `json:"by_service,omitempty"`
 	ByAccount             []AccountSummary  `json:"by_account,omitempty"`
 	SkippedRegions        []RegionWarning   `json:"skipped_regions,omitempty"`
+	ExcludedRegions       []string          `json:"excluded_regions,omitempty"`
 	SkippedAccounts       []AccountWarning  `json:"skipped_accounts,omitempty"`
 	UnclassifiedResources []ResourceWarning `json:"unclassified_resources,omitempty"`
 	BillingSelection      *BillingSelection `json:"billing_selection,omitempty"`

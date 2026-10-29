@@ -14,18 +14,18 @@ import (
 type Kind string
 
 const (
-	KindEBSSnapshot         Kind = "ebs-snapshot"
-	KindRDSSnapshot         Kind = "rds-snapshot"
-	KindRDSClusterSnapshot  Kind = "rds-cluster-snapshot"
+	KindEBSSnapshot        Kind = "ebs-snapshot"
+	KindRDSSnapshot        Kind = "rds-snapshot"
+	KindRDSClusterSnapshot Kind = "rds-cluster-snapshot"
 )
 
 // CostBasis describes how estimated monthly cost was calculated.
 const (
-	CostBasisVolumeSizeEstimate = "volume_size_estimate"
+	CostBasisVolumeSizeEstimate  = "volume_size_estimate"
 	CostBasisEBSIncrementalChain = "ebs_incremental_chain"
-	CostBasisEBSNoIncremental   = "ebs_no_incremental"
-	CostBasisRDSWithinFreeTier  = "rds_within_free_tier"
-	CostBasisRDSRegionalExcess  = "rds_regional_excess_share"
+	CostBasisEBSNoIncremental    = "ebs_no_incremental"
+	CostBasisRDSWithinFreeTier   = "rds_within_free_tier"
+	CostBasisRDSRegionalExcess   = "rds_regional_excess_share"
 )
 
 // DefaultOlderThanDays is the default --older-than-days value for snapshot list.
@@ -113,6 +113,7 @@ type Query struct {
 	OlderThan       time.Duration
 	Types           []Kind
 	Regions         []string
+	SkipRegions     []string // Excluded from regional resource discovery, even when present in Regions.
 	MinSizeGiB      float64
 	AccountProgress AccountProgress
 	Now             time.Time
@@ -157,18 +158,19 @@ type AccountSummary struct {
 
 // Summary holds aggregate totals for a snapshot scan.
 type Summary struct {
-	TotalCount              int              `json:"total_count"`
-	EstimatedMonthlyCostUSD float64          `json:"estimated_monthly_cost_usd"`
+	TotalCount                          int                          `json:"total_count"`
+	EstimatedMonthlyCostUSD             float64                      `json:"estimated_monthly_cost_usd"`
 	RDSBackupRegionalExcessGiB          float64                      `json:"rds_backup_regional_excess_gib,omitempty"`
 	RDSBackupEstimatedMonthlyRunRateUSD float64                      `json:"rds_backup_estimated_monthly_run_rate_usd,omitempty"`
 	EBSEstimatedMonthlyRunRateUSD       float64                      `json:"ebs_estimated_monthly_run_rate_usd,omitempty"`
 	BilledCosts                         []AccountBilledSnapshotCosts `json:"billed_costs,omitempty"`
-	OlderThanDays           int              `json:"older_than_days"`
-	ByKind                  []KindSummary    `json:"by_kind"`
-	ByAccount               []AccountSummary `json:"by_account"`
-	SkippedRegions          []RegionWarning  `json:"skipped_regions,omitempty"`
-	SkippedAccounts         []AccountWarning `json:"skipped_accounts,omitempty"`
-	CostDisclaimer          string           `json:"cost_disclaimer"`
+	OlderThanDays                       int                          `json:"older_than_days"`
+	ByKind                              []KindSummary                `json:"by_kind"`
+	ByAccount                           []AccountSummary             `json:"by_account"`
+	SkippedRegions                      []RegionWarning              `json:"skipped_regions,omitempty"`
+	ExcludedRegions                     []string                     `json:"excluded_regions,omitempty"`
+	SkippedAccounts                     []AccountWarning             `json:"skipped_accounts,omitempty"`
+	CostDisclaimer                      string                       `json:"cost_disclaimer"`
 }
 
 // Result is the output of Fetch.

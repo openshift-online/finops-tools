@@ -26,6 +26,7 @@ type AccountTarget struct {
 type Query struct {
 	Targets      []AccountTarget
 	Regions      []string
+	SkipRegions  []string // Excluded from regional scans; global S3/Route53 scans remain account-wide.
 	Workers      int
 	Now          time.Time
 	OnProgress   func(message string)
@@ -54,6 +55,8 @@ type AccountInventory struct {
 	VPCs            []VPC            `json:"vpcs,omitempty"`
 	// SkippedRegions records per-region service API failures (EC2, RDS, ELB, Lambda).
 	SkippedRegions []RegionWarning `json:"skipped_regions,omitempty"`
+	// ExcludedRegions lists intentional regional exclusions, separate from failures.
+	ExcludedRegions []string `json:"excluded_regions,omitempty"`
 	// Warnings records account-level failures (credential load, list regions, Route53, S3).
 	Warnings []string `json:"warnings,omitempty"`
 }

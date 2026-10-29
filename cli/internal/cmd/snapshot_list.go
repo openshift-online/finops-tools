@@ -25,6 +25,7 @@ var (
 	snapshotListPayer           string
 	snapshotListQuiet           bool
 	snapshotListRegions         string
+	snapshotListSkipRegions     []string
 	snapshotListRole            string
 	snapshotListSkipOrgCache    bool
 	snapshotListRefreshOrgCache bool
@@ -94,6 +95,9 @@ Examples:
 		if _, err := snapshot.ParseRegions(snapshotListRegions); err != nil {
 			return err
 		}
+		if _, err := skipRegionsForCommand(cmd, snapshotListSkipRegions); err != nil {
+			return err
+		}
 		if err := validateWorkers(snapshotListWorkers); err != nil {
 			return err
 		}
@@ -116,6 +120,7 @@ func init() {
 	snapshotListCmd.Flags().IntVar(&snapshotListOlderThanDays, "older-than-days", snapshot.DefaultOlderThanDays, "List snapshots older than this many days")
 	snapshotListCmd.Flags().StringVar(&snapshotListTypes, "types", "ebs,rds", "Snapshot types to scan: ebs, rds (comma-separated)")
 	snapshotListCmd.Flags().StringVar(&snapshotListRegions, "regions", "", "Limit scan to comma-separated AWS regions (default: all enabled regions)")
+	bindSkipRegionsFlag(snapshotListCmd, &snapshotListSkipRegions)
 	snapshotListCmd.Flags().Float64Var(&snapshotListMinSizeGiB, "min-size-gib", 0, "Skip snapshots smaller than this size in GiB")
 	snapshotListCmd.Flags().StringVar(&snapshotListFormat, "format", string(output.FormatPrettyPrint),
 		"Output format: pretty-print, json, csv")
@@ -144,6 +149,10 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	regions, err := snapshot.ParseRegions(snapshotListRegions)
+	if err != nil {
+		return err
+	}
+	skipRegions, err := skipRegionsForCommand(cmd, snapshotListSkipRegions)
 	if err != nil {
 		return err
 	}
@@ -190,8 +199,9 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	if len(costTargets) == 0 {
 		return output.WriteSnapshotListResult(out, format, snapshot.Result{
 			Summary: snapshot.Summary{
-				OlderThanDays:  snapshotListOlderThanDays,
-				CostDisclaimer: "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
+				OlderThanDays:   snapshotListOlderThanDays,
+				ExcludedRegions: skipRegions,
+				CostDisclaimer:  "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
 			},
 		})
 	}
@@ -218,6 +228,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		return output.WriteSnapshotListResult(out, format, snapshot.Result{
 			Summary: snapshot.Summary{
 				OlderThanDays:   snapshotListOlderThanDays,
+				ExcludedRegions: skipRegions,
 				SkippedAccounts: skippedAccounts,
 				CostDisclaimer:  "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
 			},
@@ -233,6 +244,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 		OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
 		Types:           types,
 		Regions:         regions,
+		SkipRegions:     skipRegions,
 		MinSizeGiB:      snapshotListMinSizeGiB,
 		AccountProgress: scanBar,
 		Workers:         snapshotListWorkers,

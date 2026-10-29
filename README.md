@@ -678,6 +678,7 @@ finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner
 | `--email-deadline` | With `--send`, add a deadline sentence (placeholder: `{date}`); omitted means no deadline |
 | `--email-reply-by-days` | With `--email-deadline`, days after report generation for `{date}` (default: `14`) |
 | `--months` | Calendar months of cost history to include (default: `6`) |
+| `--skip-regions` | Exclude regions from regional AWS inventory (comma-separated or repeatable); S3/Route53, costs, and OpenShift lookup remain account-wide |
 | `--exclude-recent-days` | Omit the last N UTC days from the cost end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
 | `--snowflake-alias` | Snowflake account alias for OpenShift cluster lookup (default: `snowflake.account_alias`) |
@@ -693,6 +694,22 @@ When `inventory_error` is set, the AWS inventory scan was incomplete: JSON omits
 `--group-by`, `--redirect-prefix`, and the owner-email template flags (`--email-subject-prefix`, `--email-action-title`, `--email-intro`, `--email-option`, `--email-deadline`, `--email-reply-by-days`) require `--send`.
 
 Gmail API quota/billing defaults to the `hcmfinops` GCP project (via API client options, not by changing ADC). Override with `FINOPS_GMAIL_QUOTA_PROJECT`.
+
+### Region selection for resource scans
+
+`finops account details`, `finops snapshot list`, and `finops extended-support list` accept `--skip-regions` to avoid regional resource discovery in one or more AWS regions. Supply a comma-separated list, repeat the flag, or combine both forms. Region names are trimmed and deduplicated. An explicitly empty list is rejected.
+
+```bash
+finops extended-support list --payer rh-control --skip-regions me-south-1,ap-east-1
+finops snapshot list --payer rh-control --skip-regions me-south-1 --skip-regions ap-east-1
+finops account details --account-alias my-linked --skip-regions me-south-1
+```
+
+By default, each account's enabled regions are discovered separately and exclusions are removed before regional scans start. When `--regions` is supplied on snapshot or extended-support commands, exclusions are removed from that explicit list instead. For example, `--regions us-east-1,us-west-2 --skip-regions us-west-2` scans only `us-east-1`. Excluding every selected region performs no regional resource calls and does not fall back to scanning all regions. Extended-support also applies exclusions to regional EKS catalog preloading and the skipped-account retry.
+
+Exclusions apply to regional resource discovery. Authentication, enabled-region discovery, Cost Explorer, the global AWS Health lifecycle catalog, and account details' global S3/Route53 inventory and Snowflake OpenShift lookup still run. These calls can use endpoints in an excluded region. S3 buckets remain in account-wide inventory even when located in an excluded region. Snapshot billed cost amounts remain account-wide.
+
+Pretty-print output identifies intentional exclusions separately from scan failures. JSON includes the normalized requested exclusions under `summary.excluded_regions` for snapshots and extended-support, and under `excluded_regions` on each account-details record. Account-details CSV includes `excluded_region` rows; snapshot and extended-support CSV remain findings-only. Account details and owner emails display the regional inventory scope, omit “None found” claims for AWS inventory, and omit zero resource-count fields/CSV rows when exclusions are present. Intentional exclusions do not become inventory errors or trigger account retries.
 
 ### Snapshot (AWS)
 
@@ -712,6 +729,7 @@ finops snapshot list --account-id 333333333333 --payer rhc --older-than-days 90 
 | `--older-than-days` | List snapshots older than this many days (default: `365`) |
 | `--types` | Snapshot types to scan: `ebs`, `rds`, or comma-separated (default: `ebs,rds`) |
 | `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
+| `--skip-regions` | Exclude regions after selection (comma-separated or repeatable; exclusions override `--regions`) |
 | `--min-size-gib` | Skip snapshots smaller than this size in GiB (default: `0`) |
 | `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same account selection as `finops account get-cost` (`--ou`/`--payer` are ACTIVE members only; `--include-closed-accounts` is get-cost only) |
 | `--role` | Linked-account IAM role name. Overrides the alias's stored role when set; otherwise the alias role, then `defaults.aws.linked_role` |
@@ -777,6 +795,7 @@ Each run shares validated payer configuration and an STS client across the payer
 |------|-------------|
 | `--services` | Services to scan: `rds`, `eks`, `elasticache`, `opensearch` (comma-separated; default `rds,eks,elasticache,opensearch`) |
 | `--regions` | Limit scan to comma-separated AWS regions (default: all enabled regions) |
+| `--skip-regions` | Exclude regions from resource scans and EKS catalog preloading (comma-separated or repeatable; exclusions override `--regions`) |
 | `--account-id` / `--account-alias` / `--ou` / `--tag` / `--payer` | Same selector forms as `finops account get-cost`; `--ou`/`--payer` are ACTIVE members only. `--payer` alone additionally applies the Cost Explorer candidate filter |
 | `--full-scan` | With `--payer` alone, bypass Cost Explorer and scan every active member |
 | `--billing-lookback-days` | UTC calendar days including today used for payer-wide billing selection (default: `30`; minimum: `1`) |
