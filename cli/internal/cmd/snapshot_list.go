@@ -41,7 +41,8 @@ var snapshotListCmd = &cobra.Command{
 	Long: `Discover EBS and RDS snapshots older than a cutoff and estimate monthly storage cost.
 
 Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone
-(--ou/--payer select ACTIVE members only). Linked member accounts are scanned using role assumption from the payer.
+(--ou/--payer select ACTIVE members only). --payer accepts comma-separated aliases and unions
+members across those organizations. Linked member accounts are scanned using role assumption from the payer.
 Accounts that cannot be assumed into, or that fail credentialed API calls during the scan,
 are skipped and listed under "Skipped accounts" in the output.
 
@@ -61,6 +62,7 @@ Examples:
   finops snapshot list --account-alias rh-control
   finops snapshot list --account-alias rh-control --older-than-days 365 --format json
   finops snapshot list --payer rh-control
+  finops snapshot list --payer rh-control,osd-staging-1
   finops snapshot list --payer rh-control --tag organization
   finops snapshot list --ou ou-abcd-12345678 --payer rh-control --types ebs`,
 	Args: cobra.NoArgs,

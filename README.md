@@ -562,10 +562,10 @@ Cost queries are parameterized along two dimensions — **account selection** an
 
 | Mode | Flags |
 |------|-------|
-| Explicit accounts | `--account-id` and/or `--account-alias` (optional `--payer` for unregistered member IDs) |
-| Entire org | `--payer` alone |
-| OU / org-root members | `--payer` + `--ou` (optional scope suffix per ID: `/`, `/*`, `/**`) |
-| Tag match | `--payer` + `--tag KEY[=VALUE]` |
+| Explicit accounts | `--account-id` and/or `--account-alias` (optional single `--payer` for unregistered member IDs) |
+| Entire org | `--payer` alone. Comma-separated aliases union members across those organizations |
+| OU / org-root members | `--payer` + `--ou` (optional scope suffix per ID: `/`, `/*`, `/**`). Each OU is resolved in every listed payer |
+| Tag match | `--payer` + `--tag KEY[=VALUE]`, matched in every listed payer |
 
 ```bash
 finops config account add aws 123456789012 --alias rh-control
@@ -588,6 +588,9 @@ finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
 finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
 finops account get-cost --ou r-xxxx/ --payer rh-control            # accounts directly under org root
 finops account get-cost --payer rh-control
+finops account get-cost --payer rh-control,osd-staging-1
+finops account get-cost --payer rh-control,osd-staging-1 --tag env=prod
+finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-control,osd-staging-1
 finops account get-cost --payer rh-control --group-by ou
 finops account get-cost --payer rh-control --tag organization
 finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
@@ -702,6 +705,7 @@ Find **EBS and RDS snapshots** older than a cutoff and estimate monthly storage 
 finops snapshot list --account-alias rh-control
 finops snapshot list --account-alias rh-control --older-than-days 365 --format json
 finops snapshot list --payer rh-control
+finops snapshot list --payer rh-control,osd-staging-1
 finops snapshot list --payer rh-control --tag organization
 finops snapshot list --ou ou-abcd-12345678 --payer rh-control --types ebs
 finops snapshot list --account-id 333333333333 --payer rhc --older-than-days 90 --format csv

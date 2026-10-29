@@ -240,8 +240,44 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 	if len(q.Accounts) == 0 {
 		return CostResult{}, errors.New("at least one account is required")
 	}
-	targets := FilterOverlappingTargets(q.Accounts)
+	q.Accounts = FilterOverlappingTargets(q.Accounts)
+	groups := GroupByCredentialsAccount(q.Accounts)
+	if len(groups) <= 1 {
+		return fetchCredentialGroup(ctx, q)
+	}
 
+	// GroupByOU across payers fetches linked-account rows per payer, merges them,
+	// then rolls up once. Rolling up inside each payer first flattens the tree.
+	deferOURollup := q.GroupBy == GroupByOU
+	ids := SortedCredentialAccountIDs(groups)
+	results := make([]CostResult, 0, len(ids))
+	for _, id := range ids {
+		sub := q
+		sub.Accounts = groups[id]
+		if deferOURollup {
+			sub.GroupBy = GroupByAccount
+			sub.AWSFetch = awsFetchWithoutOURollup(sub.AWSFetch)
+		}
+		result, err := fetchCredentialGroup(ctx, sub)
+		if err != nil {
+			return CostResult{}, err
+		}
+		results = append(results, result)
+	}
+	merged, err := MergeResults(results)
+	if err != nil {
+		return CostResult{}, err
+	}
+	if deferOURollup {
+		merged.GroupBy = GroupByOU
+		merged.Breakdown = rollupOUBreakdown(merged.Breakdown, q.AWSFetch)
+	}
+	return merged, nil
+}
+
+// fetchCredentialGroup fetches costs for targets that share one credentials account.
+func fetchCredentialGroup(ctx context.Context, q CostQuery) (CostResult, error) {
+	targets := q.Accounts
 	if _, ok := planBulkFetch(targets); ok {
 		reportBulkFetchProgress(q.Progress, len(targets), q.GroupBy)
 		switch q.Provider {
@@ -275,11 +311,8 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		single := q
 		single.Accounts = []AccountTarget{acct}
 		single.GroupBy = fetchGroupBy
-		if deferOURollup && single.AWSFetch != nil {
-			cp := *single.AWSFetch
-			cp.AccountOUBuckets = nil
-			cp.OUHierarchy = nil
-			single.AWSFetch = &cp
+		if deferOURollup {
+			single.AWSFetch = awsFetchWithoutOURollup(single.AWSFetch)
 		}
 
 		var r CostResult
@@ -312,6 +345,16 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 	return merged, nil
 }
 
+func awsFetchWithoutOURollup(opts *AWSFetchOptions) *AWSFetchOptions {
+	if opts == nil {
+		return nil
+	}
+	cp := *opts
+	cp.AccountOUBuckets = nil
+	cp.OUHierarchy = nil
+	return &cp
+}
+
 // FetchDaily retrieves per-day net amortized costs for one or more accounts.
 func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, error) {
 	if len(q.Accounts) == 0 {
@@ -319,37 +362,27 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 	}
 	switch q.Provider {
 	case ProviderAWS, "":
-		targets := FilterOverlappingTargets(q.Accounts)
-		if _, ok := planBulkFetch(targets); ok {
-			reportBulkFetchProgress(q.Progress, len(targets), GroupByNone)
-			opts := fetchAWSOptions{Now: time.Now()}
-			return fetchAWSDailyNetAmortizedBulk(ctx, q, targets, opts)
+		q.Accounts = FilterOverlappingTargets(q.Accounts)
+		groups := GroupByCredentialsAccount(q.Accounts)
+		if len(groups) <= 1 {
+			return fetchDailyCredentialGroup(ctx, q)
 		}
-		series := make([][]DailyCostItem, len(targets))
-		currencies := make([]string, len(targets))
-		err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
-			acct := targets[i]
-			reportFetchProgress(q.Progress, acct, i+1, len(targets), GroupByNone)
-			single := q
-			single.Accounts = []AccountTarget{acct}
-			daily, cur, err := fetchAWSDailyNetAmortized(ctx, single)
-			if err != nil {
-				return fmt.Errorf("%s: %w", acct.AccountID, err)
-			}
-			series[i] = daily
-			currencies[i] = cur
-			return nil
-		})
-		if err != nil {
-			return nil, "", err
-		}
+		ids := SortedCredentialAccountIDs(groups)
+		series := make([][]DailyCostItem, 0, len(ids))
 		var currency string
-		for _, cur := range currencies {
+		for _, id := range ids {
+			sub := q
+			sub.Accounts = groups[id]
+			daily, cur, err := fetchDailyCredentialGroup(ctx, sub)
+			if err != nil {
+				return nil, "", err
+			}
 			if currency == "" {
 				currency = cur
 			} else if cur != "" && cur != currency {
 				return nil, "", fmt.Errorf("cannot merge accounts with different currencies (%s vs %s)", currency, cur)
 			}
+			series = append(series, daily)
 		}
 		return MergeDaily(series), currency, nil
 	case ProviderGCP:
@@ -357,6 +390,42 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 	default:
 		return nil, "", fmt.Errorf("unknown provider %q", q.Provider)
 	}
+}
+
+func fetchDailyCredentialGroup(ctx context.Context, q CostQuery) ([]DailyCostItem, string, error) {
+	targets := q.Accounts
+	if _, ok := planBulkFetch(targets); ok {
+		reportBulkFetchProgress(q.Progress, len(targets), GroupByNone)
+		opts := fetchAWSOptions{Now: time.Now()}
+		return fetchAWSDailyNetAmortizedBulk(ctx, q, targets, opts)
+	}
+	series := make([][]DailyCostItem, len(targets))
+	currencies := make([]string, len(targets))
+	err := parallel.ForEach(ctx, q.Workers, len(targets), func(ctx context.Context, i int) error {
+		acct := targets[i]
+		reportFetchProgress(q.Progress, acct, i+1, len(targets), GroupByNone)
+		single := q
+		single.Accounts = []AccountTarget{acct}
+		daily, cur, err := fetchAWSDailyNetAmortized(ctx, single)
+		if err != nil {
+			return fmt.Errorf("%s: %w", acct.AccountID, err)
+		}
+		series[i] = daily
+		currencies[i] = cur
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	var currency string
+	for _, cur := range currencies {
+		if currency == "" {
+			currency = cur
+		} else if cur != "" && cur != currency {
+			return nil, "", fmt.Errorf("cannot merge accounts with different currencies (%s vs %s)", currency, cur)
+		}
+	}
+	return MergeDaily(series), currency, nil
 }
 
 func reportBulkFetchProgress(progress FetchProgress, accountCount int, groupBy GroupBy) {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
@@ -33,24 +34,37 @@ func filterExtendedSupportBillingTargets(
 	if err != nil {
 		return nil, nil, err
 	}
-	payerID, ok := cfg.PayerAccountIDForAlias(sel.PayerAlias)
-	if !ok {
-		return nil, nil, fmt.Errorf("unknown payer alias %q", sel.PayerAlias)
+	payers, err := resolveSelectorPayers(cfg, sel.PayerAliases)
+	if err != nil {
+		return nil, nil, err
 	}
 	ctx := awsCommandContext(cmd)
-	// Payer-wide target resolution has already ensured the payer's credentials.
-	awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payerID, awsFlags.CredentialsFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load payer %s for Cost Explorer account discovery: %w", payerID, err)
-	}
+	// Payer-wide target resolution has already ensured each payer's credentials.
 	costStep(status, "Finding accounts with billed Extended Support usage…")
-	candidates, err := discoverExtendedSupportBillingCandidates(ctx, awsCfg, period)
-	if err != nil {
-		return nil, nil, fmt.Errorf("cost explorer account discovery failed: %w (use --full-scan to scan all active members)", err)
-	}
-	billed := make(map[string]bool, len(candidates.AccountIDs))
-	for _, id := range candidates.AccountIDs {
-		billed[id] = true
+	billed := make(map[string]bool)
+	usageSeen := make(map[string]struct{})
+	var usageTypes []string
+	payerIDs := make([]string, 0, len(payers))
+	for _, payer := range payers {
+		awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payer.AccountID, awsFlags.CredentialsFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load payer %s for Cost Explorer account discovery: %w", payerErrorLabel(payer), err)
+		}
+		candidates, err := discoverExtendedSupportBillingCandidates(ctx, awsCfg, period)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cost explorer account discovery failed for payer %s: %w (use --full-scan to scan all active members)", payerErrorLabel(payer), err)
+		}
+		payerIDs = append(payerIDs, payer.AccountID)
+		for _, id := range candidates.AccountIDs {
+			billed[id] = true
+		}
+		for _, usageType := range candidates.UsageTypes {
+			if _, ok := usageSeen[usageType]; ok {
+				continue
+			}
+			usageSeen[usageType] = struct{}{}
+			usageTypes = append(usageTypes, usageType)
+		}
 	}
 	selected := make([]cost.AccountTarget, 0, len(targets))
 	for _, target := range targets {
@@ -59,9 +73,9 @@ func filterExtendedSupportBillingTargets(
 		}
 	}
 	selection := &extendedsupport.BillingSelection{
-		PayerAccountID: payerID,
+		PayerAccountID: strings.Join(payerIDs, ","),
 		Start:          period.Start.Format("2006-01-02"), EndExclusive: period.End.Format("2006-01-02"),
-		UsageTypes: candidates.UsageTypes, BilledAccountCount: len(billed),
+		UsageTypes: usageTypes, BilledAccountCount: len(billed),
 		EligibleAccountCount: len(targets), SelectedAccountCount: len(selected),
 		Notice: "Billing data can be delayed; accounts without matching recorded usage in this window are not scanned.",
 	}

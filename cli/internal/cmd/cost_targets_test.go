@@ -3,11 +3,14 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	orgtypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
 	reportpkg "github.com/openshift-online/finops-tools/cli/internal/report"
@@ -28,15 +31,15 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		},
 		{
 			name: "tag mode",
-			sel:  costTargetSelector{PayerAlias: "rh-control", TagKey: "env"},
+			sel:  costTargetSelector{PayerAliases: []string{"rh-control"}, TagKey: "env"},
 		},
 		{
 			name: "ou mode",
-			sel:  costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAlias: "rh-control"},
+			sel:  costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAliases: []string{"rh-control"}},
 		},
 		{
 			name: "org mode payer alone",
-			sel:  costTargetSelector{PayerAlias: "rh-control"},
+			sel:  costTargetSelector{PayerAliases: []string{"rh-control"}},
 		},
 		{
 			name:    "neither",
@@ -45,12 +48,12 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		},
 		{
 			name:    "account and ou footgun",
-			sel:     costTargetSelector{AccountIDs: []string{"111111111111"}, OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAlias: "osd-staging-2"},
+			sel:     costTargetSelector{AccountIDs: []string{"111111111111"}, OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAliases: []string{"osd-staging-2"}},
 			wantErr: errMixedAccountSelection,
 		},
 		{
 			name:    "both explicit and tag",
-			sel:     costTargetSelector{Aliases: []string{"rh-control"}, TagKey: "env", PayerAlias: "rh-control"},
+			sel:     costTargetSelector{Aliases: []string{"rh-control"}, TagKey: "env", PayerAliases: []string{"rh-control"}},
 			wantErr: errMixedAccountSelection,
 		},
 		{
@@ -65,12 +68,34 @@ func TestValidateCostTargetSelector(t *testing.T) {
 		},
 		{
 			name:    "ou and tag",
-			sel:     costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, TagKey: "env", PayerAlias: "rh-control"},
+			sel:     costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, TagKey: "env", PayerAliases: []string{"rh-control"}},
 			wantErr: errMixedAccountSelection,
 		},
 		{
 			name: "explicit with payer for member IDs",
-			sel:  costTargetSelector{AccountIDs: []string{"333333333333"}, PayerAlias: "rh-control"},
+			sel:  costTargetSelector{AccountIDs: []string{"333333333333"}, PayerAliases: []string{"rh-control"}},
+		},
+		{
+			name: "two payers org",
+			sel:  costTargetSelector{PayerAliases: []string{"rh-control", "osd-staging-1"}},
+		},
+		{
+			name: "two payers with ou",
+			sel:  costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAliases: []string{"rh-control", "osd-staging-1"}},
+		},
+		{
+			name: "two payers with tag",
+			sel:  costTargetSelector{TagKey: "env", PayerAliases: []string{"rh-control", "osd-staging-1"}},
+		},
+		{
+			name:    "two payers with explicit accounts",
+			sel:     costTargetSelector{AccountIDs: []string{"333333333333"}, PayerAliases: []string{"rh-control", "osd-staging-1"}},
+			wantErr: errMultiplePayersExplicit,
+		},
+		{
+			name:    "two payers with explicit alias",
+			sel:     costTargetSelector{Aliases: []string{"member"}, PayerAliases: []string{"rh-control", "osd-staging-1"}},
+			wantErr: errMultiplePayersExplicit,
 		},
 	}
 
@@ -197,7 +222,7 @@ func TestResolveCostTargetsOrg(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	sel := costTargetSelector{PayerAlias: "rh-control"}
+	sel := costTargetSelector{PayerAliases: []string{"rh-control"}}
 	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -261,8 +286,8 @@ func TestResolveCostTargetsOUWithScope(t *testing.T) {
 	depth0 := 0
 	cmd := &cobra.Command{}
 	sel := costTargetSelector{
-		PayerAlias: "rh-control",
-		OUs:        []configstore.OUSelector{{ID: "ou-abcd-12345678", MaxDepth: &depth0}},
+		PayerAliases: []string{"rh-control"},
+		OUs:          []configstore.OUSelector{{ID: "ou-abcd-12345678", MaxDepth: &depth0}},
 	}
 	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
 	if err != nil {
@@ -318,7 +343,7 @@ func TestResolveCostTargetsByTag(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	sel := costTargetSelector{PayerAlias: "rh-control", TagKey: "env"}
+	sel := costTargetSelector{PayerAliases: []string{"rh-control"}, TagKey: "env"}
 	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +390,7 @@ func TestResolveCostTargetsByTagNoMatches(t *testing.T) {
 	}
 
 	cmd := &cobra.Command{}
-	sel := costTargetSelector{PayerAlias: "rh-control", TagKey: "env", TagValue: "prod"}
+	sel := costTargetSelector{PayerAliases: []string{"rh-control"}, TagKey: "env", TagValue: "prod"}
 	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
 	if err != nil {
 		t.Fatalf("resolveCostTargets: %v", err)
@@ -614,5 +639,317 @@ func TestResolveAccountOUBucketsMultiPayer(t *testing.T) {
 	}
 	if !roots["r-aaaa"] || !roots["r-bbbb"] {
 		t.Fatalf("expected both org roots in hierarchy: %+v", hierarchy)
+	}
+}
+
+func TestParseCostTargetSelectorPayers(t *testing.T) {
+	sel, err := parseCostTargetSelector("", "", "", "rh-control, osd-staging-1,rh-control", "", false, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sel.PayerAliases) != 2 || sel.PayerAliases[0] != "rh-control" || sel.PayerAliases[1] != "osd-staging-1" {
+		t.Fatalf("aliases = %v", sel.PayerAliases)
+	}
+}
+
+func TestResolveSelectorPayersDedupesAccountID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rhc"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payers, err := resolveSelectorPayers(cfg, []string{"rh-control", "rhc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payers) != 1 || payers[0].Alias != "rh-control" || payers[0].AccountID != "123456789012" {
+		t.Fatalf("payers = %+v", payers)
+	}
+}
+
+func TestResolveCostTargetsOrgMultiPayer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.RegisterAWSAccount(path, "987654321098", "osd-staging-1"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := ensureCostCredentials
+	origLoad := loadAWSConfigForCredentialsAccount
+	origList := listOrganizationMemberAccounts
+	origRoot := organizationRootID
+	t.Cleanup(func() {
+		ensureCostCredentials = origEnsure
+		loadAWSConfigForCredentialsAccount = origLoad
+		listOrganizationMemberAccounts = origList
+		organizationRootID = origRoot
+	})
+
+	var ensured []string
+	ensureCostCredentials = func(_ context.Context, _ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string) error {
+		for _, target := range targets {
+			ensured = append(ensured, target.AccountID)
+		}
+		return nil
+	}
+	loadAWSConfigForCredentialsAccount = func(_ context.Context, _ configstore.File, payerID, _ string) (aws.Config, error) {
+		return aws.Config{Region: payerID}, nil
+	}
+	listOrganizationMemberAccounts = func(_ context.Context, _ aws.Config, excludeID string, _ coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
+		switch excludeID {
+		case "123456789012":
+			return []coreaccount.OrganizationAccount{
+				{ID: "123456789012", Name: "Payer A"},
+				{ID: "111111111111", Name: "Prod"},
+			}, nil
+		case "987654321098":
+			return []coreaccount.OrganizationAccount{
+				{ID: "987654321098", Name: "Payer B"},
+				{ID: "222222222222", Name: "Stage"},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected payer %s", excludeID)
+		}
+	}
+	organizationRootID = func(_ context.Context, cfg aws.Config) (string, error) {
+		return "r-" + cfg.Region, nil
+	}
+
+	cmd := &cobra.Command{}
+	sel := costTargetSelector{PayerAliases: []string{"rh-control", "osd-staging-1"}}
+	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ensured) != 2 || ensured[0] != "123456789012" || ensured[1] != "987654321098" {
+		t.Fatalf("ensured = %v", ensured)
+	}
+	if sel.SelectionRootID != "" {
+		t.Fatalf("SelectionRootID = %q, want empty for multiple payers", sel.SelectionRootID)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("got %d targets, want 2: %+v", len(targets), targets)
+	}
+	if targets[0].AccountID != "111111111111" || targets[0].PayerAccountID != "123456789012" || targets[0].DisplayName != "Prod" {
+		t.Fatalf("target[0] = %+v", targets[0])
+	}
+	if targets[1].AccountID != "222222222222" || targets[1].PayerAccountID != "987654321098" || targets[1].DisplayName != "Stage" {
+		t.Fatalf("target[1] = %+v", targets[1])
+	}
+
+	listOrganizationMemberAccounts = func(_ context.Context, _ aws.Config, excludeID string, _ coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
+		if excludeID == "987654321098" {
+			return nil, errors.New("no active member accounts found in organization")
+		}
+		return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "Prod"}}, nil
+	}
+	_, err = resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "osd-staging-1 (987654321098)") || !strings.Contains(err.Error(), "no active member accounts") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveCostTargetsOrgMultiPayerConflict(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.RegisterAWSAccount(path, "987654321098", "osd-staging-1"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := ensureCostCredentials
+	origLoad := loadAWSConfigForCredentialsAccount
+	origList := listOrganizationMemberAccounts
+	origRoot := organizationRootID
+	t.Cleanup(func() {
+		ensureCostCredentials = origEnsure
+		loadAWSConfigForCredentialsAccount = origLoad
+		listOrganizationMemberAccounts = origList
+		organizationRootID = origRoot
+	})
+	ensureCostCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
+		return nil
+	}
+	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	organizationRootID = func(context.Context, aws.Config) (string, error) { return "r-root", nil }
+	listOrganizationMemberAccounts = func(context.Context, aws.Config, string, coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
+		return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "Shared"}}, nil
+	}
+
+	cmd := &cobra.Command{}
+	sel := costTargetSelector{PayerAliases: []string{"rh-control", "osd-staging-1"}}
+	_, err = resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "111111111111") || !strings.Contains(err.Error(), "rh-control") || !strings.Contains(err.Error(), "osd-staging-1") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveCostTargetsOUMultiPayer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.RegisterAWSAccount(path, "987654321098", "osd-staging-1"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := ensureCostCredentials
+	origLoad := loadAWSConfigForCredentialsAccount
+	origList := listAccountsUnderParent
+	t.Cleanup(func() {
+		ensureCostCredentials = origEnsure
+		loadAWSConfigForCredentialsAccount = origLoad
+		listAccountsUnderParent = origList
+	})
+	ensureCostCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
+		return nil
+	}
+	loadAWSConfigForCredentialsAccount = func(_ context.Context, _ configstore.File, payerID, _ string) (aws.Config, error) {
+		return aws.Config{Region: payerID}, nil
+	}
+	parentNotFound := fmt.Errorf("list accounts for parent ou-abcd-12345678: %w", &orgtypes.ParentNotFoundException{Message: aws.String("missing")})
+	listAccountsUnderParent = func(_ context.Context, cfg aws.Config, parentID string, _ coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
+		if parentID != "ou-abcd-12345678" {
+			return nil, fmt.Errorf("unexpected parent %s", parentID)
+		}
+		if cfg.Region == "987654321098" {
+			return nil, parentNotFound
+		}
+		if cfg.Region != "123456789012" {
+			return nil, errors.New("AccessDenied")
+		}
+		return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "Prod"}}, nil
+	}
+
+	cmd := &cobra.Command{}
+	sel := costTargetSelector{
+		PayerAliases: []string{"rh-control", "osd-staging-1"},
+		OUs:          []configstore.OUSelector{{ID: "ou-abcd-12345678"}},
+	}
+	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].AccountID != "111111111111" || targets[0].PayerAccountID != "123456789012" {
+		t.Fatalf("targets = %+v", targets)
+	}
+	if sel.SelectionRootID != "ou-abcd-12345678" {
+		t.Fatalf("SelectionRootID = %q", sel.SelectionRootID)
+	}
+
+	listAccountsUnderParent = func(context.Context, aws.Config, string, coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
+		return nil, parentNotFound
+	}
+	_, err = resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "was not found under payer(s)") {
+		t.Fatalf("error = %v", err)
+	}
+
+	listAccountsUnderParent = func(_ context.Context, cfg aws.Config, _ string, _ coreaccount.ListAccountsInOUOptions) ([]coreaccount.OrganizationAccount, error) {
+		if cfg.Region == "987654321098" {
+			return nil, errors.New("AccessDenied")
+		}
+		return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "Prod"}}, nil
+	}
+	_, err = resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "osd-staging-1 (987654321098)") || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveCostTargetsByTagMultiPayer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.RegisterAWSAccount(path, "987654321098", "osd-staging-1"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := ensureCostCredentials
+	origLoad := loadAWSConfigForCredentialsAccount
+	origFilter := filterOrganizationAccountsByTag
+	origRoot := organizationRootID
+	t.Cleanup(func() {
+		ensureCostCredentials = origEnsure
+		loadAWSConfigForCredentialsAccount = origLoad
+		filterOrganizationAccountsByTag = origFilter
+		organizationRootID = origRoot
+	})
+	ensureCostCredentials = func(context.Context, *cobra.Command, configstore.File, []cost.AccountTarget, string, string, string) error {
+		return nil
+	}
+	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	organizationRootID = func(context.Context, aws.Config) (string, error) { return "r-root", nil }
+	filterOrganizationAccountsByTag = func(_ context.Context, _ aws.Config, payerID, _, _ string, _ coreaccount.TagFilterProgress, _ string, _, _ bool) ([]coreaccount.OrganizationAccount, error) {
+		switch payerID {
+		case "123456789012":
+			return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "Prod"}}, nil
+		case "987654321098":
+			return []coreaccount.OrganizationAccount{{ID: "222222222222", Name: "Stage"}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected payer %s", payerID)
+		}
+	}
+
+	cmd := &cobra.Command{}
+	sel := costTargetSelector{PayerAliases: []string{"rh-control", "osd-staging-1"}, TagKey: "env"}
+	targets, err := resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.SelectionRootID != "" {
+		t.Fatalf("SelectionRootID = %q, want empty", sel.SelectionRootID)
+	}
+	if len(targets) != 2 || targets[0].PayerAccountID != "123456789012" || targets[1].PayerAccountID != "987654321098" {
+		t.Fatalf("targets = %+v", targets)
+	}
+	if !targets[0].ScopeAccountOnly || targets[0].AccountID != "111111111111" || targets[1].AccountID != "222222222222" {
+		t.Fatalf("targets = %+v", targets)
+	}
+
+	filterOrganizationAccountsByTag = func(_ context.Context, _ aws.Config, payerID, _, _ string, _ coreaccount.TagFilterProgress, _ string, _, _ bool) ([]coreaccount.OrganizationAccount, error) {
+		if payerID == "987654321098" {
+			return nil, errors.New("AccessDenied")
+		}
+		return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "Prod"}}, nil
+	}
+	_, err = resolveCostTargets(cmd, cfg, &sel, path, "", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "osd-staging-1 (987654321098)") || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("error = %v", err)
 	}
 }

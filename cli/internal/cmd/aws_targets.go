@@ -23,7 +23,7 @@ func bindAWSTargetFlags(cmd *cobra.Command, refs awsTargetFlagRefs) {
 	cmd.Flags().StringVar(refs.Account, "account-id", "", "Provider-native AWS account ID(s), comma-separated 12-digit IDs")
 	cmd.Flags().StringVar(refs.AccountAliases, "account-alias", "", "Configured AWS account alias(es), comma-separated")
 	cmd.Flags().StringVar(refs.OU, "ou", "", "AWS OU or org-root ID(s), comma-separated (requires --payer). Scope per ID: bare=subtree, /=direct accounts, /*=one child-OU level (quote in shells), /**=subtree")
-	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias: alone selects all org members; also required with --ou/--tag or unregistered --account-id values")
+	cmd.Flags().StringVar(refs.Payer, "payer", "", "Registered payer alias(es), comma-separated. Alone selects all org members; required with --ou/--tag. A single alias also supplies credentials for unregistered --account-id values")
 	cmd.Flags().StringVar(refs.Tag, "tag", "", "Select accounts by Organizations tag: KEY or KEY=VALUE (requires --payer)")
 	if refs.SkipOrgCache != nil {
 		cmd.Flags().BoolVar(refs.SkipOrgCache, "skip-org-cache", false, "Bypass cached organization account/tag data for --tag selection (always fetch live from AWS)")
