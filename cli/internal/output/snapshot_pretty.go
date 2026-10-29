@@ -30,6 +30,9 @@ func writeSnapshotPretty(w io.Writer, r snapshot.Result) error {
 }
 
 func writeSnapshotSummary(w io.Writer, s styler, r snapshot.Result) error {
+	if err := writeExcludedRegions(w, r.Summary.ExcludedRegions); err != nil {
+		return err
+	}
 	costCtx := newSnapshotCostContext(r.Summary)
 	lines := buildSnapshotSummaryLines(r.Summary, costCtx)
 	labelWidth := 0

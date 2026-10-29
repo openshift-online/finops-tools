@@ -35,6 +35,9 @@ func writeExtendedSupportPretty(w io.Writer, r extendedsupport.Result) error {
 }
 
 func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result) error {
+	if err := writeExcludedRegions(w, r.Summary.ExcludedRegions); err != nil {
+		return err
+	}
 	if selection := r.Summary.BillingSelection; selection != nil {
 		if _, err := fmt.Fprintf(w, "  Account selection: Cost Explorer, %d of %d eligible members selected\n  Billing window: %s to %s (end exclusive)\n  %s\n\n",
 			selection.SelectedAccountCount, selection.EligibleAccountCount, selection.Start, selection.EndExclusive, selection.Notice); err != nil {

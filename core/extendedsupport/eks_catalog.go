@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/openshift-online/finops-tools/core/apilog"
+	"github.com/openshift-online/finops-tools/core/awsregions"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
@@ -184,6 +185,7 @@ func (c *EKSVersionCatalog) preload(ctx context.Context, q Query) error {
 			apilog.Log(ctx, fmt.Sprintf("EKS catalog region discovery account=%s: %v", source.CatalogAccountID, err))
 			return nil
 		}
+		regions = awsregions.Exclude(regions, q.SkipRegions)
 		return parallel.ForEach(ctx, defaultRegionConcurrency, len(regions), func(ctx context.Context, i int) error {
 			region := regions[i]
 			apilog.Log(ctx, fmt.Sprintf("Preloading EKS versions account=%s region=%s", source.CatalogAccountID, region))

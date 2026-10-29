@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openshift-online/finops-tools/core/awsregions"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
@@ -86,6 +87,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	summary := buildSummary(records, int(q.OlderThan/(24*time.Hour)), rdsContexts, ebsRunRate)
 	summary.SkippedRegions = sortRegionWarnings(warnings)
 	summary.SkippedAccounts = sortAccountWarnings(skippedAccounts)
+	summary.ExcludedRegions = awsregions.Normalize(q.SkipRegions)
 	return Result{Records: records, Summary: summary}, nil
 }
 
@@ -217,7 +219,7 @@ func (q Query) listEnabledRegions(ctx context.Context, target *AccountTarget) ([
 	if err != nil {
 		return nil, err
 	}
-	return regions, nil
+	return awsregions.Exclude(regions, q.SkipRegions), nil
 }
 
 func sortRegionWarnings(warnings []RegionWarning) []RegionWarning {

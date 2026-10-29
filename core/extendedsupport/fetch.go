@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/smithy-go"
+	"github.com/openshift-online/finops-tools/core/awsregions"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
@@ -94,6 +95,7 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	}
 
 	result := buildResult(records, warnings, unclassified, skippedAccounts, now)
+	result.Summary.ExcludedRegions = awsregions.Normalize(q.SkipRegions)
 	if _, cache := serviceSet[ServiceElastiCache]; cache {
 		result.Summary.LifecycleWarnings = q.HealthLifecycleCatalog.warnings()
 	} else if _, search := serviceSet[ServiceOpenSearch]; search {
@@ -207,6 +209,7 @@ func scanAccountRegions(
 		return regionScanResult{}, skip, nil
 	}
 
+	regions = awsregions.Exclude(regions, q.SkipRegions)
 	sem := make(chan struct{}, defaultRegionConcurrency)
 	var (
 		wg      sync.WaitGroup

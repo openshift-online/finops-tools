@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
 	"github.com/openshift-online/finops-tools/cli/internal/output"
 	"github.com/openshift-online/finops-tools/cli/internal/progress"
-	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/openshift-online/finops-tools/core/cost"
+	"github.com/openshift-online/finops-tools/core/snapshot"
 	"github.com/spf13/cobra"
 )
 
@@ -60,6 +61,9 @@ func TestSnapshotListPreRunRejectsUnknownType(t *testing.T) {
 }
 
 func TestRunSnapshotListUsesFetchHook(t *testing.T) {
+	prevSkip := snapshotListSkipRegions
+	snapshotListSkipRegions = []string{" us-west-2 ", "us-west-2"}
+	t.Cleanup(func() { snapshotListSkipRegions = prevSkip })
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
@@ -84,6 +88,9 @@ func TestRunSnapshotListUsesFetchHook(t *testing.T) {
 		}
 		if q.OlderThan != 90*24*time.Hour {
 			t.Fatalf("older than = %v", q.OlderThan)
+		}
+		if !reflect.DeepEqual(q.SkipRegions, []string{"us-west-2"}) {
+			t.Fatalf("skip regions = %v", q.SkipRegions)
 		}
 		return snapshot.Result{
 			Summary: snapshot.Summary{
