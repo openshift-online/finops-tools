@@ -602,7 +602,7 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--account-id` | One or more comma-separated **12-digit AWS account IDs** (provider-native IDs; unregistered members require `--payer`) |
 | `--account-alias` | One or more comma-separated configured aliases (e.g. `rh-control`, or a linked alias such as `quay`) |
 | `--ou` | One or more comma-separated AWS OU (`ou-xxxx-yyyyy`) or org-root (`r-xxxx`) IDs; requires `--payer`. Optional scope suffix per ID: bare or `/**` = full subtree (default), `/` = accounts directly in that parent only, `/*` = parent + immediate child OUs only |
-| `--payer` | Registered payer alias. Alone selects org members (ACTIVE only unless `--include-closed-accounts`); also required with `--ou` / `--tag`, or with unregistered `--account-id` IDs |
+| `--payer` | Registered payer alias(es), comma-separated. Alone selects org members and unions them across the listed organizations (ACTIVE only unless `--include-closed-accounts`); also required with `--ou` / `--tag`. A single alias supplies credentials for unregistered `--account-id` values; several aliases cannot be combined with `--account-id` or `--account-alias` |
 | `--tag` | Select org accounts by Organizations tag: `KEY` or `KEY=VALUE` (requires `--payer`) |
 | `--include-closed-accounts` | `finops account get-cost` only. With `--ou` or `--payer` alone, also select `SUSPENDED`, `PENDING_CLOSURE`, and `CLOSED` members (default: ACTIVE only). Ignored with a warning for `--tag` (already all states) and `--account-id`/`--account-alias` |
 | `--skip-org-cache` | Bypass cached organization account/tag data for `--tag` selection (always fetch live from AWS) |

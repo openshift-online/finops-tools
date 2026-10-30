@@ -21,12 +21,15 @@ period. Both are validated **before** any AWS API call is made, so an invalid
 combination fails fast with a clear error.
 
 The **account selection** dimension is shared by `finops account get-cost`,
-`finops report create`, `finops snapshot list`, and `finops account details`.
-Two scoping caveats: the `hcp-hierarchy` report template is Snowflake-based
-(`--snowflake-alias`) and rejects AWS selector flags, and `finops snapshot list`
-uses an `--older-than-days` age cutoff instead of a period window. The
-**time selection** dimension applies to the cost query commands only. See the
-[command matrix](#command-matrix) for per-command differences.
+`finops report create`, `finops snapshot list`, `finops account details`, and
+`finops extended-support list`.
+A few scoping caveats: the `hcp-hierarchy` report template is Snowflake-based
+(`--snowflake-alias`) and rejects AWS selector flags, `finops snapshot list`
+uses an `--older-than-days` age cutoff instead of a period window, and
+`finops extended-support list` with `--payer` alone further keeps only members
+that have Extended Support billing in the lookback window unless `--full-scan`
+is set. The **time selection** dimension applies to the cost query commands
+only. See the [command matrix](#command-matrix) for per-command differences.
 
 ---
 
@@ -37,14 +40,17 @@ uses an `--older-than-days` age cutoff instead of a period window. The
 Account selection uses **exactly one mode**. The flag groups below are mutually
 exclusive — combining flags from two groups is an error. `--payer` is special:
 it is a *qualifier* required by the OU and tag modes (and optionally used by the
-explicit mode), and it only becomes a selection mode on its own.
+explicit mode), and it only becomes a selection mode on its own. The flag
+accepts one or more comma-separated aliases. Several aliases are unioned for
+org, OU, and tag selection; explicit accounts allow at most one. See
+[Multiple payers](#multiple-payers).
 
 | # | Mode | Flags | What gets selected |
 |---|------|-------|--------------------|
-| 1 | Explicit | `--account-id` and/or `--account-alias` (optional `--payer`) | The exact accounts you name |
-| 2 | Entire org | `--payer` alone | Every member account in the payer's AWS Organization (the payer itself excluded) |
-| 3 | OU / org-root | `--payer --ou <ids>` | Accounts under an OU or org root, with per-ID scope control |
-| 4 | Tag | `--payer --tag KEY[=VALUE]` | Org accounts carrying a given AWS Organizations tag |
+| 1 | Explicit | `--account-id` and/or `--account-alias` (optional single `--payer`) | The exact accounts you name |
+| 2 | Entire org | `--payer` alone (one or more aliases) | Member accounts in each listed payer's AWS Organization (each payer itself excluded) |
+| 3 | OU / org-root | `--payer --ou <ids>` | Accounts under an OU or org root, resolved in every listed payer, with per-ID scope control |
+| 4 | Tag | `--payer --tag KEY[=VALUE]` | Org accounts carrying a given AWS Organizations tag, matched in every listed payer |
 
 Mode resolution follows this decision flow:
 
@@ -56,14 +62,16 @@ flowchart TD
     C -->|"exactly one"| T{"--tag set?"}
     T -->|yes| TP{"--payer set?"}
     TP -->|no| ET["error: --tag requires --payer"]
-    TP -->|yes| M4["Mode 4 — tag"]
+    TP -->|yes| M4["Mode 4 — tag<br/>(one or more payers, union)"]
     T -->|no| O{"--ou set?"}
     O -->|yes| OP{"--payer set?"}
     OP -->|no| EO["error: --ou requires --payer"]
-    OP -->|yes| M3["Mode 3 — OU"]
+    OP -->|yes| M3["Mode 3 — OU<br/>(each id in every payer)"]
     O -->|no| X{"--account-id or<br/>--account-alias set?"}
-    X -->|yes| M1["Mode 1 — explicit<br/>(--payer optional qualifier)"]
-    X -->|no| M2["Mode 2 — entire org<br/>(--payer alone)"]
+    X -->|yes| XP{"more than one --payer?"}
+    XP -->|yes| EX["error: multiple aliases only for<br/>org, OU, or tag selection"]
+    XP -->|no| M1["Mode 1 — explicit<br/>(single --payer optional)"]
+    X -->|no| M2["Mode 2 — entire org<br/>(one or more payers, union)"]
 ```
 
 The full combination matrix (✓ = flag provided):
@@ -81,6 +89,44 @@ The full combination matrix (✓ = flag provided):
 | ✓ | · | ✓ | · | ✗ error: mixed selection |
 | · | ✓ | ✓ | ✓ | ✗ error: mixed selection |
 | · | · | · | · | ✗ error: no selection provided |
+| · | · | · | 2+ | Mode 2 — union of those organizations |
+| · | ✓ | · | 2+ | Mode 3 — each OU id resolved in every payer |
+| · | · | ✓ | 2+ | Mode 4 — tag matched in every payer |
+| ✓ | · | · | 2+ | ✗ error: `--payer accepts multiple aliases only for org, OU, or tag selection` |
+
+`2+` means two or more comma-separated `--payer` aliases. A single alias is `✓`.
+
+### Multiple payers
+
+`--payer` takes a comma-separated list of registered payer aliases
+(`rh-control,osd-staging-1`). Entries are trimmed, empty entries are dropped,
+and duplicate aliases are ignored. Two aliases that resolve to the same payer
+account are queried once, keeping the first alias.
+
+| Selection | Several `--payer` aliases |
+|-----------|---------------------------|
+| `--payer` alone | Allowed. Union of each organization's members |
+| `--payer` + `--ou` | Allowed. Each OU or org-root id is resolved in every listed payer |
+| `--payer` + `--tag` | Allowed. The tag is matched in every listed payer |
+| `--account-id` / `--account-alias` | Rejected. Explicit selection accepts at most one `--payer` |
+
+```bash
+# Allowed — members of both organizations
+finops account get-cost --payer rh-control,osd-staging-1
+
+# Rejected — explicit accounts accept a single --payer
+finops account get-cost --payer rh-control,osd-staging-1 --account-id 333333333333
+```
+
+Shared rules for the three modes that accept a list:
+
+1. Each alias must be a registered payer. An unknown alias fails before any AWS call.
+2. Credentials are ensured for every payer, then each payer is queried in the order given.
+3. Results are unioned. The same member account ID returned by two different payers is an error (`account <id> resolved under payers <alias-a> and <alias-b>`), not a silent merge.
+4. A failure against any one payer fails the whole command and names that payer (`<alias> (<account-id>)`).
+5. On `get-cost` and `report create`, `--group-by ou` with several payers keeps a separate tree per payer, each starting at that organization's root. With one payer and exactly one `--ou` id, that id is the tree root; otherwise a single payer rolls up from its organization root.
+
+`finops tag` and `finops aws list-ous` take a single `--payer`. Comma-separated aliases apply to `account get-cost`, `report create`, `snapshot list`, `account details`, and `extended-support list`.
 
 ### Mode 1 — Explicit accounts
 
@@ -90,7 +136,7 @@ line and no AWS Organizations API call is needed to enumerate targets.
 
 | Flag | Accepts | Registration requirement |
 |------|---------|--------------------------|
-| `--account-id` | One or more comma-separated 12-digit AWS account IDs | Must be registered in the finops config — *unless* `--payer` is also given, in which case member IDs may be unregistered |
+| `--account-id` | One or more comma-separated 12-digit AWS account IDs | Must be registered in the finops config — *unless* a single `--payer` is also given, in which case member IDs may be unregistered |
 | `--account-alias` | One or more comma-separated configured aliases (payer aliases such as `rh-control`, or linked aliases such as `quay`) | Alias must exist in the finops config |
 
 How each target's **Cost Explorer credentials** are routed:
@@ -111,6 +157,8 @@ flowchart TD
 ```
 
 Duplicate IDs and aliases that resolve to the same account are deduplicated.
+More than one `--payer` alias in this mode is an error; use one alias when the
+IDs are unregistered, or omit `--payer` when every account is already registered.
 
 ```bash
 # One registered account by alias (payer or linked)
@@ -129,42 +177,58 @@ finops account get-cost --payer rh-control --account-id 333333333333
 
 ### Mode 2 — Entire organization
 
-`--payer <alias>` **alone** selects every member account in that payer's AWS
-Organization:
+`--payer <aliases>` **alone** selects every member account in each listed
+payer's AWS Organization. One alias is the common case; several aliases union
+those organizations. See [Multiple payers](#multiple-payers).
 
-1. The payer alias is resolved to a registered payer account ID (must exist in
-   the finops config).
+For each payer, in order:
+
+1. The alias is resolved to a registered payer account ID.
 2. Payer credentials are ensured (SAML or profile).
-3. All organization member accounts are listed via AWS Organizations.
-4. The payer/management account itself is **excluded** from the target list.
+3. Organization member accounts are listed via AWS Organizations.
+4. That payer/management account itself is **excluded** from its member list.
+5. Members are appended to the union. The same account ID from a later payer is an error.
+
+A payer with no members after that exclusion fails the whole command
+(`no active member accounts found in organization`, or `no member accounts found
+in organization` when `--include-closed-accounts` is set). One empty organization
+among several does not get skipped.
 
 ```mermaid
 flowchart TD
-    P["--payer rh-control"] --> C["Ensure payer credentials<br/>(SAML or profile)"]
-    C --> L["ListAccounts<br/>(AWS Organizations)"]
-    L --> F{"filter by state"}
+    P["--payer rh-control,osd-staging-1"] --> R["Resolve each alias<br/>to a registered payer"]
+    R --> C["Ensure credentials<br/>for every payer"]
+    C --> L["For each payer:<br/>ListAccounts"]
+    L --> Z{"that payer has members<br/>after excluding itself?"}
+    Z -->|no| EZ["error: no member accounts<br/>(whole command fails)"]
+    Z -->|yes| F{"filter by state"}
     F -->|"default"| A["ACTIVE members"]
     F -->|"--include-closed-accounts"| B["ACTIVE + SUSPENDED +<br/>PENDING_CLOSURE + CLOSED"]
-    A --> M["member targets<br/>(payer account itself excluded)"]
-    B --> M
+    A --> U{"same member ID<br/>under another payer?"}
+    B --> U
+    U -->|yes| E["error: account resolved<br/>under two payers"]
+    U -->|no| M["union of member targets"]
 ```
 
 ```bash
-# All active members in the organization
+# All active members in one organization
 finops account get-cost --payer rh-control
+
+# Active members of two organizations, unioned
+finops account get-cost --payer rh-control,osd-staging-1
 
 # Include closed/suspended members too (get-cost only)
 finops account get-cost --payer rh-control --include-closed-accounts
 
-# Whole org, rolled up by organizational unit
+# One org, rolled up by organizational unit
 finops account get-cost --payer rh-control --group-by ou
 ```
 
 ### Mode 3 — OU / org-root selection
 
-`--payer` plus one or more comma-separated OU (`ou-xxxx-yyyyy`) or org-root
-(`r-xxxx`) IDs. Each ID accepts an optional **scope suffix** that controls how
-deep the OU tree is walked:
+`--payer` (one or more aliases) plus one or more comma-separated OU
+(`ou-xxxx-yyyyy`) or org-root (`r-xxxx`) IDs. Each ID accepts an optional
+**scope suffix** that controls how deep the OU tree is walked:
 
 | `--ou` value | Walk depth | Meaning |
 |--------------|-----------|---------|
@@ -203,14 +267,24 @@ Notes:
 
 - Multiple OUs are **unioned** and deduplicated: `--ou ou-prod,ou-sbx` selects
   members of both subtrees.
-- An OU that matches **no (active) accounts is an error**, not an empty result —
-  this guards against typos in OU IDs.
+- With several payers, each id is looked up in every payer. An id that does not
+  exist in one organization (`ParentNotFound`) is skipped for that payer. The id
+  must exist in at least one listed payer; otherwise the command fails with
+  `OU <id> was not found under payer(s) <aliases>`. Any other error (access
+  denied, for example) fails immediately and names the payer. With a single
+  payer, a missing id is that immediate error (`OU <id> under payer <alias> (<account-id>)`).
+- An OU that exists but matches **no accounts is an error**, not an empty result
+  — this guards against typos in OU IDs. The count is across every payer that
+  contains the id (`no active accounts found in OU <id>`, or `no accounts found
+  in OU <id>` with `--include-closed-accounts`).
+- The same member account ID returned by two payers is an error, same as
+  [Mode 2](#mode-2--entire-organization).
 - Default is ACTIVE accounts only; `--include-closed-accounts` (get-cost only)
   adds `SUSPENDED`, `PENDING_CLOSURE`, and `CLOSED` members.
 - The management (payer) account sits directly under the org root, so root
   selectors include it — unlike Mode 2 (`--payer` alone), which explicitly
   excludes the payer.
-- Discover OU IDs with `finops aws list-ous --payer <alias>`.
+- Discover OU IDs with `finops aws list-ous --payer <alias>` (one payer per invocation).
 - Quote `*` suffixes in shells so the shell does not expand them:
   `--ou 'ou-xxxx/*'`.
 
@@ -229,11 +303,16 @@ finops account get-cost --ou r-xxxx/ --payer rh-control
 
 # Union of two OUs
 finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-control
+
+# Same OU list, resolved in every listed payer (an id missing from one org is skipped)
+finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-control,osd-staging-1
 ```
 
 ### Mode 4 — Tag selection
 
-`--payer` plus an AWS Organizations account tag filter:
+`--payer` (one or more aliases) plus an AWS Organizations account tag filter.
+With several payers the same filter runs once per organization and the matches
+are unioned. See [Multiple payers](#multiple-payers).
 
 | `--tag` value | Matches |
 |---------------|---------|
@@ -241,11 +320,14 @@ finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-contro
 | `KEY=VALUE` | Org accounts whose tag key has exactly this value |
 
 Tag scans consider **all** Organizations account states (not just ACTIVE).
-Unlike an empty OU, **zero matches is not an error** — the command completes and
-reports an empty result with zero cost.
+Unlike an empty OU, **zero matches is not an error** — including zero matches
+across every listed payer. The command completes and reports an empty result
+with zero cost. A failure while scanning any one payer still fails the command.
 
-Tag resolution uses the **org cache**, an on-disk snapshot of the payer's
-accounts and tags (stored under `cache/` next to the finops config file):
+Tag resolution uses the **org cache**, an on-disk snapshot of one payer's
+accounts and tags (stored under `cache/` next to the finops config file, keyed
+by payer). Each listed payer has its own cache entry. `--skip-org-cache` and
+`--refresh-org-cache` apply to every payer in the list:
 
 | Flags | Cache read | Cache write |
 |-------|-----------|-------------|
@@ -267,6 +349,9 @@ finops account get-cost --payer rh-control --tag env=prod --refresh-org-cache
 
 # Bypass the cache for a one-off live query (cache untouched)
 finops report create costs --payer rh-control --tag env=prod --skip-org-cache -o prod.html
+
+# Same tag in two organizations
+finops account get-cost --payer rh-control,osd-staging-1 --tag env=prod
 ```
 
 ### Account states by mode
@@ -274,9 +359,9 @@ finops report create costs --payer rh-control --tag env=prod --skip-org-cache -o
 | Mode | Default selection | With `--include-closed-accounts` |
 |------|-------------------|----------------------------------|
 | Explicit (`--account-id` / `--account-alias`) | Organizations state ignored — the named accounts are selected as-is | ⚠️ no effect (warning printed) |
-| Entire org (`--payer` alone) | ACTIVE only | + `SUSPENDED`, `PENDING_CLOSURE`, `CLOSED` |
-| OU (`--payer --ou`) | ACTIVE only | + `SUSPENDED`, `PENDING_CLOSURE`, `CLOSED` |
-| Tag (`--payer --tag`) | All states (tag scans are state-agnostic) | ⚠️ no effect (warning printed) |
+| Entire org (`--payer` alone, each listed payer) | ACTIVE only | + `SUSPENDED`, `PENDING_CLOSURE`, `CLOSED` |
+| OU (`--payer --ou`, each listed payer) | ACTIVE only | + `SUSPENDED`, `PENDING_CLOSURE`, `CLOSED` |
+| Tag (`--payer --tag`, each listed payer) | All states (tag scans are state-agnostic) | ⚠️ no effect (warning printed) |
 
 `--include-closed-accounts` is only offered by `finops account get-cost`.
 
@@ -286,8 +371,17 @@ finops report create costs --payer rh-control --tag env=prod --skip-org-cache -o
   pick one mode; explicit member IDs can use `--payer` instead.
 - **`--tag` / `--ou` without `--payer`** fails: both enumerate accounts through
   a payer's Organizations API.
+- **Several `--payer` aliases with `--account-id` or `--account-alias`** is
+  rejected. Explicit selection accepts one `--payer`, and only as a credential
+  qualifier for unregistered member IDs.
+- **One empty organization in a multi-payer `--payer` list** fails the whole
+  command. OU ids missing from some of the payers are skipped; an organization
+  with no members is not.
+- **The same account under two payers** is an error. Organizations are unioned,
+  and a member that appears twice is not merged.
 - **A tag with no matches** silently returns an empty (zero-cost) result — check
-  the account count in the output if you expected matches.
+  the account count in the output if you expected matches. Zero matches across
+  every listed payer is still empty, not an error.
 - **Aliases are CLI conveniences only**; all Cost Explorer queries are routed
   through registered 12-digit payer account IDs.
 - **`--include-closed-accounts`** on explicit or tag selections prints a warning
@@ -504,12 +598,13 @@ These defaults apply to `finops account get-cost` and `finops report create`;
 
 | Command | Account selection modes | `--include-closed-accounts` | Org cache flags | Time selection |
 |---------|--------------------------|:---:|:---:|----------------|
-| `finops account get-cost` | All 4 | ✓ | ✓ | `--days` / `--months` / `--from`/`--to` + `--exclude-recent-days`, with `defaults.cost.*` |
-| `finops report create` | All 4 — `costs`, `savings-plans`, `cost-anomalies` templates (`hcp-hierarchy` uses `--snowflake-alias` and rejects AWS selector flags) | · | ✓ | Same period flags and defaults as `get-cost` |
-| `finops snapshot list` | All 4 (ACTIVE-only default applies to `--payer`/`--ou`; see [account states](#account-states-by-mode)) | · | ✓ | n/a — uses an `--older-than-days` age cutoff (default `365`), not a CE query window |
-| `finops account details` | All 4 (ACTIVE-only default applies to `--payer`/`--ou`; see [account states](#account-states-by-mode)) | · | ✓ | `--months` (default `6`, monthly cost-history buckets) + `--exclude-recent-days` |
-| `finops tag list` / `add` / `update` | Single explicit account (`--account-alias` or `--account-id`, optional `--payer` credential hint) | · | · | n/a |
-| `finops aws list-ous` | `--payer` | · | · | n/a |
+| `finops account get-cost` | All 4, including comma-separated `--payer` | ✓ | ✓ | `--days` / `--months` / `--from`/`--to` + `--exclude-recent-days`, with `defaults.cost.*` |
+| `finops report create` | All 4, including comma-separated `--payer` — `costs`, `savings-plans`, `cost-anomalies` templates (`hcp-hierarchy` uses `--snowflake-alias` and rejects AWS selector flags) | · | ✓ | Same period flags and defaults as `get-cost` |
+| `finops snapshot list` | All 4, including comma-separated `--payer` (ACTIVE-only default applies to `--payer`/`--ou`; see [account states](#account-states-by-mode)) | · | ✓ | n/a — uses an `--older-than-days` age cutoff (default `365`), not a CE query window |
+| `finops account details` | All 4, including comma-separated `--payer` (ACTIVE-only default applies to `--payer`/`--ou`; see [account states](#account-states-by-mode)) | · | ✓ | `--months` (default `6`, monthly cost-history buckets) + `--exclude-recent-days` |
+| `finops extended-support list` | All 4, including comma-separated `--payer` (ACTIVE-only default applies to `--payer`/`--ou`). `--payer` alone further keeps only members with Extended Support billing in the lookback window, unless `--full-scan` | · | ✓ | n/a — `--billing-lookback-days` (default 30, including today) selects accounts when `--payer` is used alone; it is not a cost-query window |
+| `finops tag list` / `add` / `update` | Single explicit account (`--account-alias` or `--account-id`, optional single `--payer` credential hint) | · | · | n/a |
+| `finops aws list-ous` | Single `--payer` | · | · | n/a |
 
 ## Error reference
 
@@ -521,6 +616,12 @@ These defaults apply to `finops account get-cost` and `finops report create`;
 | `provide only one account selection: --account-id/--account-alias, --ou, --tag, or --payer alone (not a combination)` | Flags from two or more selection groups |
 | `--ou requires --payer` | `--ou` without `--payer` |
 | `--tag requires --payer` | `--tag` without `--payer` |
+| `--payer accepts multiple aliases only for org, OU, or tag selection` | More than one `--payer` alias combined with `--account-id` or `--account-alias` |
+| `account … resolved under payers … and …` | The same member account was returned by two different payers |
+| `OU … was not found under payer(s) …` | With several payers, that OU or org-root id did not exist in any of them |
+| `OU … under payer …` | OU or org-root lookup failed for that payer (including a missing id when only one payer is given) |
+| `no active member accounts found in organization` | `--payer` alone, and one listed payer has no ACTIVE members after excluding itself |
+| `no member accounts found in organization` | Same, when `--include-closed-accounts` is set and that payer still has no members |
 | `unknown payer alias "…" (register payer with: finops config account add aws <12-digit-id> --alias …)` | Payer alias not in the finops config |
 | `unknown account alias "…" (add with: …)` | `--account-alias` value not in the finops config |
 | `account … is not registered (run: finops config account add aws …, or use --payer <payer-alias>)` | `--account-id` neither registered nor paired with `--payer` |
@@ -549,6 +650,9 @@ Both dimensions combine freely:
 ```bash
 # Entire org, last 3 calendar months, trimmed for CE lag
 finops account get-cost --payer rh-control --months 3 --exclude-recent-days 2
+
+# Two organizations, same window
+finops account get-cost --payer rh-control,osd-staging-1 --months 3 --exclude-recent-days 2
 
 # One OU subtree, current month-to-date plus one full month, grouped by service
 finops account get-cost --ou ou-abcd-12345678 --payer rh-control --months 1 --group-by service
