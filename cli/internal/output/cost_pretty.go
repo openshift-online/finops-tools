@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	barWidth       = 24
-	maxServiceLen  = 44
+	barWidth             = 24
+	maxServiceLen        = 44
+	maxPrettyAccountList = 50
 )
 
 func writePrettyPrint(w io.Writer, r cost.CostResult) error {
@@ -173,11 +174,25 @@ func formatAccountList(names, ids string) string {
 	if len(nameParts) != len(idParts) {
 		return fmt.Sprintf("%s (%s)", names, ids)
 	}
-	var parts []string
-	for i := range nameParts {
-		parts = append(parts, fmt.Sprintf("%s (%s)", strings.TrimSpace(nameParts[i]), strings.TrimSpace(idParts[i])))
+	shown := len(nameParts)
+	extra := 0
+	if shown > maxPrettyAccountList {
+		extra = shown - maxPrettyAccountList
+		shown = maxPrettyAccountList
 	}
-	return strings.Join(parts, ", ")
+	parts := make([]string, shown)
+	for i := 0; i < shown; i++ {
+		parts[i] = fmt.Sprintf("%s (%s)", strings.TrimSpace(nameParts[i]), strings.TrimSpace(idParts[i]))
+	}
+	out := strings.Join(parts, ", ")
+	if extra == 0 {
+		return out
+	}
+	noun := "accounts"
+	if extra == 1 {
+		noun = "account"
+	}
+	return out + fmt.Sprintf(" + %d %s", extra, noun)
 }
 
 func cell(s styler, fn func(string) string, text string) string {
