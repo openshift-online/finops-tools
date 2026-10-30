@@ -42,7 +42,8 @@ ElastiCache caches, and OpenSearch Service domains
 running versions in AWS Extended Support.
 
 Account selection matches finops account get-cost: --account-id, --account-alias, --ou, --tag, or --payer alone
-(--ou/--payer select ACTIVE members only). Linked member accounts are scanned using role assumption from the payer.
+(--ou/--payer select ACTIVE members only). --payer accepts comma-separated aliases and unions
+members across those organizations. Linked member accounts are scanned using role assumption from the payer.
 With --payer alone, Cost Explorer narrows the scan to active members with recorded
 Extended Support usage in the billing lookback window (default: 30 UTC days including today).
 Billing data can be delayed. Use --full-scan to check every active member account.
@@ -101,6 +102,7 @@ affected resources appear under Support status unknown. RDS/EKS scanning continu
 Examples:
   finops extended-support list --account-alias rh-control
   finops extended-support list --payer rh-control
+  finops extended-support list --payer rh-control,osd-staging-1
   finops extended-support list --payer rh-control --billing-lookback-days 7
   finops extended-support list --payer rh-control --full-scan
   finops extended-support list --payer rh-control --services rds --format json
@@ -152,7 +154,7 @@ func init() {
 		SkipOrgCache:    &extendedSupportListSkipOrgCache,
 		RefreshOrgCache: &extendedSupportListRefreshOrgCache,
 	})
-	extendedSupportListCmd.Flags().Lookup("payer").Usage = "Registered payer alias: alone selects members with billed Extended Support usage (--full-scan selects all active members); required with --ou/--tag or unregistered --account-id"
+	extendedSupportListCmd.Flags().Lookup("payer").Usage = "Registered payer alias(es), comma-separated. Alone selects members with billed Extended Support usage in each organization (--full-scan selects all active members); required with --ou/--tag. A single alias also supplies credentials for unregistered --account-id values"
 	extendedSupportListCmd.Flags().StringVar(&extendedSupportListServices, "services", "rds,eks,elasticache,opensearch",
 		"Services to scan: rds,eks,elasticache,opensearch (comma-separated)")
 	extendedSupportListCmd.Flags().StringVar(&extendedSupportListRegions, "regions", "",

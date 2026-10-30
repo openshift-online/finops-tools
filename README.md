@@ -562,10 +562,10 @@ Cost queries are parameterized along two dimensions — **account selection** an
 
 | Mode | Flags |
 |------|-------|
-| Explicit accounts | `--account-id` and/or `--account-alias` (optional `--payer` for unregistered member IDs) |
-| Entire org | `--payer` alone |
-| OU / org-root members | `--payer` + `--ou` (optional scope suffix per ID: `/`, `/*`, `/**`) |
-| Tag match | `--payer` + `--tag KEY[=VALUE]` |
+| Explicit accounts | `--account-id` and/or `--account-alias` (optional single `--payer` for unregistered member IDs) |
+| Entire org | `--payer` alone. Comma-separated aliases union members across those organizations |
+| OU / org-root members | `--payer` + `--ou` (optional scope suffix per ID: `/`, `/*`, `/**`). Each OU is resolved in every listed payer |
+| Tag match | `--payer` + `--tag KEY[=VALUE]`, matched in every listed payer |
 
 ```bash
 finops config account add aws 123456789012 --alias rh-control
@@ -588,6 +588,9 @@ finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
 finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
 finops account get-cost --ou r-xxxx/ --payer rh-control            # accounts directly under org root
 finops account get-cost --payer rh-control
+finops account get-cost --payer rh-control,osd-staging-1
+finops account get-cost --payer rh-control,osd-staging-1 --tag env=prod
+finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-control,osd-staging-1
 finops account get-cost --payer rh-control --group-by ou
 finops account get-cost --payer rh-control --tag organization
 finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
@@ -599,7 +602,7 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--account-id` | One or more comma-separated **12-digit AWS account IDs** (provider-native IDs; unregistered members require `--payer`) |
 | `--account-alias` | One or more comma-separated configured aliases (e.g. `rh-control`, or a linked alias such as `quay`) |
 | `--ou` | One or more comma-separated AWS OU (`ou-xxxx-yyyyy`) or org-root (`r-xxxx`) IDs; requires `--payer`. Optional scope suffix per ID: bare or `/**` = full subtree (default), `/` = accounts directly in that parent only, `/*` = parent + immediate child OUs only |
-| `--payer` | Registered payer alias. Alone selects org members (ACTIVE only unless `--include-closed-accounts`); also required with `--ou` / `--tag`, or with unregistered `--account-id` IDs |
+| `--payer` | Registered payer alias(es), comma-separated. Alone selects org members and unions them across the listed organizations (ACTIVE only unless `--include-closed-accounts`); also required with `--ou` / `--tag`. A single alias supplies credentials for unregistered `--account-id` values; several aliases cannot be combined with `--account-id` or `--account-alias` |
 | `--tag` | Select org accounts by Organizations tag: `KEY` or `KEY=VALUE` (requires `--payer`) |
 | `--include-closed-accounts` | `finops account get-cost` only. With `--ou` or `--payer` alone, also select `SUSPENDED`, `PENDING_CLOSURE`, and `CLOSED` members (default: ACTIVE only). Ignored with a warning for `--tag` (already all states) and `--account-id`/`--account-alias` |
 | `--skip-org-cache` | Bypass cached organization account/tag data for `--tag` selection (always fetch live from AWS) |
@@ -702,6 +705,7 @@ Find **EBS and RDS snapshots** older than a cutoff and estimate monthly storage 
 finops snapshot list --account-alias rh-control
 finops snapshot list --account-alias rh-control --older-than-days 365 --format json
 finops snapshot list --payer rh-control
+finops snapshot list --payer rh-control,osd-staging-1
 finops snapshot list --payer rh-control --tag organization
 finops snapshot list --ou ou-abcd-12345678 --payer rh-control --types ebs
 finops snapshot list --account-id 333333333333 --payer rhc --older-than-days 90 --format csv

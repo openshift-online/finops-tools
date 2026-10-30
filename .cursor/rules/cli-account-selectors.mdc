@@ -19,6 +19,7 @@ For single-account commands (`tag list/add/update`): require **exactly one** of 
 
 For multi-account commands (`get-cost`, `snapshot list`, `report create`, `account details`): use `bindAWSTargetFlags` and **exactly one selection mode**:
 `--account-id`/`--account-alias`, `--payer` alone (entire org), `--payer --ou`, or `--payer --tag`.
+`--payer` accepts comma-separated aliases for org, OU, and tag selection. Multiple aliases cannot be combined with `--account-id` or `--account-alias`.
 
 ```go
 // ✅ GOOD — tag commands
@@ -43,6 +44,7 @@ finops tag list --account-id 111111111111 --payer rh-control
 finops tag update --account-id 111111111111 --tag-key organization --tag-value "Hybrid Platform" --payer rh-control
 finops account get-cost --account-alias rh-control
 finops account get-cost --payer rh-control
+finops account get-cost --payer rh-control,osd-staging-1
 finops account get-cost --payer rh-control --ou 'ou-abcd-12345678/*'
 finops account details --payer rh-control --ou 'ou-abcd-12345678/*'
 finops aws list-ous --payer rh-control

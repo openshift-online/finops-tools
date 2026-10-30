@@ -50,7 +50,7 @@ func FetchMonthly(ctx context.Context, q CostQuery) ([]AccountMonthlyCosts, erro
 	}
 	opts := fetchAWSOptions{
 		Now:             time.Now(),
-		NewCostExplorer: defaultCostExplorerFactory(),
+		NewCostExplorer: costExplorerFactory(),
 	}
 	if q.AWSFetch != nil {
 		opts.ListAccountNames = q.AWSFetch.ListAccountNames

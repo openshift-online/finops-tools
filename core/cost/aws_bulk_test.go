@@ -230,3 +230,106 @@ func TestFetchBulkParallelBatches(t *testing.T) {
 		t.Fatalf("Amount = %v, want %d", res.Amount, accountCount)
 	}
 }
+
+type payerPartitionCE struct {
+	calls *int32
+}
+
+func (f *payerPartitionCE) GetCostAndUsage(
+	_ context.Context,
+	params *costexplorer.GetCostAndUsageInput,
+	_ ...func(*costexplorer.Options),
+) (*costexplorer.GetCostAndUsageOutput, error) {
+	atomic.AddInt32(f.calls, 1)
+	amounts := map[string]string{
+		"111111111111": "10",
+		"222222222222": "10",
+		"333333333333": "5",
+		"444444444444": "5",
+	}
+	var groups []types.Group
+	if params.Filter != nil && params.Filter.Dimensions != nil {
+		for _, accountID := range params.Filter.Dimensions.Values {
+			groups = append(groups, types.Group{
+				Keys: []string{accountID},
+				Metrics: map[string]types.MetricValue{
+					MetricNetAmortized: {Amount: aws.String(amounts[accountID]), Unit: aws.String("USD")},
+				},
+			})
+		}
+	}
+	return &costexplorer.GetCostAndUsageOutput{
+		ResultsByTime: []types.ResultByTime{{Groups: groups}},
+	}, nil
+}
+
+func TestFetchPartitionsBulkByPayer(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	prev := costExplorerFactory
+	t.Cleanup(func() { costExplorerFactory = prev })
+	var calls int32
+	costExplorerFactory = func() func(aws.Config) CostExplorerAPI {
+		return func(aws.Config) CostExplorerAPI {
+			return &payerPartitionCE{calls: &calls}
+		}
+	}
+	targets := []AccountTarget{
+		{AccountID: "111111111111", PayerAccountID: "123456789012", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-a"}},
+		{AccountID: "222222222222", PayerAccountID: "123456789012", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-a"}},
+		{AccountID: "333333333333", PayerAccountID: "987654321098", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-b"}},
+		{AccountID: "444444444444", PayerAccountID: "987654321098", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-b"}},
+	}
+	res, err := Fetch(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Accounts: targets,
+		Range:    LastNDaysRange(30, now),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("Cost Explorer calls = %d, want 2 bulk queries", calls)
+	}
+	if res.Amount != 30 {
+		t.Fatalf("Amount = %v, want 30", res.Amount)
+	}
+
+	calls = 0
+	res, err = Fetch(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Accounts: targets,
+		Range:    LastNDaysRange(30, now),
+		GroupBy:  GroupByOU,
+		AWSFetch: &AWSFetchOptions{
+			AccountOUBuckets: map[string]OUBucket{
+				"111111111111": {ID: "ou-abcd-12345678", Name: "Prod"},
+				"222222222222": {ID: "ou-abcd-12345678", Name: "Prod"},
+				"333333333333": {ID: "ou-efgh-87654321", Name: "Sand"},
+				"444444444444": {ID: "ou-efgh-87654321", Name: "Sand"},
+			},
+			OUHierarchy: []OUHierarchyNode{
+				{ID: "ou-abcd-12345678", Name: "Prod"},
+				{ID: "ou-efgh-87654321", Name: "Sand"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("Cost Explorer calls = %d, want 2 bulk queries", calls)
+	}
+	if res.GroupBy != GroupByOU {
+		t.Fatalf("GroupBy = %q", res.GroupBy)
+	}
+	got := map[string]float64{}
+	for _, item := range res.Breakdown {
+		if item.Account != "" {
+			t.Fatalf("OU rollup kept an account row: %+v", item)
+		}
+		got[item.OUID] = item.Amount
+	}
+	if got["ou-abcd-12345678"] != 20 || got["ou-efgh-87654321"] != 10 || len(got) != 2 {
+		t.Fatalf("breakdown = %+v", res.Breakdown)
+	}
+}

@@ -40,14 +40,14 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 		fullScan, empty, failed, invalidDays bool
 		want                                 int
 	}{
-		{name: "payer filters", sel: costTargetSelector{PayerAlias: "payer"}, want: 1},
-		{name: "empty billed selection", sel: costTargetSelector{PayerAlias: "payer"}, empty: true},
-		{name: "full scan bypass", sel: costTargetSelector{PayerAlias: "payer"}, fullScan: true, want: 2},
-		{name: "explicit bypass", sel: costTargetSelector{AccountIDs: []string{"111111111111"}, PayerAlias: "payer"}, want: 2},
-		{name: "OU bypass", sel: costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAlias: "payer"}, want: 2},
-		{name: "tag bypass", sel: costTargetSelector{TagKey: "team", PayerAlias: "payer"}, want: 2},
-		{name: "API failure", sel: costTargetSelector{PayerAlias: "payer"}, failed: true},
-		{name: "invalid lookback", sel: costTargetSelector{PayerAlias: "payer"}, invalidDays: true},
+		{name: "payer filters", sel: costTargetSelector{PayerAliases: []string{"payer"}}, want: 1},
+		{name: "empty billed selection", sel: costTargetSelector{PayerAliases: []string{"payer"}}, empty: true},
+		{name: "full scan bypass", sel: costTargetSelector{PayerAliases: []string{"payer"}}, fullScan: true, want: 2},
+		{name: "explicit bypass", sel: costTargetSelector{AccountIDs: []string{"111111111111"}, PayerAliases: []string{"payer"}}, want: 2},
+		{name: "OU bypass", sel: costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAliases: []string{"payer"}}, want: 2},
+		{name: "tag bypass", sel: costTargetSelector{TagKey: "team", PayerAliases: []string{"payer"}}, want: 2},
+		{name: "API failure", sel: costTargetSelector{PayerAliases: []string{"payer"}}, failed: true},
+		{name: "invalid lookback", sel: costTargetSelector{PayerAliases: []string{"payer"}}, invalidDays: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			previousLoad, previousDiscover := loadAWSConfigForCredentialsAccount, discoverExtendedSupportBillingCandidates
@@ -85,7 +85,7 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 			}
 			selected, metadata, err := filterExtendedSupportBillingTargets(cmd, cfg, tc.sel, targets, tc.fullScan, days, time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC), nil)
 			if tc.failed {
-				if !errors.Is(err, failure) || !strings.Contains(err.Error(), "--full-scan") || selected != nil || metadata != nil {
+				if !errors.Is(err, failure) || !strings.Contains(err.Error(), "--full-scan") || !strings.Contains(err.Error(), "payer (123456789012)") || selected != nil || metadata != nil {
 					t.Fatalf("selected=%v metadata=%+v error=%v", selected, metadata, err)
 				}
 				return

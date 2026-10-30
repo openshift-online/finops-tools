@@ -57,8 +57,9 @@ account tag (default key: owner), appending @redhat.com when the tag value has
 no @ sign.
 
 Account selection matches finops account get-cost: --account-id, --account-alias,
---ou, --tag, or --payer alone (--ou/--payer select ACTIVE members only). Linked
-member accounts are scanned using role assumption from the payer.
+--ou, --tag, or --payer alone (--ou/--payer select ACTIVE members only). --payer
+accepts comma-separated aliases and unions members across those organizations.
+Linked member accounts are scanned using role assumption from the payer.
 
 By default the command prints details and does not send email. To email owners
 via Gmail, pass --send with either --yes (owner addresses) or --redirect-prefix
@@ -91,6 +92,7 @@ Gmail uses gcloud Application Default Credentials (finops does not modify ADC). 
 Examples:
   finops account details --account-alias my-linked
   finops account details --payer rh-control --ou 'ou-abcd-12345678/*' --format json -o review.json
+  finops account details --payer rh-control,osd-staging-1
   finops account details --account-alias my-linked --snowflake-alias rhprod
   finops account details --account-alias my-linked --send --redirect-prefix finops
   finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes

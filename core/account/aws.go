@@ -396,6 +396,16 @@ func ListAccountsInOU(ctx context.Context, cfg aws.Config, ouID string, opts Lis
 	return listAccountsInOUWithClient(ctx, newOrganizationsClient(cfg), ouID, opts)
 }
 
+// IsParentNotFound reports whether err is an Organizations ParentNotFoundException,
+// including when that error is wrapped.
+func IsParentNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var notFound *types.ParentNotFoundException
+	return errors.As(err, &notFound)
+}
+
 // ListAccountsUnderParent returns active accounts under an OU or organization root ID,
 // with the same depth options as ListAccountsInOU.
 func ListAccountsUnderParent(ctx context.Context, cfg aws.Config, parentID string, opts ListAccountsInOUOptions) ([]OrganizationAccount, error) {
