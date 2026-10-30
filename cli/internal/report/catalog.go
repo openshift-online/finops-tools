@@ -14,6 +14,9 @@ const (
 	TemplateSavingsPlans = "savings-plans"
 	// TemplateCostAnomalies is the AWS Cost Anomaly Detection report template.
 	TemplateCostAnomalies = "cost-anomalies"
+	// TemplateExecutiveSummary is the multi-payer HCP Executive Summary
+	// report template (golang-executive-summary-spec.md).
+	TemplateExecutiveSummary = "executive-summary"
 	// FormatHTML is the HTML output format.
 	FormatHTML = "html"
 )
@@ -46,6 +49,11 @@ func Templates() []TemplateInfo {
 		{
 			Name:        TemplateCostAnomalies,
 			Description: "AWS Cost Anomaly Detection: detected anomalies with root cause breakdown",
+			Formats:     []string{FormatHTML},
+		},
+		{
+			Name:        TemplateExecutiveSummary,
+			Description: "HCP Executive Summary: multi-payer cost, Savings Plans, anomalies, and regional fleet profitability (requires Snowflake + AWS)",
 			Formats:     []string{FormatHTML},
 		},
 	}

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	corereport "github.com/openshift-online/finops-tools/core/report"
 	"github.com/openshift-online/finops-tools/core/cost"
+	corereport "github.com/openshift-online/finops-tools/core/report"
 )
 
 func TestRenderCostsHTMLDailyChart(t *testing.T) {

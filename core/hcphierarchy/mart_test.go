@@ -17,7 +17,7 @@ type mockRows struct {
 	err   error
 }
 
-func (m *mockRows) Next() bool  { m.index++; return m.index <= len(m.data) }
+func (m *mockRows) Next() bool   { m.index++; return m.index <= len(m.data) }
 func (m *mockRows) Close() error { return nil }
 func (m *mockRows) Err() error   { return m.err }
 func (m *mockRows) Scan(dest ...any) error {
@@ -45,6 +45,13 @@ func (m *mockRows) Scan(dest ...any) error {
 				v := s
 				*p = &v
 			}
+		case *int64:
+			switch v := row[i].(type) {
+			case int64:
+				*p = v
+			case int:
+				*p = int64(v)
+			}
 		}
 	}
 	return nil
@@ -65,7 +72,7 @@ func (m *mockQueryer) QueryContext(_ context.Context, _ string, _ ...any) (Snowf
 
 func (m *mockQueryer) Close() error { return nil }
 
-// makeWorkerRow builds a full 25-column test row.
+// makeWorkerRow builds a full 26-column test row.
 func makeWorkerRow(
 	ocmID, clusterID, clusterName, accountID, state, region string,
 	org, classification, classReason string,
@@ -73,7 +80,7 @@ func makeWorkerRow(
 	hierarchySource string,
 	mcName, mcFleetID, mcAccountID, mcRegion, mcStatus string,
 	scName, scFleetID, scAccountID, scRegion, scStatus string,
-	sector, billing, serviceLevel, subscriptionStatus string,
+	sector, billing, serviceLevel, subscriptionStatus, environment string,
 ) []any {
 	return []any{
 		ocmID, clusterID, clusterName, accountID, state, region,
@@ -82,7 +89,7 @@ func makeWorkerRow(
 		hierarchySource,
 		mcName, mcFleetID, mcAccountID, mcRegion, mcStatus,
 		scName, scFleetID, scAccountID, scRegion, scStatus,
-		sector, billing, serviceLevel, subscriptionStatus,
+		sector, billing, serviceLevel, subscriptionStatus, environment,
 	}
 }
 
@@ -95,7 +102,7 @@ func TestBuild_ReturnsSingleWorkerRow(t *testing.T) {
 			true, "mart",
 			"mc-name", "mc-fleet-id", "222222222222", "us-east-1", "ready",
 			"sc-name", "sc-fleet-id", "333333333333", "us-east-1", "ready",
-			"staging", "marketplace", "standard", "active",
+			"staging", "marketplace", "standard", "active", "Production",
 		),
 	}}}
 
@@ -120,6 +127,9 @@ func TestBuild_ReturnsSingleWorkerRow(t *testing.T) {
 	if !row.HierarchyComplete {
 		t.Error("expected HierarchyComplete = true")
 	}
+	if row.Environment != "Production" {
+		t.Errorf("Environment = %q, want Production", row.Environment)
+	}
 	if report.MartView != defaultMartView {
 		t.Errorf("MartView = %q, want default", report.MartView)
 	}
@@ -135,14 +145,14 @@ func TestBuild_MultipleRows(t *testing.T) {
 			"ready", "us-east-1", "Org1", "HCP", "hcp_worker", true, "mart",
 			"mc1", "mc-fleet-1", "222222222222", "us-east-1", "ready",
 			"sc1", "sc-fleet-1", "333333333333", "us-east-1", "ready",
-			"prod", "standard", "premium", "active",
+			"prod", "standard", "premium", "active", "Production",
 		),
 		makeWorkerRow(
 			"ocm-2", "cluster-2", "worker-2", "444444444444",
 			"ready", "eu-west-1", "Org2", "HCP", "hcp_worker", false, "mart",
 			"mc2", "mc-fleet-2", "555555555555", "eu-west-1", "ready",
 			"sc2", "sc-fleet-2", "666666666666", "eu-west-1", "ready",
-			"staging", "marketplace", "standard", "active",
+			"staging", "marketplace", "standard", "active", "Stage",
 		),
 	}}}
 
@@ -189,12 +199,13 @@ func TestBuild_NullableStringColumns(t *testing.T) {
 		"ready", "us-east-1", "OrgX", "HCP", "hcp_worker", true, "mart",
 		"mc", "mc-f", "222222222222", "us-east-1", "ready",
 		"sc", "sc-f", "333333333333", "us-east-1", "ready",
-		"prod", "standard", "premium", "active",
+		"prod", "standard", "premium", "active", "Production",
 	)
 	row[11] = nil // mc_name
 	row[22] = nil // billing_model
 	row[23] = nil // service_level
 	row[24] = nil // subscription_status
+	row[25] = nil // environment
 
 	mq := &mockQueryer{rows: &mockRows{data: [][]any{row}}}
 	report, err := Build(context.Background(), mq, "")
@@ -202,9 +213,9 @@ func TestBuild_NullableStringColumns(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := report.Rows[0]
-	if got.MCName != "" || got.BillingModel != "" || got.ServiceLevel != "" || got.SubscriptionStatus != "" {
-		t.Errorf("nullable fields should be empty, got MCName=%q BillingModel=%q ServiceLevel=%q SubscriptionStatus=%q",
-			got.MCName, got.BillingModel, got.ServiceLevel, got.SubscriptionStatus)
+	if got.MCName != "" || got.BillingModel != "" || got.ServiceLevel != "" || got.SubscriptionStatus != "" || got.Environment != "" {
+		t.Errorf("nullable fields should be empty, got MCName=%q BillingModel=%q ServiceLevel=%q SubscriptionStatus=%q Environment=%q",
+			got.MCName, got.BillingModel, got.ServiceLevel, got.SubscriptionStatus, got.Environment)
 	}
 }
 
@@ -216,7 +227,7 @@ func TestBuild_HierarchyCompleteNil(t *testing.T) {
 		"ready", "us-east-1", "OrgX", "HCP", "hcp_worker", false, "mart",
 		"mc", "mc-f", "222222222222", "us-east-1", "ready",
 		"sc", "sc-f", "333333333333", "us-east-1", "ready",
-		"prod", "standard", "premium", "active",
+		"prod", "standard", "premium", "active", "Production",
 	)
 	// Overwrite the hierarchyComplete position (index 9) with nil to simulate NULL.
 	row[9] = nil
@@ -317,6 +328,7 @@ func TestBuildMartSQL_SelfJoin(t *testing.T) {
 		"w.EXTERNAL_ID                   AS customer_cluster_id",
 		"mc.AWS_ACCOUNT_ID               AS mc_account_id",
 		"sc.AWS_ACCOUNT_ID               AS sc_account_id",
+		"w.ENVIRONMENT",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("SQL missing: %q", want)

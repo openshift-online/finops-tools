@@ -14,18 +14,22 @@ import (
 )
 
 var (
-	reportGenerateAccount         string
-	reportGenerateAccountAliases  string
-	reportGenerateFormat          string
-	reportGenerateOU              string
-	reportGenerateOutput          string
-	reportGeneratePayer           string
-	reportGenerateQuiet           bool
-	reportGenerateTag             string
-	reportGenerateSkipOrgCache    bool
-	reportGenerateRefreshOrgCache bool
-	reportCreateSnowflakeAlias    string
-	reportGenerateWorkers         int
+	reportGenerateAccount          string
+	reportGenerateAccountAliases   string
+	reportGenerateFormat           string
+	reportGenerateOU               string
+	reportGenerateOutput           string
+	reportGeneratePayer            string
+	reportGenerateQuiet            bool
+	reportGenerateTag              string
+	reportGenerateSkipOrgCache     bool
+	reportGenerateRefreshOrgCache  bool
+	reportCreateSnowflakeAlias     string
+	reportCreateSnowflakeProdAlias string
+	reportGenerateWorkers          int
+	reportCreateMappingCSV         string
+	reportCreateInfraAccountIDs    string
+	reportCreateNoAnomalies        bool
 )
 
 var reportCreateCmd = &cobra.Command{
@@ -89,6 +93,10 @@ func init() {
 	})
 	reportCreateCmd.Flags().StringVar(&reportGenerateFormat, "format", reportpkg.FormatHTML, "Output format (supported: html)")
 	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeAlias, "snowflake-alias", "", "Snowflake account alias for Snowflake-backed reports")
+	reportCreateCmd.Flags().StringVar(&reportCreateSnowflakeProdAlias, "snowflake-prod-alias", "", "Snowflake account alias for the Telesense/prod connection (executive-summary template only)")
+	reportCreateCmd.Flags().StringVar(&reportCreateMappingCSV, "mapping-csv", "", "Path to the account-taxonomy mapping CSV (executive-summary template only, required)")
+	reportCreateCmd.Flags().StringVar(&reportCreateInfraAccountIDs, "infra-account-ids", "", "Comma-separated shared-infrastructure AWS account IDs (executive-summary template only, required)")
+	reportCreateCmd.Flags().BoolVar(&reportCreateNoAnomalies, "no-anomalies", false, "Skip ML and statistical anomaly detection (executive-summary template only)")
 	addOutputFlag(reportCreateCmd, &reportGenerateOutput)
 	reportCreateCmd.Flags().BoolVar(&reportGenerateQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(reportCreateCmd, &reportGenerateWorkers, "costs template only; ")
@@ -117,6 +125,7 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	applyExecutiveSummaryMonthsDefault(cmd, templateName)
 	if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
 		return err
 	}
@@ -138,6 +147,16 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	switch targetMode {
 	case reportpkg.AccountTargetsSnowflake:
 		snowflakeAlias = strings.TrimSpace(reportCreateSnowflakeAlias)
+	case reportpkg.AccountTargetsRequiredAndSnowflake:
+		snowflakeAlias = strings.TrimSpace(reportCreateSnowflakeAlias)
+		targets, err = resolveCostTargets(
+			cmd, cfg, &sel,
+			awsFlags.ConfigPath, awsFlags.CredentialsFile, awsFlags.AuthMethod,
+			status,
+		)
+		if err != nil {
+			return err
+		}
 	default:
 		targets, err = resolveCostTargets(
 			cmd, cfg, &sel,
@@ -155,15 +174,19 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	in := reportpkg.GenerateInput{
-		Format:          format,
-		Targets:         targets,
-		Range:           dateRange,
-		Progress:        status,
-		Now:             time.Now().UTC(),
-		ConfigPath:      cfgPath,
-		SnowflakeAlias:  snowflakeAlias,
-		Workers:         reportGenerateWorkers,
-		SelectionRootID: sel.SelectionRootID,
+		Format:             format,
+		Targets:            targets,
+		Range:              dateRange,
+		Progress:           status,
+		Now:                time.Now().UTC(),
+		ConfigPath:         cfgPath,
+		SnowflakeAlias:     snowflakeAlias,
+		SnowflakeProdAlias: strings.TrimSpace(reportCreateSnowflakeProdAlias),
+		Workers:            reportGenerateWorkers,
+		SelectionRootID:    sel.SelectionRootID,
+		MappingCSVPath:     strings.TrimSpace(reportCreateMappingCSV),
+		InfraAccountIDs:    parseInfraAccountIDs(reportCreateInfraAccountIDs),
+		NoAnomalies:        reportCreateNoAnomalies,
 	}
 	if err := gen.Validate(in); err != nil {
 		return err
@@ -208,4 +231,33 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+// applyExecutiveSummaryMonthsDefault defaults --months to 5 for the
+// executive-summary template (golang-executive-summary-spec.md's default
+// reporting window) when the user hasn't selected any period mode
+// explicitly. Applied before applyCostPeriodDefaults so a configured
+// defaults.cost.months (or any other period flag) still takes precedence.
+func applyExecutiveSummaryMonthsDefault(cmd *cobra.Command, templateName string) {
+	if templateName != reportpkg.TemplateExecutiveSummary {
+		return
+	}
+	if cmd.Flags().Changed("days") || cmd.Flags().Changed("months") ||
+		cmd.Flags().Changed("from") || cmd.Flags().Changed("to") {
+		return
+	}
+	periodFlags.months = 5
+}
+
+// parseInfraAccountIDs splits --infra-account-ids on commas, trimming
+// whitespace and dropping empty entries.
+func parseInfraAccountIDs(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
