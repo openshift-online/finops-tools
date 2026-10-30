@@ -626,7 +626,7 @@ The owner email is derived from the Organizations `owner` tag, appending `@redha
 
 By default the command prints details and does not send email. To email owners via **Gmail**, pass `--send` with either `--yes` (owner addresses) or `--redirect-prefix` (test delivery to `PREFIX+<owner>@redhat.com`). `--group-by` only affects how emails are batched; stdout is always one record per account. When sending, a delivery summary is written to stderr (pretty-print) so JSON/CSV stdout stays a pure details payload.
 
-Owner notification email content is customizable per run (send only): `--email-subject-prefix`, `--email-action-title`, `--email-intro` (placeholders `{account}`, `{account_id}`, `{count}`), `--email-option` (repeatable), `--email-deadline` (placeholder `{date}`), and `--email-reply-by-days`. By default the email asks the owner to keep, delete, or request modifications and states **no deadline**; pass `--email-deadline` to add a reply-by sentence (`{date}` = report generation + `--email-reply-by-days`, default `14` days).
+Owner notification email content is customizable per run (send only): `--email-subject-prefix` (plain text), `--email-action-title`, `--email-intro` (placeholders `{account}`, `{account_id}`, `{count}`), `--email-option` (repeatable), `--email-deadline` (placeholder `{date}`), and `--email-reply-by-days`. The action title, intro, each option, and the deadline accept Markdown (emphasis, links, lists, and line breaks). A single newline is a line break; a blank line starts a new paragraph. Raw HTML in those fields is shown as text. By default the email asks the owner to keep, delete, or request modifications and states **no deadline**; pass `--email-deadline` to add a reply-by sentence (`{date}` = report generation + `--email-reply-by-days`, default `14` days).
 
 A Cost Explorer, inventory, or owner-tag failure on one account is recorded for that account and does not stop the rest of the run. OpenShift cluster lookup uses Dataverse Snowflake OAuth (`--snowflake-alias`, default `snowflake.account_alias`). An unknown or incomplete `--snowflake-alias` fails before AWS work. If the flag is omitted and no Snowflake account is configured, or the lookup fails after connect, AWS cost/inventory still succeed and the OpenShift section records a soft error (owner email shows a generic incomplete-lookup note).
 
@@ -660,6 +660,12 @@ finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner
 # Production send with an explicit reply deadline (opt-in)
 finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes \
   --email-deadline 'If we do not hear from you by {date}, we will proceed with deletion.'
+
+# Markdown in the intro, options, and deadline
+finops account details --account-alias my-linked --send --redirect-prefix finops \
+  --email-intro 'Please review **{account}**. See the [runbook](https://example.com).' \
+  --email-option '**Keep** the account' \
+  --email-deadline 'Reply by **{date}**.'
 ```
 
 | Flag | Description |
@@ -671,11 +677,11 @@ finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner
 | `--yes` | With `--send`, deliver to resolved owner emails |
 | `--redirect-prefix` | With `--send`, deliver to `PREFIX+<owner>@redhat.com` (test mode) |
 | `--group-by` | `account` (default) or `owner` — one email per account or per owner (send only) |
-| `--email-subject-prefix` | With `--send`, override the email subject prefix (default: `⚠️ Action required: `) |
-| `--email-action-title` | With `--send`, override the `Action required` section heading |
-| `--email-intro` | With `--send`, override the email intro paragraph (placeholders: `{account}`, `{account_id}`, `{count}`) |
-| `--email-option` | With `--send`, override a reply option (repeatable; default: Keep the account / Delete the account / Request modifications) |
-| `--email-deadline` | With `--send`, add a deadline sentence (placeholder: `{date}`); omitted means no deadline |
+| `--email-subject-prefix` | With `--send`, override the email subject prefix (plain text; default: `⚠️ Action required: `) |
+| `--email-action-title` | With `--send`, override the `Action required` section heading (inline Markdown; raw HTML is shown as text) |
+| `--email-intro` | With `--send`, override the email intro (Markdown; placeholders: `{account}`, `{account_id}`, `{count}`; raw HTML is shown as text) |
+| `--email-option` | With `--send`, override a reply option (repeatable, inline Markdown; raw HTML is shown as text; default: Keep the account / Delete the account / Request modifications) |
+| `--email-deadline` | With `--send`, add a deadline (Markdown; placeholder: `{date}`; raw HTML is shown as text); omitted means no deadline |
 | `--email-reply-by-days` | With `--email-deadline`, days after report generation for `{date}` (default: `14`) |
 | `--months` | Calendar months of cost history to include (default: `6`) |
 | `--exclude-recent-days` | Omit the last N UTC days from the cost end anchor (incomplete AWS CE data); default from `defaults.cost.exclude_recent_days` or `0` |

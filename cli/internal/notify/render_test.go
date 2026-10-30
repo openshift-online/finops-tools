@@ -435,7 +435,7 @@ func TestRenderAccountEmailDeadlineOptIn(t *testing.T) {
 	if !strings.Contains(msg.TextBody, want) {
 		t.Fatalf("text missing deadline sentence: %s", msg.TextBody)
 	}
-	if !strings.Contains(msg.HTMLBody, "<strong>"+want+"</strong>") {
+	if !strings.Contains(msg.HTMLBody, `class="deadline"`) || !strings.Contains(msg.HTMLBody, `font-weight:600`) || !strings.Contains(msg.HTMLBody, want) {
 		t.Fatalf("html missing deadline sentence: %s", msg.HTMLBody)
 	}
 }
@@ -591,5 +591,106 @@ func TestValidateDeadlineTemplate(t *testing.T) {
 	err = ValidateDeadlineTemplate("Reply by {accounts}.")
 	if err == nil || !strings.Contains(err.Error(), "{accounts}") {
 		t.Fatalf("{accounts} should be rejected: %v", err)
+	}
+}
+
+func TestRenderAccountEmailDefaultActionHTML(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{})
+	want := `<h2>Action required</h2><p>We are reviewing AWS account test-account (111111111111), which may no longer be needed. Based on the information below, please reply to this email and tell us whether you want to:</p><ul><li>Keep the account</li><li>Delete the account</li><li>Request modifications (describe what you need)</li></ul></section>`
+	if !strings.Contains(msg.HTMLBody, want) {
+		t.Fatalf("default action HTML changed:\n%s", msg.HTMLBody)
+	}
+	if strings.Contains(msg.HTMLBody, `class="deadline"`) {
+		t.Fatalf("default email should not include a deadline: %s", msg.HTMLBody)
+	}
+}
+
+func TestRenderAccountEmailSubjectPrefixIsPlain(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{SubjectPrefix: "**Review**: "})
+	if msg.Subject != "**Review**: AWS account review: test-account (111111111111)" {
+		t.Fatalf("Subject = %q", msg.Subject)
+	}
+}
+
+func TestRenderAccountEmailMarkdownTemplate(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{
+		ActionTitle:  "*Please respond*",
+		Intro:        "Please review **{account}**. See the [runbook](https://example.com/docs).",
+		Options:      []string{"**Keep** the account"},
+		DeadlineText: "Reply by **{date}**.",
+	})
+	if !strings.Contains(msg.HTMLBody, "<h2><em>Please respond</em></h2>") {
+		t.Fatalf("title html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.TextBody, "Please respond\n") || strings.Contains(msg.TextBody, "*Please respond*") {
+		t.Fatalf("title text: %s", msg.TextBody)
+	}
+	account := "AWS account test-account (111111111111)"
+	if !strings.Contains(msg.HTMLBody, "<strong>"+account+"</strong>") {
+		t.Fatalf("intro html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, `<a style="color:#0969da" href="https://example.com/docs">runbook</a>`) {
+		t.Fatalf("link html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.TextBody, "Please review "+account+". See the runbook (https://example.com/docs).") {
+		t.Fatalf("intro text: %s", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<li><strong>Keep</strong> the account</li>") {
+		t.Fatalf("option html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.TextBody, "- Keep the account") {
+		t.Fatalf("option text: %s", msg.TextBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>29 January 2026</strong>") {
+		t.Fatalf("deadline html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.TextBody, "Reply by 29 January 2026.") {
+		t.Fatalf("deadline text: %s", msg.TextBody)
+	}
+	if strings.Contains(msg.TextBody, "**") {
+		t.Fatalf("text body should drop emphasis markers: %s", msg.TextBody)
+	}
+}
+
+func TestRenderAccountEmailMarkdownPlaceholderIsLiteral(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "*prod* <x>",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{Intro: "Review **{account}**."})
+	if strings.Contains(msg.HTMLBody, "<em>") || strings.Contains(msg.HTMLBody, "<x>") {
+		t.Fatalf("account name should not be parsed as markup: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "<strong>AWS account *prod* &lt;x&gt; (111111111111)</strong>") {
+		t.Fatalf("intro html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.TextBody, "AWS account *prod* <x> (111111111111)") {
+		t.Fatalf("intro text: %s", msg.TextBody)
+	}
+}
+
+func TestRenderAccountEmailMarkdownNewlineAndList(t *testing.T) {
+	msg := RenderAccountEmail(accountreview.AccountDetails{
+		AccountID:   "111111111111",
+		AccountName: "test-account",
+		GeneratedAt: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+	}, RenderOptions{Intro: "Line one\nLine two\n\n- Alpha\n- Beta"})
+	if !strings.Contains(msg.HTMLBody, "Line one<br>") || !strings.Contains(msg.HTMLBody, "<ul>") || !strings.Contains(msg.HTMLBody, "<li>Alpha</li>") {
+		t.Fatalf("html: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.TextBody, "Line one\nLine two") || !strings.Contains(msg.TextBody, "- Alpha\n- Beta") {
+		t.Fatalf("text: %s", msg.TextBody)
 	}
 }
