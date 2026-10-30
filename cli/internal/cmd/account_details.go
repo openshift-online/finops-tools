@@ -65,12 +65,15 @@ via Gmail, pass --send with either --yes (owner addresses) or --redirect-prefix
 (PREFIX+<owner>@redhat.com test delivery). --group-by applies only to email
 batching; stdout is always one record per account.
 
-Owner email content is customizable per run: --email-subject-prefix,
---email-action-title, --email-intro ({account}, {account_id}, {count}
+Owner email content is customizable per run: --email-subject-prefix (plain
+text), --email-action-title, --email-intro ({account}, {account_id}, {count}
 placeholders), --email-option (repeatable), --email-deadline ({date}
-placeholder), and --email-reply-by-days. By default the email asks the owner to
-keep, delete, or request modifications and states no deadline; pass
---email-deadline to add one.
+placeholder), and --email-reply-by-days. The action title, intro, each option,
+and the deadline accept Markdown (emphasis, links, lists, and line breaks). A
+single newline is a line break; a blank line starts a new paragraph. Raw HTML
+in those fields is shown as text. By default the email asks the owner to keep,
+delete, or request modifications and states no deadline; pass --email-deadline
+to add one.
 
 A Cost Explorer, inventory, or owner-tag failure on one account is recorded for
 that account and does not stop the rest of the run. Incomplete inventory (including
@@ -95,7 +98,11 @@ Examples:
   finops account details --account-alias my-linked --send --redirect-prefix finops
   finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes
   finops account details --payer rh-control --ou ou-abcd-12345678 --group-by owner --send --yes \
-    --email-deadline 'If we do not hear from you by {date}, we will proceed with deletion.'`,
+    --email-deadline 'If we do not hear from you by {date}, we will proceed with deletion.'
+  finops account details --account-alias my-linked --send --redirect-prefix finops \
+    --email-intro 'Please review **{account}**. See the [runbook](https://example.com).' \
+    --email-option '**Keep** the account' \
+    --email-deadline 'Reply by **{date}**.'`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
 		sel, err := parseCostTargetSelector(
@@ -154,15 +161,15 @@ func init() {
 		"With --send, deliver to PREFIX+<owner>@redhat.com instead of owner addresses")
 	accountDetailsCmd.Flags().StringVar(&detailsGroupBy, "group-by", string(accountreview.GroupByAccount), "Group emails by account or owner (send only)")
 	accountDetailsCmd.Flags().StringVar(&detailsSubjectPrefix, "email-subject-prefix", "",
-		`With --send, override the email subject prefix (default "⚠️ Action required: ")`)
+		`With --send, override the email subject prefix (plain text; default "⚠️ Action required: ")`)
 	accountDetailsCmd.Flags().StringVar(&detailsActionTitle, "email-action-title", "",
-		`With --send, override the "Action required" section heading`)
+		"With --send, override the action heading (inline Markdown; raw HTML is shown as text)")
 	accountDetailsCmd.Flags().StringVar(&detailsEmailIntro, "email-intro", "",
-		"With --send, override the email intro paragraph (placeholders: {account}, {account_id}, {count})")
+		"With --send, override the intro (Markdown; placeholders: {account}, {account_id}, {count}; raw HTML is shown as text)")
 	accountDetailsCmd.Flags().StringArrayVar(&detailsEmailOptions, "email-option", nil,
-		"With --send, override a reply option (repeatable; default: Keep the account / Delete the account / Request modifications)")
+		"With --send, override a reply option (repeatable, inline Markdown; raw HTML is shown as text)")
 	accountDetailsCmd.Flags().StringVar(&detailsEmailDeadline, "email-deadline", "",
-		"With --send, add a deadline sentence (placeholder: {date}); omitted means no deadline")
+		"With --send, add a deadline (Markdown; placeholder: {date}; raw HTML is shown as text); omitted means no deadline")
 	accountDetailsCmd.Flags().IntVar(&detailsReplyByDays, "email-reply-by-days", 14,
 		"With --email-deadline, days after report generation for {date}")
 	accountDetailsCmd.Flags().IntVar(&detailsMonths, "months", 6, "Number of calendar months of cost history to include")

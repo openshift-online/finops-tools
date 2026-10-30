@@ -41,13 +41,14 @@ const incompleteInventoryNote = "Inventory collection was incomplete. Missing re
 const incompleteOpenShiftNote = "OpenShift cluster lookup was incomplete. Clusters in this account may not be listed."
 
 const (
-	htmlTableStyle  = `width:100%;border-collapse:collapse;font-size:.9rem`
-	htmlCellStyle   = `text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
-	htmlAmountStyle = `text-align:right;white-space:nowrap;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
-	htmlMetaStyle   = `color:#656d76;font-size:.9rem`
-	htmlActionStyle = `background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem`
-	htmlCardStyle   = `background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem`
-	htmlH4Style     = `margin:.75rem 0 .35rem;font-size:.9rem;font-weight:600;color:#656d76`
+	htmlTableStyle    = `width:100%;border-collapse:collapse;font-size:.9rem`
+	htmlCellStyle     = `text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
+	htmlAmountStyle   = `text-align:right;white-space:nowrap;padding:.4rem .6rem;border-bottom:1px solid #d0d7de`
+	htmlMetaStyle     = `color:#656d76;font-size:.9rem`
+	htmlActionStyle   = `background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem`
+	htmlCardStyle     = `background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem`
+	htmlH4Style       = `margin:.75rem 0 .35rem;font-size:.9rem;font-weight:600;color:#656d76`
+	htmlDeadlineStyle = `font-weight:600;margin:.75rem 0 0`
 )
 
 // RenderOptions customizes rendered owner notification emails. The zero value
@@ -55,17 +56,22 @@ const (
 // default outcome, so a reply deadline is only shown when DeadlineText is set.
 type RenderOptions struct {
 	// SubjectPrefix overrides the built-in subject prefix (used verbatim,
-	// including any trailing space).
+	// including any trailing space). Subject text is plain: mail clients do
+	// not render Markdown or HTML in subjects.
 	SubjectPrefix string
 	// ActionTitle overrides the "Action required" section heading.
+	// Inline Markdown (emphasis and links) is rendered; raw HTML is shown as text.
 	ActionTitle string
 	// Intro overrides the whole intro paragraph, including the reply
 	// instruction. Placeholders: {account}, {account_id}, {count}.
+	// Markdown is rendered in the HTML body; raw HTML is shown as text.
 	Intro string
-	// Options overrides the reply options list.
+	// Options overrides the reply options list. Each entry is inline Markdown;
+	// raw HTML is shown as text.
 	Options []string
 	// DeadlineText adds a deadline sentence with a {date} placeholder.
 	// Empty omits the deadline sentence (and the reply-by date) entirely.
+	// Markdown is rendered in the HTML body; raw HTML is shown as text.
 	DeadlineText string
 	// ReplyByDays sets the {date} offset in days from report generation.
 	// Zero falls back to the built-in default of 14 days.
@@ -77,20 +83,6 @@ func (o RenderOptions) subjectPrefix() string {
 		return o.SubjectPrefix
 	}
 	return actionRequiredSubjectPrefix
-}
-
-func (o RenderOptions) title() string {
-	if o.ActionTitle != "" {
-		return o.ActionTitle
-	}
-	return actionRequiredTitle
-}
-
-func (o RenderOptions) optionList() []string {
-	if len(o.Options) > 0 {
-		return o.Options
-	}
-	return actionRequiredOptionList
 }
 
 // ValidateIntroTemplate returns an error when intro contains a placeholder
@@ -126,20 +118,9 @@ func validatePlaceholders(where, s string, allowed ...string) error {
 	return nil
 }
 
-// expandPlaceholders replaces {token} placeholders with values. Unknown tokens
-// are left untouched; the CLI validates templates before rendering.
-func expandPlaceholders(s string, values map[string]string) string {
-	repl := make([]string, 0, 2*len(values))
-	for k, v := range values {
-		repl = append(repl, "{"+k+"}", v)
-	}
-	return strings.NewReplacer(repl...).Replace(s)
-}
-
-func actionRequiredIntro(details []accountreview.AccountDetails, opts RenderOptions) string {
-	if opts.Intro != "" {
-		return expandPlaceholders(opts.Intro, introPlaceholderValues(details))
-	}
+// actionRequiredIntro is the built-in intro. Custom intro text is rendered
+// separately so Markdown in an override is not applied to this copy.
+func actionRequiredIntro(details []accountreview.AccountDetails) string {
 	switch len(details) {
 	case 1:
 		d := details[0]
@@ -178,15 +159,10 @@ func introPlaceholderValues(details []accountreview.AccountDetails) map[string]s
 	}
 }
 
-// actionRequiredDeadlineText renders the configured deadline sentence. ok is
-// false when no deadline is configured; callers omit the sentence entirely.
-func actionRequiredDeadlineText(generated time.Time, opts RenderOptions) (string, bool) {
-	if opts.DeadlineText == "" {
-		return "", false
-	}
-	return expandPlaceholders(opts.DeadlineText, map[string]string{
+func deadlinePlaceholderValues(generated time.Time, opts RenderOptions) map[string]string {
+	return map[string]string{
 		"date": replyByDate(generated, opts).Format("2 January 2006"),
-	}), true
+	}
 }
 
 func replyByDate(generated time.Time, opts RenderOptions) time.Time {
@@ -382,13 +358,21 @@ func writeOpenShiftText(b *strings.Builder, d accountreview.AccountDetails) {
 }
 
 func writeActionRequiredText(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time, opts RenderOptions) {
-	fmt.Fprintf(b, "%s\n\n", opts.title())
-	b.WriteString(actionRequiredIntro(details, opts))
+	if opts.ActionTitle != "" {
+		fmt.Fprintf(b, "%s\n\n", renderTemplateMarkdown(opts.ActionTitle, nil, true).Plain)
+	} else {
+		fmt.Fprintf(b, "%s\n\n", actionRequiredTitle)
+	}
+	if opts.Intro != "" {
+		b.WriteString(renderTemplateMarkdown(opts.Intro, introPlaceholderValues(details), false).Plain)
+	} else {
+		b.WriteString(actionRequiredIntro(details))
+	}
 	b.WriteString("\n\n")
 	b.WriteString(optionListText(opts))
-	if text, ok := actionRequiredDeadlineText(generated, opts); ok {
+	if opts.DeadlineText != "" {
 		b.WriteString("\n\n")
-		b.WriteString(text)
+		b.WriteString(renderTemplateMarkdown(opts.DeadlineText, deadlinePlaceholderValues(generated, opts), false).Plain)
 	}
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("=", 48))
@@ -396,10 +380,16 @@ func writeActionRequiredText(b *strings.Builder, details []accountreview.Account
 }
 
 func optionListText(opts RenderOptions) string {
-	options := opts.optionList()
-	lines := make([]string, len(options))
-	for i, o := range options {
-		lines[i] = "- " + o
+	if len(opts.Options) == 0 {
+		lines := make([]string, len(actionRequiredOptionList))
+		for i, opt := range actionRequiredOptionList {
+			lines[i] = "- " + opt
+		}
+		return strings.Join(lines, "\n")
+	}
+	lines := make([]string, len(opts.Options))
+	for i, opt := range opts.Options {
+		lines[i] = "- " + renderTemplateMarkdown(opt, nil, true).Plain
 	}
 	return strings.Join(lines, "\n")
 }
@@ -634,19 +624,44 @@ func writeResourceTable(b *strings.Builder, table accountreview.ResourceTable) {
 }
 
 func writeActionRequiredHTML(b *strings.Builder, details []accountreview.AccountDetails, generated time.Time, opts RenderOptions) {
-	fmt.Fprintf(b, `<section class="action" style="%s"><h2>%s</h2><p>`, htmlActionStyle, htmlEscape(opts.title()))
-	b.WriteString(htmlEscape(actionRequiredIntro(details, opts)))
-	b.WriteString(`</p><ul>`)
-	for _, opt := range opts.optionList() {
-		fmt.Fprintf(b, `<li>%s</li>`, htmlEscape(opt))
+	title := htmlEscape(actionRequiredTitle)
+	if opts.ActionTitle != "" {
+		title = renderTemplateMarkdown(opts.ActionTitle, nil, true).HTML
 	}
-	if text, ok := actionRequiredDeadlineText(generated, opts); ok {
-		b.WriteString(`</ul><p><strong>`)
-		b.WriteString(htmlEscape(text))
-		b.WriteString(`</strong></p></section>`)
+	fmt.Fprintf(b, `<section class="action" style="%s"><h2>%s</h2>`, htmlActionStyle, title)
+	if opts.Intro != "" {
+		b.WriteString(renderTemplateMarkdown(opts.Intro, introPlaceholderValues(details), false).HTML)
+	} else {
+		fmt.Fprintf(b, `<p>%s</p>`, htmlEscape(actionRequiredIntro(details)))
+	}
+	b.WriteString(`<ul>`)
+	if len(opts.Options) > 0 {
+		for _, opt := range opts.Options {
+			fmt.Fprintf(b, `<li>%s</li>`, renderTemplateMarkdown(opt, nil, true).HTML)
+		}
+	} else {
+		for _, opt := range actionRequiredOptionList {
+			fmt.Fprintf(b, `<li>%s</li>`, htmlEscape(opt))
+		}
+	}
+	b.WriteString(`</ul>`)
+	if opts.DeadlineText != "" {
+		fragment := renderTemplateMarkdown(opts.DeadlineText, deadlinePlaceholderValues(generated, opts), false).HTML
+		writeDeadlineHTML(b, fragment)
+	}
+	b.WriteString(`</section>`)
+}
+
+func writeDeadlineHTML(b *strings.Builder, fragment string) {
+	fragment = strings.TrimSpace(fragment)
+	if fragment == "" {
 		return
 	}
-	b.WriteString(`</ul></section>`)
+	if inner, ok := singleParagraphInner(fragment); ok {
+		fmt.Fprintf(b, `<p class="deadline" style="%s">%s</p>`, htmlDeadlineStyle, inner)
+		return
+	}
+	fmt.Fprintf(b, `<div class="deadline" style="%s">%s</div>`, htmlDeadlineStyle, fragment)
 }
 
 func writeHTMLTableOpen(b *strings.Builder) {
