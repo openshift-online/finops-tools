@@ -344,7 +344,7 @@ func fetchAWSDailyNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchA
 	dr := EffectiveRange(q, opts.Now)
 	ce := opts.NewCostExplorer(cfg)
 	filter := LinkedAccountFilter(acct.AccountID, acct.ScopeToAccount())
-	return sumNetAmortizedDaily(ctx, ce, dr, filter)
+	return sumNetAmortizedDailyWithCoverage(ctx, ce, dr, filter, q.RequireDailyCoverage)
 }
 
 func defaultCostExplorerFactory() func(aws.Config) CostExplorerAPI {
@@ -357,6 +357,10 @@ func defaultCostExplorerFactory() func(aws.Config) CostExplorerAPI {
 }
 
 func sumNetAmortizedDaily(ctx context.Context, ce CostExplorerAPI, dr DateRange, filter *types.Expression) ([]DailyCostItem, string, error) {
+	return sumNetAmortizedDailyWithCoverage(ctx, ce, dr, filter, false)
+}
+
+func sumNetAmortizedDailyWithCoverage(ctx context.Context, ce CostExplorerAPI, dr DateRange, filter *types.Expression, requireCoverage bool) ([]DailyCostItem, string, error) {
 	byDate := make(map[string]float64)
 	currency := "USD"
 	var token *string
@@ -401,9 +405,16 @@ func sumNetAmortizedDaily(ctx context.Context, ce CostExplorerAPI, dr DateRange,
 		token = out.NextPageToken
 	}
 
+	if requireCoverage {
+		for date := dr.Start; date.Before(dr.End); date = date.AddDate(0, 0, 1) {
+			if _, ok := byDate[FormatDate(date)]; !ok {
+				return nil, "", fmt.Errorf("daily cost data unavailable for %s", FormatDate(date))
+			}
+		}
+	}
 	daily := make([]DailyCostItem, 0, len(byDate))
 	for date, amt := range byDate {
-		if amt == 0 {
+		if amt == 0 && !requireCoverage {
 			continue
 		}
 		daily = append(daily, DailyCostItem{Date: date, Amount: amt})
