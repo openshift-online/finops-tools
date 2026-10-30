@@ -214,12 +214,20 @@ func replaceWithLiteral(n ast.Node, raw []byte) {
 	parent.ReplaceChild(parent, n, ast.NewString(append([]byte(nil), raw...)))
 }
 
+func htmlBlockRaw(n *ast.HTMLBlock, source []byte) []byte {
+	raw := n.Lines().Value(source)
+	if n.HasClosure() {
+		raw = append(raw, n.ClosureLine.Value(source)...)
+	}
+	return raw
+}
+
 func replaceHTMLBlock(n *ast.HTMLBlock, source []byte) {
 	parent := n.Parent()
 	if parent == nil {
 		return
 	}
-	raw := n.Text(source)
+	raw := htmlBlockRaw(n, source)
 	if len(bytes.TrimSpace(raw)) == 0 {
 		parent.RemoveChild(parent, n)
 		return
@@ -337,7 +345,7 @@ func (w *plainWriter) writeNode(n ast.Node) {
 			w.b.Write(n.Segments.Value(w.source))
 		}
 	case *ast.HTMLBlock:
-		w.b.Write(n.Text(w.source))
+		w.b.Write(htmlBlockRaw(n, w.source))
 	case *ast.LinkReferenceDefinition:
 		return
 	default:
