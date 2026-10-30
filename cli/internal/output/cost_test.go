@@ -4,6 +4,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -172,6 +173,93 @@ func TestWriteCostResultPrettyPrintMergedPayers(t *testing.T) {
 	}
 	if strings.Contains(out, "Combined total") {
 		t.Error("should not show separate combined line when already merged")
+	}
+}
+
+func manyAccountResult(n int) cost.CostResult {
+	r := fixtureResult()
+	r.Linked = true
+	names := make([]string, n)
+	ids := make([]string, n)
+	for i := 0; i < n; i++ {
+		names[i] = fmt.Sprintf("Account %02d", i+1)
+		ids[i] = fmt.Sprintf("%012d", i+1)
+	}
+	r.AccountName = strings.Join(names, ", ")
+	r.AccountID = strings.Join(ids, ", ")
+	return r
+}
+
+func TestWriteCostResultPrettyPrintAccountListAtLimit(t *testing.T) {
+	r := manyAccountResult(maxPrettyAccountList)
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	last := fmt.Sprintf("Account %02d (%012d)", maxPrettyAccountList, maxPrettyAccountList)
+	if !strings.Contains(out, "Account 01 (000000000001)") || !strings.Contains(out, last) {
+		t.Errorf("missing accounts at the list limit:\n%s", out)
+	}
+	if strings.Contains(out, " + ") {
+		t.Errorf("list at the limit should not be truncated:\n%s", out)
+	}
+}
+
+func TestWriteCostResultPrettyPrintAccountListTruncatesOneExtra(t *testing.T) {
+	r := manyAccountResult(maxPrettyAccountList + 1)
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	last := fmt.Sprintf("Account %02d (%012d)", maxPrettyAccountList, maxPrettyAccountList)
+	omitted := fmt.Sprintf("Account %02d", maxPrettyAccountList+1)
+	if !strings.Contains(out, "Account 01 (000000000001)") || !strings.Contains(out, last) {
+		t.Errorf("missing first accounts:\n%s", out)
+	}
+	if strings.Contains(out, omitted) {
+		t.Errorf("account past the limit should be omitted:\n%s", out)
+	}
+	if !strings.Contains(out, "+ 1 account") || strings.Contains(out, "+ 1 accounts") {
+		t.Errorf("missing singular remainder:\n%s", out)
+	}
+}
+
+func TestWriteCostResultPrettyPrintAccountListTruncatesMany(t *testing.T) {
+	r := manyAccountResult(maxPrettyAccountList + 5)
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	last := fmt.Sprintf("Account %02d (%012d)", maxPrettyAccountList, maxPrettyAccountList)
+	omitted := fmt.Sprintf("Account %02d", maxPrettyAccountList+1)
+	if !strings.Contains(out, last) || strings.Contains(out, omitted) {
+		t.Errorf("expected first %d accounts only:\n%s", maxPrettyAccountList, out)
+	}
+	if !strings.Contains(out, "+ 5 accounts") {
+		t.Errorf("missing remainder suffix:\n%s", out)
+	}
+}
+
+func TestWriteCostResultJSONKeepsFullAccountList(t *testing.T) {
+	r := manyAccountResult(maxPrettyAccountList + 5)
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatJSON, r); err != nil {
+		t.Fatal(err)
+	}
+	var decoded cost.CostResult
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.AccountName != r.AccountName || decoded.AccountID != r.AccountID {
+		t.Fatalf("json account list = %q / %q", decoded.AccountName, decoded.AccountID)
+	}
+	lastName := fmt.Sprintf("Account %02d", maxPrettyAccountList+5)
+	lastID := fmt.Sprintf("%012d", maxPrettyAccountList+5)
+	if !strings.Contains(decoded.AccountName, lastName) || !strings.Contains(decoded.AccountID, lastID) {
+		t.Fatalf("json dropped trailing accounts: %q / %q", decoded.AccountName, decoded.AccountID)
 	}
 }
 
