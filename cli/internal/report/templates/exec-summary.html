@@ -1,0 +1,156 @@
+{{ define "title" }}Executive Summary — {{ .PayerLabel }}{{ end }}
+
+{{ define "content" }}
+<style>
+  .es-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 560px) { .es-kpi-grid { grid-template-columns: 1fr; } }
+  .es-kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+  }
+  .es-kpi-label {
+    font-size: 0.82rem;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .es-kpi-value { font-size: 1.9rem; font-weight: 700; margin: 0.2rem 0; line-height: 1.2; }
+  .es-kpi-sub { font-size: 0.85rem; color: var(--muted); margin: 0; }
+  .es-mom { font-weight: 600; }
+  .mom-up { color: #c0392b; }
+  .mom-down { color: #2e7d32; }
+  .mom-flat { color: var(--muted); }
+  .payer-row { background: #f0f6ff; font-weight: 600; }
+  .payer-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 0 0.35rem;
+    margin-left: 0.4rem;
+  }
+  .account-block { margin-bottom: 1rem; }
+  .account-block h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+</style>
+
+<header>
+  <h1>Executive Summary</h1>
+  <p class="meta">
+    Payer: {{ .PayerLabel }} <span class="payer-badge">payer</span> ({{ .PayerAccountID }}) &middot;
+    {{ .AccountCount }} account(s) &middot; {{ .PeriodLabel }} &middot; {{ .Currency }} &middot;
+    Generated {{ .GeneratedAt }}
+  </p>
+</header>
+
+<div class="es-kpi-grid">
+  <div class="es-kpi-card">
+    <div class="es-kpi-label">Monthly Total — {{ .LatestMonth }}</div>
+    <div class="es-kpi-value">{{ .MonthlyTotal }}</div>
+    <p class="es-kpi-sub">Payer plus active linked accounts, net amortized cost</p>
+  </div>
+  <div class="es-kpi-card">
+    <div class="es-kpi-label">MoM Growth — {{ .LatestMonth }}</div>
+    <div class="es-kpi-value es-mom {{ .MoMClass }}">{{ if .MoMDirection }}{{ .MoMDirection }} {{ end }}{{ .MoMLabel }}</div>
+    <p class="es-kpi-sub">Calendar-day-normalized daily averages vs prior month</p>
+  </div>
+</div>
+
+<section>
+  <h2>Monthly Costs</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Month</th>
+        <th class="amount">Monthly Total</th>
+        <th class="amount">Daily Average</th>
+        <th class="percent">MoM Growth</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Months }}
+      <tr>
+        <td>{{ .Month }}</td>
+        <td class="amount">{{ .Total }}</td>
+        <td class="amount">{{ .DailyAverage }}</td>
+        <td class="percent {{ .MoMClass }}">{{ if .MoMDirection }}{{ .MoMDirection }} {{ end }}{{ .MoM }}</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Cost by Linked Account</h2>
+  <p class="meta">Monthly totals per account; the payer's own spend is listed as a separate row.</p>
+  {{ range .Accounts }}
+  <div class="account-block">
+    <h3>{{ .AccountName }} ({{ .AccountID }}){{ if .IsPayer }} <span class="payer-badge">payer</span>{{ end }}</h3>
+    <table>
+      <thead>
+        <tr>
+          {{ range .MonthTotals }}<th class="amount">{{ .Month }}</th>{{ end }}
+          <th class="amount">Window Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          {{ range .MonthTotals }}<td class="amount">{{ .Total }}</td>{{ end }}
+          <td class="amount">{{ .Total }}</td>
+        </tr>
+      </tbody>
+    </table>
+    {{ if .Services }}
+    <table>
+      <thead>
+        <tr><th>Service ({{ $.LatestMonth }})</th><th class="amount">Cost</th></tr>
+      </thead>
+      <tbody>
+        {{ range .Services }}
+        <tr><td>{{ .Service }}</td><td class="amount">{{ .Amount }}</td></tr>
+        {{ end }}
+      </tbody>
+    </table>
+    {{ end }}
+  </div>
+  {{ end }}
+</section>
+
+<section>
+  <h2>Monthly Cost by Account and Service</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Month</th>
+        <th>Account</th>
+        <th>Service</th>
+        <th class="amount">Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .ServiceRows }}
+      <tr {{ if .IsPayer }}class="payer-row"{{ end }}>
+        <td>{{ .Month }}</td>
+        <td>{{ .AccountName }} ({{ .AccountID }})</td>
+        <td>{{ .Service }}</td>
+        <td class="amount">{{ .Amount }}</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+</section>
+{{ end }}
+
+{{ define "exec-summary" }}
+{{ template "layout" . }}
+{{ end }}
