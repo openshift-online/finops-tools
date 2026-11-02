@@ -127,3 +127,35 @@ func TestRenderTemplateMarkdownHardWrapAndList(t *testing.T) {
 		t.Fatalf("ordered html=%s plain=%q", ordered.HTML, ordered.Plain)
 	}
 }
+
+func TestRenderTemplateMarkdownPlainDecodesEscapesAndEntities(t *testing.T) {
+	escaped := renderTemplateMarkdown(`say \*hello\* please`, nil, true)
+	if escaped.Plain != "say *hello* please" {
+		t.Fatalf("escaped punctuation plain = %q", escaped.Plain)
+	}
+	if escaped.HTML != "say *hello* please" {
+		t.Fatalf("escaped punctuation html = %q", escaped.HTML)
+	}
+
+	entity := renderTemplateMarkdown(`FinOps &copy; &#169;`, nil, true)
+	if entity.Plain != "FinOps © ©" {
+		t.Fatalf("entity plain = %q", entity.Plain)
+	}
+
+	// Escaped ampersand must stay literal (\&amp; → "&amp;", not "&").
+	amp := renderTemplateMarkdown(`use \&amp; and \&copy;`, nil, true)
+	if amp.Plain != "use &amp; and &copy;" {
+		t.Fatalf("escaped ampersand plain = %q", amp.Plain)
+	}
+	if !strings.Contains(amp.HTML, "&amp;amp;") || !strings.Contains(amp.HTML, "&amp;copy;") {
+		t.Fatalf("escaped ampersand html = %q", amp.HTML)
+	}
+
+	code := renderTemplateMarkdown("`\\*code\\*`", nil, true)
+	if code.Plain != `\*code\*` {
+		t.Fatalf("code span plain = %q", code.Plain)
+	}
+	if code.HTML != `<code>\*code\*</code>` {
+		t.Fatalf("code span html = %q", code.HTML)
+	}
+}

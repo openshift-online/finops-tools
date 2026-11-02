@@ -11,6 +11,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	goldhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // placeholderSentinelOpen and placeholderSentinelClose wrap a placeholder name
@@ -317,7 +318,11 @@ func (w *plainWriter) writeNode(n ast.Node) {
 	case *ast.Paragraph, *ast.Heading, *ast.TextBlock, *ast.Emphasis, *ast.CodeSpan:
 		w.writeInlines(n)
 	case *ast.Text:
-		w.b.Write(n.Value(w.source))
+		value := n.Value(w.source)
+		if !n.IsRaw() {
+			value = plainTextValue(value)
+		}
+		w.b.Write(value)
 		if n.HardLineBreak() || n.SoftLineBreak() {
 			w.b.WriteByte('\n')
 		}
@@ -423,4 +428,32 @@ func appendLink(b *strings.Builder, label, rawURL string) {
 	b.WriteString(" (")
 	b.WriteString(trimmedURL)
 	b.WriteByte(')')
+}
+
+// plainTextValue mirrors goldmark's HTML text writer for plain output: unescape
+// Markdown punctuation and resolve entities, but keep an escaped ampersand
+// literal so "\&amp;" stays "&amp;" rather than becoming "&".
+func plainTextValue(value []byte) []byte {
+	var result []byte
+	start := 0
+	for i := 0; i+1 < len(value); i++ {
+		if value[i] != '\\' || value[i+1] != '&' {
+			continue
+		}
+		if result == nil {
+			result = make([]byte, 0, len(value))
+		}
+		result = append(result, resolvePlainText(value[start:i])...)
+		result = append(result, '&')
+		i++
+		start = i + 1
+	}
+	if result == nil {
+		return resolvePlainText(value)
+	}
+	return append(result, resolvePlainText(value[start:])...)
+}
+
+func resolvePlainText(value []byte) []byte {
+	return util.ResolveEntityNames(util.ResolveNumericReferences(util.UnescapePunctuations(value)))
 }
