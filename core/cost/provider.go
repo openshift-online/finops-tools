@@ -260,7 +260,7 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		}
 		result, err := fetchCredentialGroup(ctx, sub)
 		if err != nil {
-			return CostResult{}, err
+			return CostResult{}, fmt.Errorf("payer %s: %w", id, err)
 		}
 		results = append(results, result)
 	}
@@ -375,7 +375,7 @@ func FetchDaily(ctx context.Context, q CostQuery) ([]DailyCostItem, string, erro
 			sub.Accounts = groups[id]
 			daily, cur, err := fetchDailyCredentialGroup(ctx, sub)
 			if err != nil {
-				return nil, "", err
+				return nil, "", fmt.Errorf("payer %s: %w", id, err)
 			}
 			if currency == "" {
 				currency = cur

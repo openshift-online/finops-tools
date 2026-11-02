@@ -2,7 +2,9 @@ package cost
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -331,5 +333,97 @@ func TestFetchPartitionsBulkByPayer(t *testing.T) {
 	}
 	if got["ou-abcd-12345678"] != 20 || got["ou-efgh-87654321"] != 10 || len(got) != 2 {
 		t.Fatalf("breakdown = %+v", res.Breakdown)
+	}
+}
+
+type failingCE struct {
+	err error
+}
+
+func (f *failingCE) GetCostAndUsage(
+	context.Context,
+	*costexplorer.GetCostAndUsageInput,
+	...func(*costexplorer.Options),
+) (*costexplorer.GetCostAndUsageOutput, error) {
+	return nil, f.err
+}
+
+type emptyResultsCE struct{}
+
+func (emptyResultsCE) GetCostAndUsage(
+	context.Context,
+	*costexplorer.GetCostAndUsageInput,
+	...func(*costexplorer.Options),
+) (*costexplorer.GetCostAndUsageOutput, error) {
+	return &costexplorer.GetCostAndUsageOutput{}, nil
+}
+
+func multiPayerFetchTargets() []AccountTarget {
+	return []AccountTarget{
+		{AccountID: "111111111111", PayerAccountID: "123456789012", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-a"}},
+		{AccountID: "222222222222", PayerAccountID: "123456789012", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-a"}},
+		{AccountID: "333333333333", PayerAccountID: "987654321098", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-b"}},
+		{AccountID: "444444444444", PayerAccountID: "987654321098", ScopeAccountOnly: true, AWSConfig: aws.Config{Region: "payer-b"}},
+	}
+}
+
+func TestFetchFailureNamesPayer(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	prev := costExplorerFactory
+	t.Cleanup(func() { costExplorerFactory = prev })
+	boom := errors.New("AccessDenied")
+	costExplorerFactory = func() func(aws.Config) CostExplorerAPI {
+		return func(cfg aws.Config) CostExplorerAPI {
+			if cfg.Region == "payer-b" {
+				return &failingCE{err: boom}
+			}
+			var calls int32
+			return &payerPartitionCE{calls: &calls}
+		}
+	}
+
+	_, err := Fetch(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Accounts: multiPayerFetchTargets(),
+		Range:    LastNDaysRange(30, now),
+	})
+	if err == nil {
+		t.Fatal("expected error when one payer's fetch fails")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want wrapped %v", err, boom)
+	}
+	if !strings.Contains(err.Error(), "payer 987654321098") {
+		t.Fatalf("error = %v, want failing payer 987654321098 named", err)
+	}
+}
+
+func TestFetchDailyFailureNamesPayer(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	prev := costExplorerFactory
+	t.Cleanup(func() { costExplorerFactory = prev })
+	boom := errors.New("AccessDenied")
+	costExplorerFactory = func() func(aws.Config) CostExplorerAPI {
+		return func(cfg aws.Config) CostExplorerAPI {
+			if cfg.Region == "payer-b" {
+				return &failingCE{err: boom}
+			}
+			return emptyResultsCE{}
+		}
+	}
+
+	_, _, err := FetchDaily(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Accounts: multiPayerFetchTargets(),
+		Range:    LastNDaysRange(30, now),
+	})
+	if err == nil {
+		t.Fatal("expected error when one payer's fetch fails")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want wrapped %v", err, boom)
+	}
+	if !strings.Contains(err.Error(), "payer 987654321098") {
+		t.Fatalf("error = %v, want failing payer 987654321098 named", err)
 	}
 }
