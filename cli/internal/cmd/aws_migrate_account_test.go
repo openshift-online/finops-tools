@@ -593,7 +593,7 @@ func TestAWSMigrateAccountWritesTagRecoveryOnRestoreFailure(t *testing.T) {
 	migrateAccountListTags = func(context.Context, aws.Config, string) ([]coreaccount.Tag, error) {
 		return []coreaccount.Tag{
 			{Key: "owner", Value: "jdoe"},
-			{Key: "note", Value: " trailing "},
+			{Key: "note", Value: "trailing"},
 		}, nil
 	}
 	migrateAccountInvite = func(context.Context, aws.Config, string, string) (coreaccount.InviteResult, error) {
@@ -648,7 +648,10 @@ func TestAWSMigrateAccountWritesTagRecoveryOnRestoreFailure(t *testing.T) {
 	if !strings.Contains(errOut.String(), recoveryPath) {
 		t.Fatalf("stderr missing recovery path %q: %q", recoveryPath, errOut.String())
 	}
-	if strings.Contains(errOut.String(), "jdoe") || strings.Contains(errOut.String(), "trailing") {
+	if !strings.Contains(errOut.String(), "--tag-value '<value>'") {
+		t.Fatalf("stderr missing quoted recovery hint: %q", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "jdoe") {
 		t.Fatalf("stderr should not include tag values: %q", errOut.String())
 	}
 
@@ -671,7 +674,7 @@ func TestAWSMigrateAccountWritesTagRecoveryOnRestoreFailure(t *testing.T) {
 		t.Fatalf("recovery meta = %#v", got)
 	}
 	if len(got.Tags) != 2 || got.Tags[0] != (coreaccount.Tag{Key: "owner", Value: "jdoe"}) ||
-		got.Tags[1] != (coreaccount.Tag{Key: "note", Value: " trailing "}) {
+		got.Tags[1] != (coreaccount.Tag{Key: "note", Value: "trailing"}) {
 		t.Fatalf("recovery tags = %#v", got.Tags)
 	}
 }

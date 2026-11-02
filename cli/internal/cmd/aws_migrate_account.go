@@ -320,7 +320,7 @@ func migrateOneAccount(
 			} else {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 					"  Tag key/value snapshot saved to %s (mode 0600)\n"+
-						"  Re-apply with: finops tag add --account-id %s --payer %s --tag-key <key> --tag-value <value>\n",
+						"  Re-apply with: finops tag add --account-id %s --payer %s --tag-key <key> --tag-value '<value>'\n",
 					recoveryPath, accountID, toAlias)
 			}
 		} else {

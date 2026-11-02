@@ -22,6 +22,9 @@ Pass either --account-alias or --account-id.
 By default, the command fails when the tag key already exists.
 Use --force to overwrite an existing tag value.
 
+Tag keys and values are trimmed. Empty values are allowed after trimming
+(AWS Organizations permits them).
+
 Examples:
   finops tag add --account-alias rh-control --tag-key owner --tag-value team-a
   finops tag add --account-alias osd-tenant-1 --tag-key env --tag-value prod --force
@@ -47,7 +50,7 @@ var (
 func init() {
 	tagCmd.AddCommand(tagAddCmd)
 	tagAddCmd.Flags().StringVar(&accountAddTagKey, "tag-key", "", "Tag key")
-	tagAddCmd.Flags().StringVar(&accountAddTagValue, "tag-value", "", "Tag value")
+	tagAddCmd.Flags().StringVar(&accountAddTagValue, "tag-value", "", "Tag value (trimmed; empty allowed)")
 	tagAddCmd.Flags().BoolVar(&accountAddTagForce, "force", false, "Overwrite existing value when the tag key already exists")
 	bindAWSAccountSelectorFlags(tagAddCmd, awsAccountSelectorFlagRefs{
 		Payer:     &accountAddTagPayer,
@@ -61,10 +64,13 @@ func runTagAdd(cmd *cobra.Command, args []string) error {
 	if tagKey == "" {
 		return fmt.Errorf("tag key is required (--tag-key)")
 	}
-	tagValue := strings.TrimSpace(accountAddTagValue)
-	if tagValue == "" {
+	// Trim values (accidental whitespace is harmful). Require the flag so a
+	// missing --tag-value is still an error; empty after trim is allowed.
+	// Tests may set the package var directly without marking the flag changed.
+	if !cmd.Flags().Changed("tag-value") && accountAddTagValue == "" {
 		return fmt.Errorf("tag value is required (--tag-value)")
 	}
+	tagValue := strings.TrimSpace(accountAddTagValue)
 
 	configPath, err := configstore.ResolvePath(awsFlags.ConfigPath)
 	if err != nil {

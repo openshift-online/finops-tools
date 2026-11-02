@@ -56,6 +56,7 @@ func listTagsWithClient(ctx context.Context, client OrganizationsAPI, accountID 
 		token = nextToken
 	}
 
+	tags = normalizeAccountTags(tags)
 	slices.SortFunc(tags, func(a, b Tag) int {
 		if cmp := strings.Compare(a.Key, b.Key); cmp != 0 {
 			return cmp
@@ -78,17 +79,34 @@ func setAccountTagsWithClient(ctx context.Context, client OrganizationsAPI, acco
 		return nil
 	}
 
-	// Preserve keys/values exactly (AWS Organizations allows empty values and
-	// significant spaces). Only reject a missing key.
+	// Trim keys/values: accidental whitespace is harmful in practice.
+	// Empty values remain allowed (AWS Organizations permits them).
 	normalized := make([]Tag, 0, len(tags))
 	for _, tag := range tags {
-		if tag.Key == "" {
+		key := strings.TrimSpace(tag.Key)
+		if key == "" {
 			return fmt.Errorf("tag key is required")
 		}
-		normalized = append(normalized, Tag{Key: tag.Key, Value: tag.Value})
+		normalized = append(normalized, Tag{Key: key, Value: strings.TrimSpace(tag.Value)})
 	}
 
 	return client.SetAccountTags(ctx, accountID, normalized)
+}
+
+// normalizeAccountTags trims keys/values and drops entries with an empty key.
+func normalizeAccountTags(tags []Tag) []Tag {
+	if len(tags) == 0 {
+		return tags
+	}
+	out := make([]Tag, 0, len(tags))
+	for _, tag := range tags {
+		key := strings.TrimSpace(tag.Key)
+		if key == "" {
+			continue
+		}
+		out = append(out, Tag{Key: key, Value: strings.TrimSpace(tag.Value)})
+	}
+	return out
 }
 
 // AccountName returns the AWS Organizations account name for accountID.

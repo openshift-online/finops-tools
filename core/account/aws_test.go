@@ -715,20 +715,24 @@ func TestSetAccountTagWithClientValidationAndErrors(t *testing.T) {
 	}
 }
 
-func TestSetAccountTagsWithClientPreservesExactValues(t *testing.T) {
+func TestSetAccountTagsWithClientTrimsKeysAndValues(t *testing.T) {
 	client := &fakeOrganizationsTagMutator{}
 	tags := []Tag{
-		{Key: "owner", Value: ""},
+		{Key: " owner ", Value: ""},
 		{Key: "note", Value: " trailing "},
 	}
 	if err := setAccountTagsWithClient(context.Background(), client, "123456789012", tags); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	want := []Tag{
+		{Key: "owner", Value: ""},
+		{Key: "note", Value: "trailing"},
+	}
 	if len(client.lastTags) != 2 {
 		t.Fatalf("lastTags len = %d, want 2", len(client.lastTags))
 	}
-	if client.lastTags[0] != tags[0] || client.lastTags[1] != tags[1] {
-		t.Fatalf("lastTags = %#v, want %#v", client.lastTags, tags)
+	if client.lastTags[0] != want[0] || client.lastTags[1] != want[1] {
+		t.Fatalf("lastTags = %#v, want %#v", client.lastTags, want)
 	}
 }
 
