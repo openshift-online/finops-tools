@@ -137,8 +137,8 @@ func TestRenderTemplateMarkdownPlainDecodesEscapesAndEntities(t *testing.T) {
 		t.Fatalf("escaped punctuation html = %q", escaped.HTML)
 	}
 
-	entity := renderTemplateMarkdown(`FinOps &copy; &#169;`, nil, true)
-	if entity.Plain != "FinOps © ©" {
+	entity := renderTemplateMarkdown(`FinOps &copy; &#169; &#039;`, nil, true)
+	if entity.Plain != "FinOps © © '" {
 		t.Fatalf("entity plain = %q", entity.Plain)
 	}
 
@@ -149,6 +149,24 @@ func TestRenderTemplateMarkdownPlainDecodesEscapesAndEntities(t *testing.T) {
 	}
 	if !strings.Contains(amp.HTML, "&amp;amp;") || !strings.Contains(amp.HTML, "&amp;copy;") {
 		t.Fatalf("escaped ampersand html = %q", amp.HTML)
+	}
+
+	// Even backslash run: first \ escapes the second, then &copy; resolves.
+	even := renderTemplateMarkdown(`\\&copy;`, nil, true)
+	if even.Plain != `\©` {
+		t.Fatalf("even backslash plain = %q", even.Plain)
+	}
+	if even.HTML != `\©` {
+		t.Fatalf("even backslash html = %q", even.HTML)
+	}
+
+	// Single-pass decode: &#38;copy; → "&copy;", not a second pass to ©.
+	nested := renderTemplateMarkdown(`&#38;copy;`, nil, true)
+	if nested.Plain != `&copy;` {
+		t.Fatalf("nested numeric plain = %q", nested.Plain)
+	}
+	if nested.HTML != `&amp;copy;` {
+		t.Fatalf("nested numeric html = %q", nested.HTML)
 	}
 
 	code := renderTemplateMarkdown("`\\*code\\*`", nil, true)

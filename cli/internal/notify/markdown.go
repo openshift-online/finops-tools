@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -430,30 +431,88 @@ func appendLink(b *strings.Builder, label, rawURL string) {
 	b.WriteByte(')')
 }
 
-// plainTextValue mirrors goldmark's HTML text writer for plain output: unescape
-// Markdown punctuation and resolve entities, but keep an escaped ampersand
-// literal so "\&amp;" stays "&amp;" rather than becoming "&".
+// plainTextValue mirrors goldmark's HTML text writer for plain output: one pass
+// that unescapes Markdown punctuation and resolves entities. Escaped ampersands
+// stay literal ("\&amp;" → "&amp;"), and an even backslash run before "&"
+// ("\\&copy;") leaves a backslash then resolves the entity ("\©").
 func plainTextValue(value []byte) []byte {
-	var result []byte
-	start := 0
-	for i := 0; i+1 < len(value); i++ {
-		if value[i] != '\\' || value[i+1] != '&' {
+	var b strings.Builder
+	b.Grow(len(value))
+	escaped := false
+	limit := len(value)
+	n := 0
+	for i := 0; i < limit; i++ {
+		c := value[i]
+		if escaped {
+			if util.IsPunct(c) {
+				b.Write(value[n : i-1])
+				n = i
+				escaped = false
+				continue
+			}
+		}
+		if c == '\x00' {
+			b.Write(value[n:i])
+			b.WriteRune('\uFFFD')
+			n = i + 1
+			escaped = false
 			continue
 		}
-		if result == nil {
-			result = make([]byte, 0, len(value))
+		if c == '&' {
+			pos := i
+			next := i + 1
+			ok := false
+			if next < limit && value[next] == '#' {
+				nnext := next + 1
+				if nnext < limit {
+					nc := value[nnext]
+					if nc == 'x' || nc == 'X' {
+						start := nnext + 1
+						i, ok = util.ReadWhile(value, [2]int{start, limit}, util.IsHexDecimal)
+						if ok && i < limit && value[i] == ';' && i-start < 7 {
+							v, _ := strconv.ParseUint(util.BytesToReadOnlyString(value[start:i]), 16, 32)
+							b.Write(value[n:pos])
+							n = i + 1
+							b.WriteRune(util.ToValidRune(rune(v)))
+							escaped = false
+							continue
+						}
+					} else if nc >= '0' && nc <= '9' {
+						start := nnext
+						i, ok = util.ReadWhile(value, [2]int{start, limit}, util.IsNumeric)
+						// Base 10 matches goldmark's HTML writer (not util.ResolveNumericReferences' base 0).
+						if ok && i < limit && i-start < 8 && value[i] == ';' {
+							v, _ := strconv.ParseUint(util.BytesToReadOnlyString(value[start:i]), 10, 32)
+							b.Write(value[n:pos])
+							n = i + 1
+							b.WriteRune(util.ToValidRune(rune(v)))
+							escaped = false
+							continue
+						}
+					}
+				}
+			} else {
+				start := next
+				i, ok = util.ReadWhile(value, [2]int{start, limit}, util.IsAlphaNumeric)
+				if ok && i < limit && value[i] == ';' {
+					name := util.BytesToReadOnlyString(value[start:i])
+					if entity, found := util.LookUpHTML5EntityByName(name); found {
+						b.Write(value[n:pos])
+						n = i + 1
+						b.Write(entity.Characters)
+						escaped = false
+						continue
+					}
+				}
+			}
+			i = next - 1
 		}
-		result = append(result, resolvePlainText(value[start:i])...)
-		result = append(result, '&')
-		i++
-		start = i + 1
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		escaped = false
 	}
-	if result == nil {
-		return resolvePlainText(value)
-	}
-	return append(result, resolvePlainText(value[start:])...)
-}
-
-func resolvePlainText(value []byte) []byte {
-	return util.ResolveEntityNames(util.ResolveNumericReferences(util.UnescapePunctuations(value)))
+	b.Write(value[n:])
+	return []byte(b.String())
 }
