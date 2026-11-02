@@ -27,6 +27,8 @@ var (
 	migrateAccountAccept             = coreaccount.AcceptInviteHandshake
 	migrateAccountUpdateTrust        = coreaccount.UpdateLinkedRoleTrust
 	migrateAccountMove               = coreaccount.MoveAccountToParent
+	migrateAccountListTags           = coreaccount.ListTags
+	migrateAccountSetTags            = coreaccount.SetAccountTags
 	migrateAccountUpdateConfig       = configstore.UpdateLinkedAccountPayer
 	migrateAccountInvalidateOrgCache = invalidateOrgCacheForPayer
 
@@ -49,6 +51,10 @@ Uses AWS Organizations direct transfer (invite from destination management accou
 accept from the member account via role assumption from the source payer), then
 rewrites the linked role trust policy to the destination management account.
 
+Snapshots AWS Organizations account tags from the source payer before the transfer
+and restores them on the destination payer afterward (AWS deletes account tags when
+an account leaves an organization).
+
 Requires management-account admin on both payers and OrganizationAccountAccessRole
 (or --role) in the member account. SCPs or Control Tower may still block the transfer.
 
@@ -57,6 +63,8 @@ destination organization while the role still trusts the source management accou
 Assume the linked role from --from-payer (still valid) and retry the trust update;
 do not treat that state as a rollback to the source org. An optional --destination-ou
 move that fails after trust update can be retried from the destination payer.
+If tag restore fails after a successful migrate, re-apply tags with finops tag add
+using --payer for the destination.
 
 Examples:
   finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
@@ -233,6 +241,11 @@ func migrateOneAccount(
 		return fmt.Errorf("account %s is already a member of destination payer %s", accountID, toAlias)
 	}
 
+	preservedTags, err := migrateAccountListTags(awsCtx, fromCfg, accountID)
+	if err != nil {
+		return fmt.Errorf("list Organizations account tags on source payer %s: %w", fromAlias, err)
+	}
+
 	destOU := strings.TrimSpace(migrateAccountDestOU)
 	displayAccount := accountID
 	if accountAlias != "" && accountAlias != accountID {
@@ -247,11 +260,12 @@ func migrateOneAccount(
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  destination OU:   %s\n", destOU)
 	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", formatMigratePreserveTagsLine(preservedTags))
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake → update role trust (to-payer)")
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → move to OU")
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → update local config\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → restore account tags → update local config\n")
 
 	if migrateAccountDryRun {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete; no changes made.")
@@ -303,6 +317,17 @@ func migrateOneAccount(
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved account to %s\n", destOU)
 	}
 
+	if len(preservedTags) > 0 {
+		if err := migrateAccountSetTags(awsCtx, toCfg, accountID, preservedTags); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+				"warning: AWS migrate succeeded but restoring Organizations account tags failed: %v\n"+
+					"  Re-apply on destination payer %s: %s\n",
+				err, toAlias, formatMigrateTagKeys(preservedTags))
+		} else {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored %d Organizations account tag(s)\n", len(preservedTags))
+		}
+	}
+
 	if err := migrateAccountUpdateConfig(configPath, preferNonEmpty(accountAlias, accountID), toAlias, roleName); err != nil {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: AWS migrate succeeded but local config update failed: %v\n", err)
 	} else {
@@ -314,6 +339,21 @@ func migrateOneAccount(
 
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Migration complete.")
 	return nil
+}
+
+func formatMigratePreserveTagsLine(tags []coreaccount.Tag) string {
+	if len(tags) == 0 {
+		return "preserve tags:    0"
+	}
+	return fmt.Sprintf("preserve tags:    %d (%s)", len(tags), formatMigrateTagKeys(tags))
+}
+
+func formatMigrateTagKeys(tags []coreaccount.Tag) string {
+	keys := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		keys = append(keys, tag.Key)
+	}
+	return strings.Join(keys, ", ")
 }
 
 func ensureMigratePayerCredentials(cmd *cobra.Command, ctx context.Context, alias, payerID string) error {

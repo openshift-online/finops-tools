@@ -24,6 +24,12 @@ func SetAccountTag(ctx context.Context, cfg aws.Config, accountID, tagKey, tagVa
 	return setAccountTagWithClient(ctx, newOrganizationsClient(cfg), accountID, tagKey, tagValue)
 }
 
+// SetAccountTags adds or updates AWS Organizations tags on accountID in one TagResource call.
+// An empty tags slice is a no-op.
+func SetAccountTags(ctx context.Context, cfg aws.Config, accountID string, tags []Tag) error {
+	return setAccountTagsWithClient(ctx, newOrganizationsClient(cfg), accountID, tags)
+}
+
 func listTagsWithClient(ctx context.Context, client OrganizationsAPI, accountID string) ([]Tag, error) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
@@ -60,20 +66,32 @@ func listTagsWithClient(ctx context.Context, client OrganizationsAPI, accountID 
 }
 
 func setAccountTagWithClient(ctx context.Context, client OrganizationsAPI, accountID, tagKey, tagValue string) error {
+	return setAccountTagsWithClient(ctx, client, accountID, []Tag{{Key: tagKey, Value: tagValue}})
+}
+
+func setAccountTagsWithClient(ctx context.Context, client OrganizationsAPI, accountID string, tags []Tag) error {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return fmt.Errorf("account ID is required")
 	}
-	tagKey = strings.TrimSpace(tagKey)
-	if tagKey == "" {
-		return fmt.Errorf("tag key is required")
-	}
-	tagValue = strings.TrimSpace(tagValue)
-	if tagValue == "" {
-		return fmt.Errorf("tag value is required")
+	if len(tags) == 0 {
+		return nil
 	}
 
-	return client.SetAccountTag(ctx, accountID, tagKey, tagValue)
+	normalized := make([]Tag, 0, len(tags))
+	for _, tag := range tags {
+		key := strings.TrimSpace(tag.Key)
+		if key == "" {
+			return fmt.Errorf("tag key is required")
+		}
+		value := strings.TrimSpace(tag.Value)
+		if value == "" {
+			return fmt.Errorf("tag value is required")
+		}
+		normalized = append(normalized, Tag{Key: key, Value: value})
+	}
+
+	return client.SetAccountTags(ctx, accountID, normalized)
 }
 
 // AccountName returns the AWS Organizations account name for accountID.

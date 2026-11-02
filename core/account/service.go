@@ -32,6 +32,11 @@ type OrganizationsAPI interface {
 		ctx context.Context,
 		accountID, tagKey, tagValue string,
 	) error
+	SetAccountTags(
+		ctx context.Context,
+		accountID string,
+		tags []Tag,
+	) error
 	DescribeOrganization(
 		ctx context.Context,
 		params *organizations.DescribeOrganizationInput,
@@ -149,15 +154,30 @@ func (c organizationsClient) SetAccountTag(
 	ctx context.Context,
 	accountID, tagKey, tagValue string,
 ) error {
-	apilog.Log(ctx, fmt.Sprintf("Organizations.TagResource account=%s key=%s", accountID, tagKey))
+	return c.SetAccountTags(ctx, accountID, []Tag{{Key: tagKey, Value: tagValue}})
+}
+
+func (c organizationsClient) SetAccountTags(
+	ctx context.Context,
+	accountID string,
+	tags []Tag,
+) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(tags))
+	orgTags := make([]orgtypes.Tag, 0, len(tags))
+	for _, tag := range tags {
+		keys = append(keys, tag.Key)
+		orgTags = append(orgTags, orgtypes.Tag{
+			Key:   aws.String(tag.Key),
+			Value: aws.String(tag.Value),
+		})
+	}
+	apilog.Log(ctx, fmt.Sprintf("Organizations.TagResource account=%s keys=%s", accountID, strings.Join(keys, ",")))
 	_, err := c.client.TagResource(ctx, &organizations.TagResourceInput{
 		ResourceId: aws.String(accountID),
-		Tags: []orgtypes.Tag{
-			{
-				Key:   aws.String(tagKey),
-				Value: aws.String(tagValue),
-			},
-		},
+		Tags:       orgTags,
 	})
 	return err
 }
