@@ -121,13 +121,20 @@ type Query struct {
 
 // Record is one resource past standard support or at end of life.
 type Record struct {
-	AccountID              string            `json:"account_id"`
-	Region                 string            `json:"region"`
-	Service                Service           `json:"service"`
-	ResourceType           ResourceType      `json:"resource_type"`
-	ResourceID             string            `json:"resource_id"`
-	Engine                 string            `json:"engine"`
-	EngineVersion          string            `json:"engine_version"`
+	AccountID     string       `json:"account_id"`
+	Region        string       `json:"region"`
+	Service       Service      `json:"service"`
+	ResourceType  ResourceType `json:"resource_type"`
+	ResourceID    string       `json:"resource_id"`
+	Engine        string       `json:"engine"`
+	EngineVersion string       `json:"engine_version"`
+	// MajorEngineVersion uses service-specific version granularity:
+	//   - RDS/Aurora: MajorEngineVersion returned by DescribeDBEngineVersions.
+	//   - EKS: Kubernetes major.minor version, identical to EngineVersion.
+	//   - ElastiCache: first dot-separated segment of EngineVersion.
+	//   - OpenSearch: numeric major.minor version, identical to EngineVersion.
+	//
+	// Consumers should interpret this value together with Service and Engine.
 	MajorEngineVersion     string            `json:"major_engine_version"`
 	StandardSupportEndDate time.Time         `json:"standard_support_end_date,omitzero"`
 	ExtendedSupportEndDate *time.Time        `json:"extended_support_end_date,omitempty"`

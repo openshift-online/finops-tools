@@ -39,7 +39,7 @@ func writeExtendedSupportCSV(w io.Writer, r extendedsupport.Result) error {
 	header := []string{
 		"account_id", "region", "service", "resource_type", "resource_id",
 		"engine", "engine_version", "major_engine_version",
-		"standard_support_end_date", "extended_support_end_date", "engine_lifecycle_support",
+		"standard_support_end_date", "extended_support_end_date", "end_of_life_date", "engine_lifecycle_support",
 	}
 	if err := cw.Write(header); err != nil {
 		return err
@@ -48,6 +48,10 @@ func writeExtendedSupportCSV(w io.Writer, r extendedsupport.Result) error {
 		extendedEnd := ""
 		if rec.ExtendedSupportEndDate != nil {
 			extendedEnd = rec.ExtendedSupportEndDate.Format("2006-01-02")
+		}
+		endOfLife := ""
+		if rec.EndOfLifeDate != nil {
+			endOfLife = rec.EndOfLifeDate.Format("2006-01-02")
 		}
 		row := []string{
 			sanitizeCSVField(rec.AccountID),
@@ -60,6 +64,7 @@ func writeExtendedSupportCSV(w io.Writer, r extendedsupport.Result) error {
 			sanitizeCSVField(rec.MajorEngineVersion),
 			rec.StandardSupportEndDate.Format("2006-01-02"),
 			extendedEnd,
+			endOfLife,
 			sanitizeCSVField(rec.EngineLifecycleSupport),
 		}
 		if err := cw.Write(row); err != nil {

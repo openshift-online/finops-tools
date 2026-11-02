@@ -763,6 +763,24 @@ The default billing lookback covers 30 UTC calendar days including today; `--bil
 
 Pretty-print output shows the billing window and selected/eligible account counts, even when no accounts match. JSON retains these details, matched usage types, the number of billed accounts, and a coverage notice under `summary.billing_selection`. Accounts excluded by billing selection are not reported as skipped accounts. A failed or incomplete Cost Explorer query stops discovery with an error; it never silently becomes an empty or partial candidate list. Payer credentials need `ce:GetDimensionValues` and `ce:GetCostAndUsage` for the default payer-wide selection. `--full-scan` does not need those permissions.
 
+Each service uses its own APIs to discover the running version and retrieve support lifecycle dates:
+
+| Service | Resource version | Support lifecycle |
+|---------|------------------|-------------------|
+| RDS / Aurora | `DescribeDBInstances` / `DescribeDBClusters`, then `DescribeDBEngineVersions` resolves the major version | `DescribeDBMajorEngineVersions` |
+| EKS | `DescribeCluster` returns the Kubernetes version | `DescribeClusterVersions` |
+| ElastiCache | `DescribeCacheClusters` / `DescribeServerlessCaches` | AWS Health `DescribeServiceLifecycle` |
+| OpenSearch | `DescribeDomain` returns the engine/version | AWS Health `DescribeServiceLifecycle` |
+
+The `major_engine_version` field in JSON and CSV uses service-specific version granularity. Interpret it together with `service` and `engine`:
+
+| Service | Meaning of `major_engine_version` | Example |
+|---------|-----------------------------------|---------|
+| RDS / Aurora | `MajorEngineVersion` returned by `DescribeDBEngineVersions` | `15` for PostgreSQL; `8.0` for Aurora MySQL |
+| EKS | Kubernetes major.minor version, identical to `engine_version` | `1.28` |
+| ElastiCache | First dot-separated segment of `engine_version` | `7` for Redis `7.1` |
+| OpenSearch | Numeric major.minor version, identical to `engine_version` | `2.11` |
+
 An RDS resource is reported when the standard support end date for its engine major version (from `rds:DescribeDBMajorEngineVersions`) is in the past. The output includes both the standard support end date and, when published, the extended support end date. Resources at or past a published extended support end date appear separately under "Past extended support". Supported engines are MySQL, PostgreSQL, Aurora MySQL, and Aurora PostgreSQL. Version lookup includes deprecated versions, and linked-account roles are assumed when each account's scan begins.
 
 For EKS, the run first preloads `DescribeClusterVersions` catalogs for the payer's enabled regions (or `--regions`), including all versions and pagination. Successful regional catalogs are shared across accounts and the final retry pass. If a payer cannot load a catalog, a member role can load it during scanning; additional member-enabled regions are loaded on demand. Failed catalog requests are retained per credential source, so one denied account does not prevent another account from loading the catalog. Catalogs are kept in memory for the current command only.
@@ -814,7 +832,7 @@ Failed service discovery is listed under "Skipped regions", including partial di
 
 Resources at or past a known extended support end date appear under "Past extended support" in pretty-print output, with a separate count, resource identifiers, versions, and support dates. JSON retains these records under `summary.past_extended_support_resources`. This applies to RDS, EKS, ElastiCache, and OpenSearch when their lifecycle data supplies the end date. These resources are excluded from the current Extended Support count, its service/account totals, and "Support status unknown". The end boundary is exclusive for current Extended Support, so a resource enters "Past extended support" exactly at that timestamp.
 
-For ElastiCache and OpenSearch, a dated AWS Health `end_of_life` event also puts the resource under "Past extended support" as soon as that timestamp is reached in the applicable region. End of life establishes this terminal status independently of missing or unusable standard/extended support milestones. The event type is matched without regard to case; regional overrides still apply, and missing or conflicting end-of-life dates cannot establish this status. A future end-of-life event alone does not establish the current support status. The end-of-life date appears in a separate "END OF LIFE" column and `end_of_life_date` in JSON. Unavailable support dates are shown as "—" and omitted from JSON rather than inferred from the end-of-life date.
+For ElastiCache and OpenSearch, a dated AWS Health `end_of_life` event also puts the resource under "Past extended support" as soon as that timestamp is reached in the applicable region. End of life establishes this terminal status independently of missing or unusable standard/extended support milestones. The event type is matched without regard to case; regional overrides still apply, and missing or conflicting end-of-life dates cannot establish this status. A future end-of-life event alone does not establish the current support status. The end-of-life date appears in a separate "END OF LIFE" column in pretty-print output and as `end_of_life_date` in JSON and CSV. The CSV column uses `YYYY-MM-DD` when available and is blank otherwise. Unavailable support dates are shown as "—" and omitted from JSON rather than inferred from the end-of-life date.
 
 Resources with missing engine/version information, failed lifecycle lookups, or missing standard support end dates appear under "Support status unknown" in pretty-print output and `summary.unclassified_resources` in JSON. They are excluded from the Extended Support count. Resources still in standard support or before an explicit Extended Support start appear in neither section. CSV contains only resources currently in Extended Support; use JSON to export past-support records and unknown resources. Check warnings before treating an empty result as "no resources in extended support".
 

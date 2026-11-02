@@ -460,6 +460,7 @@ func listAllDBClusters(ctx context.Context, client RDSAPI, region string) ([]rds
 	return clusters, nil
 }
 
+// check for is X service available in the region
 func isRDSRegionUnsupported(err error) bool {
 	if err == nil {
 		return false
