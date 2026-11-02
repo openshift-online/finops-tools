@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -473,7 +474,7 @@ func plainTextValue(value []byte) []byte {
 							v, _ := strconv.ParseUint(util.BytesToReadOnlyString(value[start:i]), 16, 32)
 							b.Write(value[n:pos])
 							n = i + 1
-							b.WriteRune(util.ToValidRune(rune(v)))
+							writePlainRuneRef(&b, v)
 							escaped = false
 							continue
 						}
@@ -485,7 +486,7 @@ func plainTextValue(value []byte) []byte {
 							v, _ := strconv.ParseUint(util.BytesToReadOnlyString(value[start:i]), 10, 32)
 							b.Write(value[n:pos])
 							n = i + 1
-							b.WriteRune(util.ToValidRune(rune(v)))
+							writePlainRuneRef(&b, v)
 							escaped = false
 							continue
 						}
@@ -515,4 +516,14 @@ func plainTextValue(value []byte) []byte {
 	}
 	b.Write(value[n:])
 	return []byte(b.String())
+}
+
+// writePlainRuneRef writes a numeric character reference as a rune, rejecting
+// values above unicode.MaxRune before the uint64→rune conversion (CodeQL).
+func writePlainRuneRef(b *strings.Builder, v uint64) {
+	if v > unicode.MaxRune {
+		b.WriteRune('\uFFFD')
+		return
+	}
+	b.WriteRune(util.ToValidRune(rune(v)))
 }

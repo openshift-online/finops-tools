@@ -169,6 +169,12 @@ func TestRenderTemplateMarkdownPlainDecodesEscapesAndEntities(t *testing.T) {
 		t.Fatalf("nested numeric html = %q", nested.HTML)
 	}
 
+	// Out-of-range numeric refs become U+FFFD rather than truncating.
+	oob := renderTemplateMarkdown(`&#x110000;`, nil, true)
+	if oob.Plain != "\uFFFD" {
+		t.Fatalf("out-of-range numeric plain = %q", oob.Plain)
+	}
+
 	code := renderTemplateMarkdown("`\\*code\\*`", nil, true)
 	if code.Plain != `\*code\*` {
 		t.Fatalf("code span plain = %q", code.Plain)
