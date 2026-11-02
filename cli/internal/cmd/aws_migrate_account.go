@@ -3,7 +3,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -63,8 +66,9 @@ destination organization while the role still trusts the source management accou
 Assume the linked role from --from-payer (still valid) and retry the trust update;
 do not treat that state as a rollback to the source org. An optional --destination-ou
 move that fails after trust update can be retried from the destination payer.
-If tag restore fails after a successful migrate, re-apply tags with finops tag add
-using --payer for the destination.
+If tag restore fails after a successful migrate, a recovery file with key/value pairs
+is written next to the finops config (migrate-tag-recovery/<account-id>.json); re-apply
+with finops tag add using --payer for the destination.
 
 Examples:
   finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
@@ -309,8 +313,16 @@ func migrateOneAccount(
 		if err := migrateAccountSetTags(awsCtx, toCfg, accountID, preservedTags); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 				"warning: AWS migrate succeeded but restoring Organizations account tags failed: %v\n"+
-					"  Re-apply on destination payer %s: %s\n",
+					"  Keys on destination payer %s: %s\n",
 				err, toAlias, formatMigrateTagKeys(preservedTags))
+			if recoveryPath, writeErr := writeMigrateTagRecoveryFile(configPath, accountID, toAlias, preservedTags); writeErr != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  warning: could not write tag recovery file: %v\n", writeErr)
+			} else {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"  Tag key/value snapshot saved to %s (mode 0600)\n"+
+						"  Re-apply with: finops tag add --account-id %s --payer %s --tag-key <key> --tag-value <value>\n",
+					recoveryPath, accountID, toAlias)
+			}
 		} else {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored %d Organizations account tag(s)\n", len(preservedTags))
 		}
@@ -356,6 +368,39 @@ func formatMigrateTagKeys(tags []coreaccount.Tag) string {
 		keys = append(keys, tag.Key)
 	}
 	return strings.Join(keys, ", ")
+}
+
+// migrateTagRecoveryFile is written only when destination tag restore fails so
+// operators can re-apply key/value pairs without logging values to stderr.
+type migrateTagRecoveryFile struct {
+	AccountID string            `json:"account_id"`
+	Payer     string            `json:"payer"`
+	Tags      []coreaccount.Tag `json:"tags"`
+}
+
+func writeMigrateTagRecoveryFile(configPath, accountID, payerAlias string, tags []coreaccount.Tag) (string, error) {
+	dir := filepath.Join(filepath.Dir(configPath), "migrate-tag-recovery")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create migrate tag recovery dir: %w", err)
+	}
+	path := filepath.Join(dir, accountID+".json")
+	payload, err := json.MarshalIndent(migrateTagRecoveryFile{
+		AccountID: accountID,
+		Payer:     payerAlias,
+		Tags:      append([]coreaccount.Tag(nil), tags...),
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode migrate tag recovery: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
+		return "", fmt.Errorf("write migrate tag recovery: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("replace migrate tag recovery: %w", err)
+	}
+	return path, nil
 }
 
 func ensureMigratePayerCredentials(cmd *cobra.Command, ctx context.Context, alias, payerID string) error {

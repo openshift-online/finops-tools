@@ -3,7 +3,9 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -519,6 +521,173 @@ func TestAWSMigrateAccountRestoresTags(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Restored 1 Organizations account tag(s)") {
 		t.Fatalf("missing restore success line: %q", out.String())
+	}
+}
+
+func TestAWSMigrateAccountWritesTagRecoveryOnRestoreFailure(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := configstore.Default()
+	var err error
+	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = cfg.SetAWSAlias("osd-staging-1", "987654321098")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = cfg.SetLinkedAccount("tenant-a", configstore.LinkedAccount{
+		AccountID:  "111111111111",
+		PayerAlias: "rh-control",
+		Role:       "OrganizationAccountAccessRole",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := migrateAccountEnsureCredentials
+	origLoad := migrateAccountLoadConfigForCreds
+	origContains := migrateAccountContains
+	origInvite := migrateAccountInvite
+	origAssume := migrateAccountAssumeLinked
+	origLoadSession := migrateAccountLoadFromSession
+	origAccept := migrateAccountAccept
+	origTrust := migrateAccountUpdateTrust
+	origListTags := migrateAccountListTags
+	origSetTags := migrateAccountSetTags
+	origUpdateConfig := migrateAccountUpdateConfig
+	origInvalidate := migrateAccountInvalidateOrgCache
+	defer func() {
+		migrateAccountEnsureCredentials = origEnsure
+		migrateAccountLoadConfigForCreds = origLoad
+		migrateAccountContains = origContains
+		migrateAccountInvite = origInvite
+		migrateAccountAssumeLinked = origAssume
+		migrateAccountLoadFromSession = origLoadSession
+		migrateAccountAccept = origAccept
+		migrateAccountUpdateTrust = origTrust
+		migrateAccountListTags = origListTags
+		migrateAccountSetTags = origSetTags
+		migrateAccountUpdateConfig = origUpdateConfig
+		migrateAccountInvalidateOrgCache = origInvalidate
+	}()
+
+	migrateAccountEnsureCredentials = func(context.Context, awsauth.EnsureOptions) (awsconfig.Result, error) {
+		return awsconfig.Result{}, nil
+	}
+	migrateAccountLoadConfigForCreds = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	containsCalls := 0
+	migrateAccountContains = func(_ context.Context, _ aws.Config, accountID string) (bool, error) {
+		containsCalls++
+		if accountID != "111111111111" {
+			return false, nil
+		}
+		return containsCalls == 1, nil
+	}
+	migrateAccountListTags = func(context.Context, aws.Config, string) ([]coreaccount.Tag, error) {
+		return []coreaccount.Tag{
+			{Key: "owner", Value: "jdoe"},
+			{Key: "note", Value: " trailing "},
+		}, nil
+	}
+	migrateAccountInvite = func(context.Context, aws.Config, string, string) (coreaccount.InviteResult, error) {
+		return coreaccount.InviteResult{HandshakeID: "h-abc12345", State: "OPEN"}, nil
+	}
+	migrateAccountAssumeLinked = func(context.Context, awsconfig.EnsureLinkedOptions) (awsconfig.ProfileSession, awsconfig.Identity, error) {
+		return awsconfig.ProfileSession{}, awsconfig.Identity{}, nil
+	}
+	migrateAccountLoadFromSession = func(context.Context, awsconfig.ProfileSession) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	migrateAccountAccept = func(context.Context, aws.Config, string) (coreaccount.InviteResult, error) {
+		return coreaccount.InviteResult{HandshakeID: "h-abc12345", State: "ACCEPTED"}, nil
+	}
+	migrateAccountSetTags = func(context.Context, aws.Config, string, []coreaccount.Tag) error {
+		return fmt.Errorf("tagresource denied")
+	}
+	migrateAccountUpdateTrust = func(context.Context, aws.Config, string, string, string) error {
+		return nil
+	}
+	migrateAccountUpdateConfig = func(string, string, string, string) error { return nil }
+	migrateAccountInvalidateOrgCache = func(string, string) error { return nil }
+
+	migrateAccountIDFlag = "111111111111"
+	migrateAccountFromPayer = "rh-control"
+	migrateAccountToPayer = "osd-staging-1"
+	migrateAccountDestOU = ""
+	migrateAccountRole = ""
+	migrateAccountNotes = ""
+	migrateAccountDryRun = false
+	migrateAccountYes = true
+	awsFlags.ConfigPath = configPath
+	defer func() {
+		migrateAccountIDFlag = ""
+		migrateAccountFromPayer = ""
+		migrateAccountToPayer = ""
+		migrateAccountDryRun = false
+		migrateAccountYes = false
+		awsFlags.ConfigPath = ""
+	}()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("role", "", "")
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	if err := runAWSMigrateAccount(cmd, nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	recoveryPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+	if !strings.Contains(errOut.String(), recoveryPath) {
+		t.Fatalf("stderr missing recovery path %q: %q", recoveryPath, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "jdoe") || strings.Contains(errOut.String(), "trailing") {
+		t.Fatalf("stderr should not include tag values: %q", errOut.String())
+	}
+
+	data, err := os.ReadFile(recoveryPath)
+	if err != nil {
+		t.Fatalf("read recovery file: %v", err)
+	}
+	info, err := os.Stat(recoveryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perms := info.Mode().Perm(); perms != 0o600 {
+		t.Fatalf("recovery file perms = %o, want 0600", perms)
+	}
+	var got migrateTagRecoveryFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode recovery: %v", err)
+	}
+	if got.AccountID != "111111111111" || got.Payer != "osd-staging-1" {
+		t.Fatalf("recovery meta = %#v", got)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != (coreaccount.Tag{Key: "owner", Value: "jdoe"}) ||
+		got.Tags[1] != (coreaccount.Tag{Key: "note", Value: " trailing "}) {
+		t.Fatalf("recovery tags = %#v", got.Tags)
+	}
+}
+
+func TestWriteMigrateTagRecoveryFile(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	path, err := writeMigrateTagRecoveryFile(configPath, "111111111111", "osd-staging-1", []coreaccount.Tag{
+		{Key: "owner", Value: ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+	if path != wantPath {
+		t.Fatalf("path = %q, want %q", path, wantPath)
 	}
 }
 
