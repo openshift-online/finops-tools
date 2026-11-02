@@ -52,8 +52,8 @@ accept from the member account via role assumption from the source payer), then
 rewrites the linked role trust policy to the destination management account.
 
 Snapshots AWS Organizations account tags from the source payer before the transfer
-and restores them on the destination payer afterward (AWS deletes account tags when
-an account leaves an organization).
+and restores them on the destination payer immediately after handshake acceptance
+(AWS deletes account tags when an account leaves an organization).
 
 Requires management-account admin on both payers and OrganizationAccountAccessRole
 (or --role) in the member account. SCPs or Control Tower may still block the transfer.
@@ -261,11 +261,11 @@ func migrateOneAccount(
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  destination OU:   %s\n", destOU)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", formatMigratePreserveTagsLine(preservedTags))
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake → update role trust (to-payer)")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake → restore account tags → update role trust (to-payer)")
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → move to OU")
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → restore account tags → update local config\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → update local config\n")
 
 	if migrateAccountDryRun {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete; no changes made.")
@@ -303,6 +303,19 @@ func migrateOneAccount(
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Accepted handshake %s (state %s)\n", accepted.HandshakeID, accepted.State)
 
+	// Restore tags immediately after acceptance so a later trust/OU failure
+	// does not leave the transferred account without its Organizations tags.
+	if len(preservedTags) > 0 {
+		if err := migrateAccountSetTags(awsCtx, toCfg, accountID, preservedTags); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+				"warning: AWS migrate succeeded but restoring Organizations account tags failed: %v\n"+
+					"  Re-apply on destination payer %s: %s\n",
+				err, toAlias, formatMigrateTagKeys(preservedTags))
+		} else {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored %d Organizations account tag(s)\n", len(preservedTags))
+		}
+	}
+
 	// Invited accounts keep the old management account in the role trust policy;
 	// rewrite it while the source-payer assume session is still valid.
 	if err := migrateAccountUpdateTrust(awsCtx, memberCfg, roleName, fromPayerID, toPayerID); err != nil {
@@ -315,17 +328,6 @@ func migrateOneAccount(
 			return wrapMigrateOUMoveError(err, accountID, destOU, toAlias)
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved account to %s\n", destOU)
-	}
-
-	if len(preservedTags) > 0 {
-		if err := migrateAccountSetTags(awsCtx, toCfg, accountID, preservedTags); err != nil {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-				"warning: AWS migrate succeeded but restoring Organizations account tags failed: %v\n"+
-					"  Re-apply on destination payer %s: %s\n",
-				err, toAlias, formatMigrateTagKeys(preservedTags))
-		} else {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored %d Organizations account tag(s)\n", len(preservedTags))
-		}
 	}
 
 	if err := migrateAccountUpdateConfig(configPath, preferNonEmpty(accountAlias, accountID), toAlias, roleName); err != nil {

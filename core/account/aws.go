@@ -78,17 +78,14 @@ func setAccountTagsWithClient(ctx context.Context, client OrganizationsAPI, acco
 		return nil
 	}
 
+	// Preserve keys/values exactly (AWS Organizations allows empty values and
+	// significant spaces). Only reject a missing key.
 	normalized := make([]Tag, 0, len(tags))
 	for _, tag := range tags {
-		key := strings.TrimSpace(tag.Key)
-		if key == "" {
+		if tag.Key == "" {
 			return fmt.Errorf("tag key is required")
 		}
-		value := strings.TrimSpace(tag.Value)
-		if value == "" {
-			return fmt.Errorf("tag value is required")
-		}
-		normalized = append(normalized, Tag{Key: key, Value: value})
+		normalized = append(normalized, Tag{Key: tag.Key, Value: tag.Value})
 	}
 
 	return client.SetAccountTags(ctx, accountID, normalized)

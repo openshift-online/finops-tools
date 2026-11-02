@@ -138,13 +138,14 @@ func (c organizationsClient) ListTagsForAccount(
 	}
 	tags := make([]Tag, 0, len(out.Tags))
 	for _, tag := range out.Tags {
-		key := strings.TrimSpace(aws.ToString(tag.Key))
+		key := aws.ToString(tag.Key)
 		if key == "" {
 			continue
 		}
+		// Keep AWS key/value bytes unchanged (spaces and empty values are valid).
 		tags = append(tags, Tag{
 			Key:   key,
-			Value: strings.TrimSpace(aws.ToString(tag.Value)),
+			Value: aws.ToString(tag.Value),
 		})
 	}
 	return tags, out.NextToken, nil
