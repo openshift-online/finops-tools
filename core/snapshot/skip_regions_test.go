@@ -82,6 +82,20 @@ func TestFetchExcludesRegionsBeforeSnapshotCalls(t *testing.T) {
 			if !reflect.DeepEqual(result.Summary.ExcludedRegions, []string{"us-west-2"}) || len(result.Summary.SkippedRegions) != 0 {
 				t.Fatalf("summary = %+v", result.Summary)
 			}
+			if len(result.Summary.ScanScopes) != 2 {
+				t.Fatalf("missing per-account scan scopes: %+v", result.Summary.ScanScopes)
+			}
+			for i, scope := range result.Summary.ScanScopes {
+				want := []string{"us-east-1"}
+				if tc.name == "all excluded" {
+					want = []string{}
+				} else if tc.name == "discovered per account" && i == 1 {
+					want = []string{"eu-west-1"}
+				}
+				if !reflect.DeepEqual(scope.Regions, want) {
+					t.Fatalf("billing scope=%v, want %v", scope.Regions, want)
+				}
+			}
 			if tc.name == "discovered per account" {
 				found := false
 				for _, rec := range result.Records {

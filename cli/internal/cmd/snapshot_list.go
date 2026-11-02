@@ -48,7 +48,7 @@ are skipped and listed under "Skipped accounts" in the output.
 
 Cost estimates use incremental EBS snapshot chains where possible and RDS regional excess shares.
 When Cost Explorer data is available, summary shows attributed storage cost for listed snapshots
-and account-wide billed EBS/RDS snapshot storage.
+using billing for successfully scanned regions, alongside account-wide billed EBS/RDS storage for comparison.
 Per-snapshot $/MO allocates billed cost proportionally; — on EBS means no incremental blocks.
 
 Required IAM permissions in each scanned account:
@@ -167,6 +167,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	}
 
 	status := progress.New(cmd.ErrOrStderr(), snapshotListQuiet)
+	scanNow := time.Now().UTC()
 
 	sel, err := parseCostTargetSelector(
 		snapshotListAccount, snapshotListAccountAliases, snapshotListOU, snapshotListPayer,
@@ -224,31 +225,30 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if len(scanTargets) == 0 {
-		return output.WriteSnapshotListResult(out, format, snapshot.Result{
-			Summary: snapshot.Summary{
-				OlderThanDays:   snapshotListOlderThanDays,
-				ExcludedRegions: skipRegions,
-				SkippedAccounts: skippedAccounts,
-				CostDisclaimer:  "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
-			},
-		})
+	result := snapshot.Result{
+		Summary: snapshot.Summary{
+			OlderThanDays:   snapshotListOlderThanDays,
+			ExcludedRegions: skipRegions,
+			CostDisclaimer:  "Estimates use volume or allocated size; actual EBS snapshot billing may be lower.",
+		},
 	}
-
-	if len(scanTargets) <= 1 {
+	if len(scanTargets) == 1 {
 		status.Step("Scanning account for snapshots…")
 	}
 	scanBar := progress.NewBar(cmd.ErrOrStderr(), snapshotListQuiet, "Scanning accounts for snapshots…", len(scanTargets))
-	result, err := snapshotListFetch(awsCtx, snapshot.Query{
-		Targets:         scanTargets,
-		OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
-		Types:           types,
-		Regions:         regions,
-		SkipRegions:     skipRegions,
-		MinSizeGiB:      snapshotListMinSizeGiB,
-		AccountProgress: scanBar,
-		Workers:         snapshotListWorkers,
-	})
+	if len(scanTargets) > 0 {
+		result, err = snapshotListFetch(awsCtx, snapshot.Query{
+			Targets:         scanTargets,
+			OlderThan:       time.Duration(snapshotListOlderThanDays) * 24 * time.Hour,
+			Types:           types,
+			Regions:         regions,
+			SkipRegions:     skipRegions,
+			MinSizeGiB:      snapshotListMinSizeGiB,
+			AccountProgress: scanBar,
+			Workers:         snapshotListWorkers,
+			Now:             scanNow,
+		})
+	}
 	// Finish before the next status line so interactive redraws end with a newline.
 	if scanBar != nil {
 		scanBar.Finish()
@@ -261,11 +261,18 @@ func runSnapshotList(cmd *cobra.Command, _ []string) error {
 	// Cost Explorer runs on payer credentials and only needs account IDs from
 	// costTargets (not scanTargets), so skipped assume-role accounts stay in scope.
 	status.Step("Fetching billed snapshot costs from Cost Explorer…")
-	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, costTargets, awsFlags.CredentialsFile, time.Now().UTC(), snapshotListWorkers)
+	billed, err := fetchSnapshotBilledCosts(awsCtx, cfg, costTargets, awsFlags.CredentialsFile, scanNow, snapshotListWorkers)
 	if err != nil {
 		status.Step(fmt.Sprintf("Warning: billed snapshot costs unavailable: %v", err))
 	} else {
 		result.Summary.BilledCosts = billed
+	}
+	status.Step("Fetching billed snapshot costs for scanned regions…")
+	regionalBilled, err := fetchRegionalSnapshotBilledCosts(awsCtx, cfg, costTargets, awsFlags.CredentialsFile, result.Summary.ScanScopes, scanNow, snapshotListWorkers)
+	if err != nil {
+		status.Step(fmt.Sprintf("Warning: regional billed snapshot costs unavailable; showing estimates: %v", err))
+	} else {
+		result.Summary.RegionalBilledCosts = regionalBilled
 	}
 
 	return output.WriteSnapshotListResult(out, format, result)

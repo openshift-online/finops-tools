@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 	"github.com/openshift-online/finops-tools/core/apilog"
+	"github.com/openshift-online/finops-tools/core/awsregions"
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
@@ -59,14 +60,90 @@ func FetchBilledSnapshotCosts(
 	now time.Time,
 	workers int,
 ) ([]AccountBilledSnapshotCosts, error) {
+	return fetchBilledSnapshotCosts(ctx, ce, accountIDs, nil, now, workers)
+}
+
+// FetchRegionalBilledSnapshotCosts returns billing for each account's completed
+// scan regions. Accounts sharing a region set are batched together. An empty
+// scope returns zero costs and never issues an unrestricted billing query.
+func FetchRegionalBilledSnapshotCosts(
+	ctx context.Context,
+	ce CostExplorerAPI,
+	scopes []AccountScanScope,
+	now time.Time,
+	workers int,
+) ([]AccountBilledSnapshotCosts, error) {
+	if ce == nil {
+		return nil, fmt.Errorf("cost explorer client is required")
+	}
+	type regionGroup struct {
+		regions  []string
+		accounts []string
+	}
+	var accountIDs []string
+	regionsByAccount := make(map[string][]string)
+	for _, scope := range scopes {
+		id := strings.TrimSpace(scope.AccountID)
+		if id == "" {
+			continue
+		}
+		accountIDs = append(accountIDs, id)
+		regionsByAccount[id] = append(regionsByAccount[id], scope.Regions...)
+	}
+	accountIDs = cost.UniqueAccountIDs(accountIDs)
+	groups := make(map[string]*regionGroup)
+	var groupOrder []string
+	byAccount := make(map[string]AccountBilledSnapshotCosts)
+	for _, id := range accountIDs {
+		regions := awsregions.Normalize(regionsByAccount[id])
+		if len(regions) == 0 {
+			byAccount[id] = AccountBilledSnapshotCosts{AccountID: id, Period: billedSnapshotPeriod(now)}
+			continue
+		}
+		key := strings.Join(regions, ",")
+		if groups[key] == nil {
+			groups[key] = &regionGroup{regions: regions}
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key].accounts = append(groups[key].accounts, id)
+	}
+	for _, key := range groupOrder {
+		group := groups[key]
+		costs, err := fetchBilledSnapshotCosts(ctx, ce, group.accounts, group.regions, now, workers)
+		if err != nil {
+			return nil, err
+		}
+		for _, costs := range costs {
+			byAccount[costs.AccountID] = costs
+		}
+	}
+	out := make([]AccountBilledSnapshotCosts, 0, len(accountIDs))
+	for _, id := range accountIDs {
+		out = append(out, byAccount[id])
+	}
+	return out, nil
+}
+
+func billedSnapshotPeriod(now time.Time) BilledSnapshotPeriod {
+	start, end := LastCompleteMonthRange(now)
+	return BilledSnapshotPeriod{
+		StartDate: cost.FormatDate(start.UTC()),
+		EndDate:   cost.FormatDate(end.AddDate(0, 0, -1).UTC()),
+	}
+}
+
+func fetchBilledSnapshotCosts(
+	ctx context.Context,
+	ce CostExplorerAPI,
+	accountIDs, regions []string,
+	now time.Time,
+	workers int,
+) ([]AccountBilledSnapshotCosts, error) {
 	if ce == nil {
 		return nil, fmt.Errorf("cost explorer client is required")
 	}
 	start, end := LastCompleteMonthRange(now)
-	period := BilledSnapshotPeriod{
-		StartDate: cost.FormatDate(start.UTC()),
-		EndDate:   cost.FormatDate(end.AddDate(0, 0, -1).UTC()),
-	}
+	period := billedSnapshotPeriod(now)
 
 	accountIDs = cost.UniqueAccountIDs(accountIDs)
 	if len(accountIDs) == 0 {
@@ -76,7 +153,7 @@ func FetchBilledSnapshotCosts(
 	batches := batchAccountIDs(accountIDs, snapshotBillingBatchSize)
 	batchResults := make([]map[string]AccountBilledSnapshotCosts, len(batches))
 	err := parallel.ForEach(ctx, workers, len(batches), func(ctx context.Context, i int) error {
-		partial, err := fetchBatchBilledSnapshotCosts(ctx, ce, batches[i], start, end, period)
+		partial, err := fetchBatchBilledSnapshotCosts(ctx, ce, batches[i], regions, start, end, period)
 		if err != nil {
 			return err
 		}
@@ -127,6 +204,7 @@ func fetchBatchBilledSnapshotCosts(
 	ctx context.Context,
 	ce CostExplorerAPI,
 	accountIDs []string,
+	regions []string,
 	start, end time.Time,
 	period BilledSnapshotPeriod,
 ) (map[string]AccountBilledSnapshotCosts, error) {
@@ -157,7 +235,7 @@ func fetchBatchBilledSnapshotCosts(
 					Key:  aws.String("USAGE_TYPE"),
 				},
 			},
-			Filter:        linkedAccountsCEFilter(accountIDs),
+			Filter:        snapshotCEFilter(accountIDs, regions),
 			NextPageToken: token,
 		})
 		if err != nil {
@@ -188,6 +266,17 @@ func fetchBatchBilledSnapshotCosts(
 		token = out.NextPageToken
 	}
 	return results, nil
+}
+
+func snapshotCEFilter(accountIDs, regions []string) *types.Expression {
+	accounts := linkedAccountsCEFilter(accountIDs)
+	if len(regions) == 0 {
+		return accounts
+	}
+	return &types.Expression{And: []types.Expression{
+		*accounts,
+		{Dimensions: &types.DimensionValues{Key: types.DimensionRegion, Values: regions}},
+	}}
 }
 
 func linkedAccountsCEFilter(accountIDs []string) *types.Expression {

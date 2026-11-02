@@ -13,8 +13,10 @@ import (
 )
 
 var (
-	fetchSnapshotBilledCosts         = fetchSnapshotBilledCostsImpl
-	fetchBilledSnapshotCostsForGroup = snapshot.FetchBilledSnapshotCosts
+	fetchSnapshotBilledCosts                 = fetchSnapshotBilledCostsImpl
+	fetchBilledSnapshotCostsForGroup         = snapshot.FetchBilledSnapshotCosts
+	fetchRegionalSnapshotBilledCosts         = fetchRegionalSnapshotBilledCostsImpl
+	fetchRegionalBilledSnapshotCostsForGroup = snapshot.FetchRegionalBilledSnapshotCosts
 )
 
 // fetchSnapshotBilledCostsImpl queries Cost Explorer using payer credentials from
@@ -28,6 +30,34 @@ func fetchSnapshotBilledCostsImpl(
 	now time.Time,
 	workers int,
 ) ([]snapshot.AccountBilledSnapshotCosts, error) {
+	return fetchSnapshotBilling(ctx, store, costTargets, credentialsFile, nil, now, workers)
+}
+
+func fetchRegionalSnapshotBilledCostsImpl(
+	ctx context.Context,
+	store configstore.File,
+	costTargets []cost.AccountTarget,
+	credentialsFile string,
+	scopes []snapshot.AccountScanScope,
+	now time.Time,
+	workers int,
+) ([]snapshot.AccountBilledSnapshotCosts, error) {
+	// A non-nil empty scope means no regions were scanned, never account-wide.
+	if scopes == nil {
+		scopes = []snapshot.AccountScanScope{}
+	}
+	return fetchSnapshotBilling(ctx, store, costTargets, credentialsFile, scopes, now, workers)
+}
+
+func fetchSnapshotBilling(
+	ctx context.Context,
+	store configstore.File,
+	costTargets []cost.AccountTarget,
+	credentialsFile string,
+	scopes []snapshot.AccountScanScope,
+	now time.Time,
+	workers int,
+) ([]snapshot.AccountBilledSnapshotCosts, error) {
 	type group struct {
 		accountIDs []string
 		seen       map[string]struct{}
@@ -36,6 +66,10 @@ func fetchSnapshotBilledCostsImpl(
 	groupOrder := make([]string, 0)
 	accountOrder := make([]string, 0)
 	seenAccount := make(map[string]struct{})
+	scopeByAccount := make(map[string]snapshot.AccountScanScope, len(scopes))
+	for _, scope := range scopes {
+		scopeByAccount[scope.AccountID] = scope
+	}
 
 	for _, target := range costTargets {
 		accountID := strings.TrimSpace(target.AccountID)
@@ -65,13 +99,18 @@ func fetchSnapshotBilledCostsImpl(
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", credID, err)
 		}
-		billed, err := fetchBilledSnapshotCostsForGroup(
-			ctx,
-			snapshot.NewCostExplorerClient(awsCfg),
-			g.accountIDs,
-			now,
-			workers,
-		)
+		var billed []snapshot.AccountBilledSnapshotCosts
+		if scopes == nil {
+			billed, err = fetchBilledSnapshotCostsForGroup(ctx, snapshot.NewCostExplorerClient(awsCfg), g.accountIDs, now, workers)
+		} else {
+			groupScopes := make([]snapshot.AccountScanScope, 0, len(g.accountIDs))
+			for _, id := range g.accountIDs {
+				scope := scopeByAccount[id]
+				scope.AccountID = id
+				groupScopes = append(groupScopes, scope)
+			}
+			billed, err = fetchRegionalBilledSnapshotCostsForGroup(ctx, snapshot.NewCostExplorerClient(awsCfg), groupScopes, now, workers)
+		}
 		if err != nil {
 			return nil, err
 		}

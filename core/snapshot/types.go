@@ -156,6 +156,14 @@ type AccountSummary struct {
 	EstimatedMonthlyCostUSD float64 `json:"estimated_monthly_cost_usd"`
 }
 
+// AccountScanScope records the regions whose resource scans completed, including
+// regions with no listed snapshots.
+type AccountScanScope struct {
+	AccountID                   string   `json:"account_id"`
+	Regions                     []string `json:"regions"`
+	RDSCostEstimationIncomplete bool     `json:"rds_cost_estimation_incomplete,omitempty"`
+}
+
 // Summary holds aggregate totals for a snapshot scan.
 type Summary struct {
 	TotalCount                          int                          `json:"total_count"`
@@ -164,6 +172,8 @@ type Summary struct {
 	RDSBackupEstimatedMonthlyRunRateUSD float64                      `json:"rds_backup_estimated_monthly_run_rate_usd,omitempty"`
 	EBSEstimatedMonthlyRunRateUSD       float64                      `json:"ebs_estimated_monthly_run_rate_usd,omitempty"`
 	BilledCosts                         []AccountBilledSnapshotCosts `json:"billed_costs,omitempty"`
+	RegionalBilledCosts                 []AccountBilledSnapshotCosts `json:"regional_billed_costs,omitempty"`
+	ScanScopes                          []AccountScanScope           `json:"scan_scopes,omitempty"`
 	OlderThanDays                       int                          `json:"older_than_days"`
 	ByKind                              []KindSummary                `json:"by_kind"`
 	ByAccount                           []AccountSummary             `json:"by_account"`
