@@ -47,7 +47,7 @@ type AccountSummary struct {
 
 // Report is the PR1 single-payer executive summary.
 type Report struct {
-	// PayerAlias is the configured payer alias (e.g. "rh-control").
+	// PayerAlias is the configured payer alias (e.g. "example-payer").
 	PayerAlias string
 	// PayerAccountID is the 12-digit payer account ID.
 	PayerAccountID string

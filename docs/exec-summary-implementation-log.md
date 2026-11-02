@@ -38,7 +38,7 @@ Per the plan, no credentials, tokens, account IDs, or cost figures are recorded 
 
 ### End-to-end live run — 2026-11-02
 
-`bin/finops report create exec-summary --payer <configured-alias> --output <temp path>` was run read-only through the same payer credentials. Outcome recorded in the PR report.
+`bin/finops report create exec-summary --payer <configured-alias> --output <temp path>` was run read-only through the same payer credentials. **Outcome: success.** The report covered the default 5 completed months for the configured payer and its active linked accounts (four-digit account count, i.e. more than 100 members, so the ≤100 linked-account batch limit and Cost Explorer pagination were both exercised on the real org), monthly reconciliation passed (no error), and the HTML was written with the expected sections (Monthly Total and MoM Growth KPIs, per-account monthly totals, monthly account/service breakdown). The output file is large (double-digit MB) because the drill-down table includes every account/service/month row for the whole org; limiting that table is deferred to a later PR.
 
 ### Validation
 

@@ -76,7 +76,7 @@ func TestExecSummaryGeneratorGenerateRendersHTML(t *testing.T) {
 		Now:    now,
 		Months: 5,
 		Targets: []cost.AccountTarget{
-			{AccountID: "123456789012", DisplayName: "Payer", DisplayAlias: "rh-control"},
+			{AccountID: "123456789012", DisplayName: "Payer", DisplayAlias: "example-payer"},
 			{AccountID: "111111111111", PayerAccountID: "123456789012", DisplayName: "Member A"},
 		},
 	}
@@ -88,7 +88,7 @@ func TestExecSummaryGeneratorGenerateRendersHTML(t *testing.T) {
 	for _, want := range []string{
 		"Executive Summary",
 		"Payer",
-		"rh-control",
+		"example-payer",
 		"Monthly Total",
 		"MoM Growth",
 		"90.00",
@@ -151,7 +151,7 @@ func TestExecSummaryGeneratorFetchErrorPropagates(t *testing.T) {
 func TestRenderExecSummaryHTMLEscapingAndKPIs(t *testing.T) {
 	mom := -10.5
 	rep := execsummary.Report{
-		PayerAlias:     "rh-control",
+		PayerAlias:     "example-payer",
 		PayerAccountID: "123456789012",
 		Currency:       "USD",
 		StartMonth:     "2026-02",

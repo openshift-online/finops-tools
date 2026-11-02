@@ -54,14 +54,14 @@ func sampleResult() cost.MonthlyAccountServiceResult {
 }
 
 func TestBuildReportMonthlyTotalsAndMoM(t *testing.T) {
-	rep, err := BuildReport("rh-control", sampleResult(), fiveMonthWindow(), map[string]string{
+	rep, err := BuildReport("example-payer", sampleResult(), fiveMonthWindow(), map[string]string{
 		memberA: "Member A",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if rep.PayerAlias != "rh-control" || rep.PayerAccountID != payerID {
+	if rep.PayerAlias != "example-payer" || rep.PayerAccountID != payerID {
 		t.Errorf("payer identity = %q/%q", rep.PayerAlias, rep.PayerAccountID)
 	}
 	if rep.Currency != "USD" {
@@ -111,7 +111,7 @@ func TestBuildReportMonthlyTotalsAndMoM(t *testing.T) {
 }
 
 func TestBuildReportZeroPriorMonthMoMIsNA(t *testing.T) {
-	rep, err := BuildReport("rh-control", sampleResult(), fiveMonthWindow(), nil)
+	rep, err := BuildReport("example-payer", sampleResult(), fiveMonthWindow(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestBuildReportZeroPriorMonthMoMIsNA(t *testing.T) {
 }
 
 func TestBuildReportAccounts(t *testing.T) {
-	rep, err := BuildReport("rh-control", sampleResult(), fiveMonthWindow(), map[string]string{
+	rep, err := BuildReport("example-payer", sampleResult(), fiveMonthWindow(), map[string]string{
 		payerID: "Payer Account",
 		memberA: "Member A",
 	})
@@ -168,7 +168,7 @@ func TestBuildReportAccounts(t *testing.T) {
 func TestBuildReportRowOutsideWindowFails(t *testing.T) {
 	res := sampleResult()
 	res.Rows = append(res.Rows, cost.MonthlyGroupedCost{Month: "2026-07", AccountID: memberA, Service: "Amazon EC2", Amount: 5})
-	_, err := BuildReport("rh-control", res, fiveMonthWindow(), nil)
+	_, err := BuildReport("example-payer", res, fiveMonthWindow(), nil)
 	if err == nil {
 		t.Fatal("expected error for row outside the window")
 	}
@@ -177,7 +177,7 @@ func TestBuildReportRowOutsideWindowFails(t *testing.T) {
 func TestBuildReportPayerWithNoOwnSpendStillListed(t *testing.T) {
 	res := sampleResult()
 	res.Rows = nil
-	rep, err := BuildReport("rh-control", res, fiveMonthWindow(), nil)
+	rep, err := BuildReport("example-payer", res, fiveMonthWindow(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestBuildReportLeapYearFebruary(t *testing.T) {
 			{Month: "2028-03", AccountID: payerID, Service: "Amazon S3", Amount: 31},
 		},
 	}
-	rep, err := BuildReport("rh-control", res, window, nil)
+	rep, err := BuildReport("example-payer", res, window, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
