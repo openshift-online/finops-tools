@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
@@ -43,7 +42,7 @@ func filterExtendedSupportBillingTargets(
 	costStep(status, "Finding accounts with billed Extended Support usage…")
 	billed := make(map[string]bool)
 	usageSeen := make(map[string]struct{})
-	var usageTypes []string
+	usageTypes := make([]string, 0)
 	payerIDs := make([]string, 0, len(payers))
 	for _, payer := range payers {
 		awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payer.AccountID, awsFlags.CredentialsFile)
@@ -73,11 +72,14 @@ func filterExtendedSupportBillingTargets(
 		}
 	}
 	selection := &extendedsupport.BillingSelection{
-		PayerAccountID: strings.Join(payerIDs, ","),
-		Start:          period.Start.Format("2006-01-02"), EndExclusive: period.End.Format("2006-01-02"),
+		PayerAccountIDs: payerIDs,
+		Start:           period.Start.Format("2006-01-02"), EndExclusive: period.End.Format("2006-01-02"),
 		UsageTypes: usageTypes, BilledAccountCount: len(billed),
 		EligibleAccountCount: len(targets), SelectedAccountCount: len(selected),
 		Notice: "Billing data can be delayed; accounts without matching recorded usage in this window are not scanned.",
+	}
+	if len(payerIDs) == 1 {
+		selection.PayerAccountID = payerIDs[0]
 	}
 	costStep(status, fmt.Sprintf("Cost Explorer selected %d of %d eligible member accounts (%d matching usage types)…", len(selected), len(targets), len(selection.UsageTypes)))
 	return selected, selection, nil

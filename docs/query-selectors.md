@@ -28,8 +28,10 @@ A few scoping caveats: the `hcp-hierarchy` report template is Snowflake-based
 uses an `--older-than-days` age cutoff instead of a period window, and
 `finops extended-support list` with `--payer` alone further keeps only members
 that have Extended Support billing in the lookback window unless `--full-scan`
-is set. The **time selection** dimension applies to the cost query commands
-only. See the [command matrix](#command-matrix) for per-command differences.
+is set. The shared **time selection** modes apply to the cost query commands
+only; the other commands use their own lookback options (`--older-than-days`,
+`--months`, `--billing-lookback-days`). See the
+[command matrix](#command-matrix) for per-command differences.
 
 ---
 
@@ -123,7 +125,7 @@ Shared rules for the three modes that accept a list:
 1. Each alias must be a registered payer. An unknown alias fails before any AWS call.
 2. Credentials are ensured for every payer, then each payer is queried in the order given.
 3. Results are unioned. The same member account ID returned by two different payers is an error (`account <id> resolved under payers <alias-a> and <alias-b>`), not a silent merge.
-4. A failure against any one payer fails the whole command and names that payer (`<alias> (<account-id>)`).
+4. A failure against any one payer fails the whole command and names that payer (`<alias> (<account-id>)`). The exception: with several payers, an OU or org-root id that is missing from one payer (`ParentNotFound`) is skipped for that payer instead of failing the command (see [Mode 3](#mode-3--ou--org-root-selection)).
 5. On `get-cost` and `report create`, `--group-by ou` with several payers keeps a separate tree per payer, each starting at that organization's root. With one payer and exactly one `--ou` id, that id is the tree root; otherwise a single payer rolls up from its organization root.
 
 `finops tag` and `finops aws list-ous` take a single `--payer`. Comma-separated aliases apply to `account get-cost`, `report create`, `snapshot list`, `account details`, and `extended-support list`.
