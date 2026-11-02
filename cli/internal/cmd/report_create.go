@@ -181,8 +181,9 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		SelectionRootID: sel.SelectionRootID,
 	}
 	if templateName == reportpkg.TemplateExecSummary {
-		// For exec-summary the shared --months flag counts completed calendar months.
-		in.Months = periodFlags.months
+		// For exec-summary the shared --months flag counts completed calendar months,
+		// and only when set explicitly (config cost-period defaults do not apply).
+		in.Months = execSummaryMonthsFromFlags(cmd, periodFlags.months)
 	}
 	if err := gen.Validate(in); err != nil {
 		return err

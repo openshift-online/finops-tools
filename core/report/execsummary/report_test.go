@@ -21,8 +21,8 @@ func monthTime(year int, month time.Month) time.Time {
 func fiveMonthWindow() TimeWindow {
 	// Feb–Jun 2026 (today in July 2026): includes 28-day February.
 	return TimeWindow{
-		Start:  monthTime(2026, time.February),
-		End:    monthTime(2026, time.June),
+		Start: monthTime(2026, time.February),
+		End:   monthTime(2026, time.June),
 		Months: []time.Time{
 			monthTime(2026, time.February),
 			monthTime(2026, time.March),
@@ -192,5 +192,38 @@ func TestBuildReportPayerWithNoOwnSpendStillListed(t *testing.T) {
 	}
 	if len(rep.Months) != 5 {
 		t.Errorf("months = %d, want 5", len(rep.Months))
+	}
+}
+
+// TestBuildReportLeapYearFebruary documents the calendar-day normalization for
+// a 29-day February: 29 spend over 29 days averages 1/day like a 31-day month
+// with 31 spend, so MoM between them is 0.
+func TestBuildReportLeapYearFebruary(t *testing.T) {
+	window := TimeWindow{
+		Start: monthTime(2028, time.February),
+		End:   monthTime(2028, time.March),
+		Months: []time.Time{
+			monthTime(2028, time.February),
+			monthTime(2028, time.March),
+		},
+	}
+	res := cost.MonthlyAccountServiceResult{
+		PayerAccountID: payerID,
+		Currency:       "USD",
+		Rows: []cost.MonthlyGroupedCost{
+			{Month: "2028-02", AccountID: payerID, Service: "Amazon S3", Amount: 29},
+			{Month: "2028-03", AccountID: payerID, Service: "Amazon S3", Amount: 31},
+		},
+	}
+	rep, err := BuildReport("rh-control", res, window, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feb, mar := rep.Months[0], rep.Months[1]
+	if feb.DailyAverage != 1 || mar.DailyAverage != 1 {
+		t.Fatalf("daily averages = %v/%v, want 1/1 (leap-year Feb has 29 days)", feb.DailyAverage, mar.DailyAverage)
+	}
+	if mar.MoMPct == nil || *mar.MoMPct != 0 {
+		t.Errorf("mar MoM = %v, want 0", mar.MoMPct)
 	}
 }

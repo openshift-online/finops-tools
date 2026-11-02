@@ -61,7 +61,12 @@ func (execSummaryGenerator) Generate(ctx context.Context, in GenerateInput) erro
 	payerAlias := ""
 	for _, t := range in.Targets {
 		if !t.IsLinked() {
-			payerAlias = t.AccountDisplayName()
+			// Prefer the configured alias; DisplayName is the Organizations
+			// account name, which is not what "payer alias" means in the report.
+			payerAlias = t.DisplayAlias
+			if payerAlias == "" {
+				payerAlias = t.AccountDisplayName()
+			}
 			break
 		}
 	}

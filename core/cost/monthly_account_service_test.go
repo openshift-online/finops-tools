@@ -14,16 +14,16 @@ import (
 )
 
 const (
-	testPayerID  = "123456789012"
-	testMemberA  = "111111111111"
-	testMemberB  = "222222222222"
+	testPayerID = "123456789012"
+	testMemberA = "111111111111"
+	testMemberB = "222222222222"
 )
 
 // routingCE routes GetCostAndUsage calls by filter shape so tests can distinguish
 // member-batch, payer-only, and totals queries.
 type routingCE struct {
-	pages     [][]types.ResultByTime
-	requests  []*costexplorer.GetCostAndUsageInput
+	pages       [][]types.ResultByTime
+	requests    []*costexplorer.GetCostAndUsageInput
 	invocations int
 }
 
@@ -177,13 +177,14 @@ func TestFetchMonthlyAccountServiceBatchSizeCapped(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// 3 member batches (250 IDs) + 1 payer + 1 totals = 5 requests.
-	if len(ce.requests) != 5 {
-		t.Fatalf("requests = %d, want 5", len(ce.requests))
+	// 3 member batches (250 IDs) + 1 payer + 3 totals batches (251 IDs) = 7 requests.
+	if len(ce.requests) != 7 {
+		t.Fatalf("requests = %d, want 7", len(ce.requests))
 	}
-	for i := range 3 {
-		if got := len(filterAccountValues(ce.requests[i])); got > linkedAccountFilterBatchSize {
-			t.Errorf("batch %d has %d accounts, want <= %d", i, got, linkedAccountFilterBatchSize)
+	// Every request must respect the linked-account filter batch limit.
+	for i, in := range ce.requests {
+		if got := len(filterAccountValues(in)); got > linkedAccountFilterBatchSize {
+			t.Errorf("request %d filters %d accounts, want <= %d", i, got, linkedAccountFilterBatchSize)
 		}
 	}
 }
@@ -294,5 +295,31 @@ func TestFetchMonthlyAccountServiceNoPayerFails(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "payer") {
 		t.Fatalf("err = %v, want payer target required error", err)
+	}
+}
+
+func TestFetchMonthlyAccountServiceEmptyQueryDoesNotForceUSDCurrency(t *testing.T) {
+	// Non-USD org where the payer has no own spend: the empty payer query must
+	// not introduce a default USD currency that conflicts with EUR member rows.
+	ce := &routingCE{pages: [][]types.ResultByTime{
+		// member batch (EUR)
+		{groupedRow("2026-06", testMemberA, "Amazon EC2", "100", "EUR")},
+		// payer query: no rows
+		{},
+		// totals (EUR)
+		{totalRow("2026-06", "100", "EUR")},
+	}}
+	res, err := fetchMonthlyAccountServiceWith(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Accounts: payerMemberTargets(),
+		Range:    windowRange(),
+	}, fetchAWSOptions{
+		NewCostExplorer: func(aws.Config) CostExplorerAPI { return ce },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Currency != "EUR" {
+		t.Errorf("currency = %q, want EUR", res.Currency)
 	}
 }

@@ -25,9 +25,9 @@ type MonthSummary struct {
 
 // ServiceMonthCost is one AWS service's cost for one account in one month.
 type ServiceMonthCost struct {
-	Month  string
+	Month   string
 	Service string
-	Amount float64
+	Amount  float64
 }
 
 // AccountSummary is one account (payer or linked) in the report.
@@ -169,14 +169,14 @@ func BuildReport(
 	})
 
 	return Report{
-		PayerAlias:    payerAlias,
+		PayerAlias:     payerAlias,
 		PayerAccountID: res.PayerAccountID,
-		Currency:      res.Currency,
-		StartMonth:    MonthLabel(window.Start),
-		EndMonth:      MonthLabel(window.End),
-		Months:        months,
-		Accounts:      accountList,
-		Rows:          res.Rows,
+		Currency:       res.Currency,
+		StartMonth:     MonthLabel(window.Start),
+		EndMonth:       MonthLabel(window.End),
+		Months:         months,
+		Accounts:       accountList,
+		Rows:           res.Rows,
 	}, nil
 }
 

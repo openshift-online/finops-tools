@@ -105,3 +105,16 @@ func TestReportCreateHelpShowsExecSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestExecSummaryMonthsOnlyWhenFlagChanged(t *testing.T) {
+	cmd := newExecSummaryTestCmd()
+	if got := execSummaryMonthsFromFlags(cmd, 12); got != 0 {
+		t.Errorf("unchanged flag: months = %d, want 0 (template default)", got)
+	}
+	if err := cmd.Flags().Set("months", "3"); err != nil {
+		t.Fatal(err)
+	}
+	if got := execSummaryMonthsFromFlags(cmd, 3); got != 3 {
+		t.Errorf("changed flag: months = %d, want 3", got)
+	}
+}

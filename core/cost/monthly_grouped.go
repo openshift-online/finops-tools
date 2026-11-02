@@ -107,9 +107,9 @@ func sumNetAmortizedMonthlyGrouped(
 		token = out.NextPageToken
 	}
 
-	if currency == "" {
-		currency = "USD"
-	}
+	// Leave currency empty when no rows were seen: an empty result must not
+	// force a default currency that could conflict with other queries.
+
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Month != rows[j].Month {
 			return rows[i].Month < rows[j].Month

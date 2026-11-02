@@ -71,12 +71,12 @@ func TestExecSummaryGeneratorGenerateRendersHTML(t *testing.T) {
 
 	var buf bytes.Buffer
 	in := GenerateInput{
-		Format:  FormatHTML,
-		Out:     &buf,
-		Now:     now,
-		Months:  5,
+		Format: FormatHTML,
+		Out:    &buf,
+		Now:    now,
+		Months: 5,
 		Targets: []cost.AccountTarget{
-			{AccountID: "123456789012", DisplayName: "Payer"},
+			{AccountID: "123456789012", DisplayName: "Payer", DisplayAlias: "rh-control"},
 			{AccountID: "111111111111", PayerAccountID: "123456789012", DisplayName: "Member A"},
 		},
 	}
@@ -88,6 +88,7 @@ func TestExecSummaryGeneratorGenerateRendersHTML(t *testing.T) {
 	for _, want := range []string{
 		"Executive Summary",
 		"Payer",
+		"rh-control",
 		"Monthly Total",
 		"MoM Growth",
 		"90.00",
@@ -197,5 +198,11 @@ func TestRenderExecSummaryHTMLEscapingAndKPIs(t *testing.T) {
 	}
 	if !strings.Contains(out, "USD") {
 		t.Error("currency missing")
+	}
+	if !strings.Contains(out, "▼") {
+		t.Error("MoM direction arrow should render as a literal character")
+	}
+	if strings.Contains(out, "&#9660;") || strings.Contains(out, "&amp;#") {
+		t.Error("MoM direction arrow is being HTML-escaped")
 	}
 }

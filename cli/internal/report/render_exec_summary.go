@@ -33,13 +33,13 @@ func execSummaryTemplateCompiled() (*template.Template, error) {
 
 // ExecSummaryMonthView is one row in the monthly totals table.
 type ExecSummaryMonthView struct {
-	Month         string
-	Total         string
-	DailyAverage  string
-	MoM           string
-	MoMClass      string
-	HasMoM        bool
-	MoMDirection  string
+	Month        string
+	Total        string
+	DailyAverage string
+	MoM          string
+	MoMClass     string
+	HasMoM       bool
+	MoMDirection string
 }
 
 // ExecSummaryAccountServiceView is one (account, service, month) cost cell.
@@ -54,12 +54,12 @@ type ExecSummaryAccountServiceView struct {
 
 // ExecSummaryAccountView is one account block with its per-month totals and services.
 type ExecSummaryAccountView struct {
-	AccountID    string
-	AccountName  string
-	IsPayer      bool
-	Total        string
-	MonthTotals  []ExecSummaryMonthTotalView
-	Services     []ExecSummaryServiceView
+	AccountID   string
+	AccountName string
+	IsPayer     bool
+	Total       string
+	MonthTotals []ExecSummaryMonthTotalView
+	Services    []ExecSummaryServiceView
 }
 
 // ExecSummaryMonthTotalView is an account's total for one month.
@@ -76,20 +76,20 @@ type ExecSummaryServiceView struct {
 
 // ExecSummaryReportView is the template context for exec-summary.html.
 type ExecSummaryReportView struct {
-	GeneratedAt     string
-	PayerLabel      string
-	PayerAccountID  string
-	AccountCount    int
-	PeriodLabel     string
-	Currency        string
-	LatestMonth     string
-	MonthlyTotal    string
-	MoMLabel        string
-	MoMClass        string
-	MoMDirection    string
-	Months          []ExecSummaryMonthView
-	Accounts        []ExecSummaryAccountView
-	ServiceRows     []ExecSummaryAccountServiceView
+	GeneratedAt    string
+	PayerLabel     string
+	PayerAccountID string
+	AccountCount   int
+	PeriodLabel    string
+	Currency       string
+	LatestMonth    string
+	MonthlyTotal   string
+	MoMLabel       string
+	MoMClass       string
+	MoMDirection   string
+	Months         []ExecSummaryMonthView
+	Accounts       []ExecSummaryAccountView
+	ServiceRows    []ExecSummaryAccountServiceView
 }
 
 // NewExecSummaryReportView maps a core execsummary.Report to the template context.
@@ -171,19 +171,19 @@ func NewExecSummaryReportView(r execsummary.Report, generatedAt time.Time) ExecS
 	}
 
 	// Full per-month account/service rows for the drill-down table.
+	namesByID := make(map[string]string, len(r.Accounts))
+	for _, a := range r.Accounts {
+		namesByID[a.AccountID] = a.DisplayName
+	}
 	for _, row := range r.Rows {
-		name := row.AccountID
-		isPayer := row.AccountID == r.PayerAccountID
-		for _, a := range r.Accounts {
-			if a.AccountID == row.AccountID {
-				name = a.DisplayName
-				break
-			}
+		name, ok := namesByID[row.AccountID]
+		if !ok {
+			name = row.AccountID
 		}
 		view.ServiceRows = append(view.ServiceRows, ExecSummaryAccountServiceView{
 			AccountName: name,
 			AccountID:   row.AccountID,
-			IsPayer:     isPayer,
+			IsPayer:     row.AccountID == r.PayerAccountID,
 			Month:       row.Month,
 			Service:     row.Service,
 			Amount:      format.FormatMoney(row.Amount, r.Currency),
@@ -196,11 +196,11 @@ func NewExecSummaryReportView(r execsummary.Report, generatedAt time.Time) ExecS
 func momClass(pct float64) (class, direction string) {
 	switch {
 	case pct > 0:
-		return "mom-up", "&#9650;"
+		return "mom-up", "▲"
 	case pct < 0:
-		return "mom-down", "&#9660;"
+		return "mom-down", "▼"
 	default:
-		return "mom-flat", "&#8212;"
+		return "mom-flat", "—"
 	}
 }
 

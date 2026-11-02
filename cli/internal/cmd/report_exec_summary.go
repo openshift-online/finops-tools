@@ -34,3 +34,15 @@ func buildExecSummaryTargets(payerID, payerAlias string, memberTargets []cost.Ac
 	}
 	return mergeCostTargets([]cost.AccountTarget{payer}, memberTargets)
 }
+
+// execSummaryMonthsFromFlags returns the shared --months flag value for the
+// exec-summary report only when the user set it explicitly. Config defaults for
+// the cost period (defaults.cost.months) target get-cost semantics and must not
+// silently change the exec-summary completed-month window; 0 means the template
+// default (5).
+func execSummaryMonthsFromFlags(cmd *cobra.Command, flagValue int) int {
+	if cmd.Flags().Changed("months") {
+		return flagValue
+	}
+	return 0
+}

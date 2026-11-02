@@ -97,12 +97,33 @@ func fetchMonthlyAccountServiceWith(ctx context.Context, q CostQuery, opts fetch
 	}
 	rows = append(rows, payerRows...)
 
-	// Monthly totals scoped to the selected accounts (payer + members).
+	// Monthly totals scoped to the selected accounts (payer + members), batched
+	// to the same linked-account filter limit as the grouped queries.
 	selectedIDs := append([]string{payer.AccountID}, memberIDs...)
-	months, totalsCurrency, _, err := sumNetAmortizedMonthly(ctx, ce, dr, linkedAccountsFilter(selectedIDs))
-	if err != nil {
-		return MonthlyAccountServiceResult{}, fmt.Errorf("monthly totals query: %w", err)
+	months := make([]MonthlyCostPoint, 0)
+	totalsByMonth := make(map[string]float64)
+	var totalsCurrency string
+	for _, batch := range batchStrings(selectedIDs, linkedAccountFilterBatchSize) {
+		batchMonths, batchCurrency, _, err := sumNetAmortizedMonthly(ctx, ce, dr, linkedAccountsFilter(batch))
+		if err != nil {
+			return MonthlyAccountServiceResult{}, fmt.Errorf("monthly totals query: %w", err)
+		}
+		if len(batchMonths) > 0 {
+			// Only trust the currency of a totals batch that actually saw data;
+			// an empty result carries a meaningless default.
+			totalsCurrency, err = mergeCurrency(totalsCurrency, batchCurrency)
+			if err != nil {
+				return MonthlyAccountServiceResult{}, err
+			}
+		}
+		for _, m := range batchMonths {
+			totalsByMonth[m.Month] += m.Amount
+		}
 	}
+	for month := range totalsByMonth {
+		months = append(months, MonthlyCostPoint{Month: month, Amount: totalsByMonth[month]})
+	}
+	sort.Slice(months, func(i, j int) bool { return months[i].Month < months[j].Month })
 	currency, err = mergeCurrency(currency, totalsCurrency)
 	if err != nil {
 		return MonthlyAccountServiceResult{}, err
@@ -122,6 +143,9 @@ func fetchMonthlyAccountServiceWith(ctx context.Context, q CostQuery, opts fetch
 		return rows[i].Service < rows[j].Service
 	})
 
+	if currency == "" {
+		currency = "USD"
+	}
 	return MonthlyAccountServiceResult{
 		Rows:           rows,
 		Currency:       currency,
