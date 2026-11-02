@@ -243,6 +243,46 @@ func TestWriteCostResultPrettyPrintAccountListTruncatesMany(t *testing.T) {
 	}
 }
 
+func TestWriteCostResultPrettyPrintCommaInAccountName(t *testing.T) {
+	r := fixtureResult()
+	r.AccountName = "Acme, Inc."
+	r.AccountID = "111111111111"
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	if !strings.Contains(out, "Acme, Inc. (111111111111)") {
+		t.Errorf("missing comma account name:\n%s", out)
+	}
+	if strings.Contains(out, " + ") {
+		t.Errorf("single account should not be truncated:\n%s", out)
+	}
+}
+
+func TestWriteCostResultPrettyPrintAccountListTruncatesWhenNameContainsSeparator(t *testing.T) {
+	n := maxPrettyAccountList + 3
+	r := manyAccountResult(n)
+	r.AccountName = strings.Replace(r.AccountName, "Account 01", "Acme, Inc.", 1)
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	lastShown := fmt.Sprintf("%012d", maxPrettyAccountList)
+	omittedID := fmt.Sprintf("%012d", maxPrettyAccountList+1)
+	omittedName := fmt.Sprintf("Account %02d", maxPrettyAccountList+1)
+	if !strings.Contains(out, "000000000001") || !strings.Contains(out, lastShown) {
+		t.Errorf("missing first account ids:\n%s", out)
+	}
+	if strings.Contains(out, omittedID) || strings.Contains(out, omittedName) {
+		t.Errorf("account past the limit should be omitted:\n%s", out)
+	}
+	if !strings.Contains(out, "+ 3 accounts") {
+		t.Errorf("missing remainder suffix:\n%s", out)
+	}
+}
+
 func TestWriteCostResultJSONKeepsFullAccountList(t *testing.T) {
 	r := manyAccountResult(maxPrettyAccountList + 5)
 	var buf bytes.Buffer

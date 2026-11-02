@@ -172,8 +172,14 @@ func formatAccountList(names, ids string) string {
 	nameParts := strings.Split(names, ", ")
 	idParts := strings.Split(ids, ", ")
 	if len(nameParts) != len(idParts) {
-		return fmt.Sprintf("%s (%s)", names, ids)
+		// Account IDs do not contain the ", " separator, so they stay a reliable
+		// count when an account name itself contains ", ".
+		return formatUnpairedAccountList(names, ids, idParts)
 	}
+	return formatPairedAccountList(nameParts, idParts)
+}
+
+func formatPairedAccountList(nameParts, idParts []string) string {
 	shown := len(nameParts)
 	extra := 0
 	if shown > maxPrettyAccountList {
@@ -184,15 +190,29 @@ func formatAccountList(names, ids string) string {
 	for i := 0; i < shown; i++ {
 		parts[i] = fmt.Sprintf("%s (%s)", strings.TrimSpace(nameParts[i]), strings.TrimSpace(idParts[i]))
 	}
-	out := strings.Join(parts, ", ")
+	return strings.Join(parts, ", ") + accountListRemainder(extra)
+}
+
+func formatUnpairedAccountList(names, ids string, idParts []string) string {
+	if strings.TrimSpace(ids) == "" || len(idParts) <= maxPrettyAccountList {
+		return fmt.Sprintf("%s (%s)", names, ids)
+	}
+	shown := make([]string, maxPrettyAccountList)
+	for i := 0; i < maxPrettyAccountList; i++ {
+		shown[i] = strings.TrimSpace(idParts[i])
+	}
+	return strings.Join(shown, ", ") + accountListRemainder(len(idParts)-maxPrettyAccountList)
+}
+
+func accountListRemainder(extra int) string {
 	if extra == 0 {
-		return out
+		return ""
 	}
 	noun := "accounts"
 	if extra == 1 {
 		noun = "account"
 	}
-	return out + fmt.Sprintf(" + %d %s", extra, noun)
+	return fmt.Sprintf(" + %d %s", extra, noun)
 }
 
 func cell(s styler, fn func(string) string, text string) string {
