@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/spf13/cobra"
@@ -11,8 +12,12 @@ import (
 // validateExecSummarySelection enforces the exec-summary report's scoped options:
 // a single --payer alias and at most the shared --months period flag.
 func validateExecSummarySelection(cmd *cobra.Command, sel costTargetSelector) error {
-	if sel.PayerAlias == "" {
+	if len(sel.PayerAliases) == 0 {
 		return fmt.Errorf("exec-summary report requires --payer <alias>")
+	}
+	if len(sel.PayerAliases) > 1 {
+		return fmt.Errorf("exec-summary report currently supports a single payer (got %d: %s); multi-payer support is planned",
+			len(sel.PayerAliases), strings.Join(sel.PayerAliases, ", "))
 	}
 	if len(sel.AccountIDs) > 0 || len(sel.Aliases) > 0 || len(sel.OUs) > 0 || sel.TagKey != "" {
 		return fmt.Errorf("exec-summary report selects accounts with --payer alone (not --account-id/--account-alias, --ou, or --tag)")

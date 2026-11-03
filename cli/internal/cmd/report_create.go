@@ -156,11 +156,12 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		if templateName == reportpkg.TemplateExecSummary {
 			// resolveCostTargets excludes the payer from member discovery; the
 			// executive summary reports payer own spend too.
-			payerID, ok := cfg.PayerAccountIDForAlias(sel.PayerAlias)
+			payerAlias := sel.PayerAliases[0]
+			payerID, ok := cfg.PayerAccountIDForAlias(payerAlias)
 			if !ok {
-				return fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", sel.PayerAlias, sel.PayerAlias)
+				return fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
 			}
-			targets = buildExecSummaryTargets(payerID, sel.PayerAlias, targets)
+			targets = buildExecSummaryTargets(payerID, payerAlias, targets)
 		}
 	}
 

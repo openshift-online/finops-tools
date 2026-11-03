@@ -21,14 +21,17 @@ func TestValidateExecSummarySelection(t *testing.T) {
 	if err := validateExecSummarySelection(cmd, costTargetSelector{}); err == nil {
 		t.Error("missing --payer should fail")
 	}
-	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAlias: "example-payer"}); err != nil {
+	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAliases: []string{"example-payer"}}); err != nil {
 		t.Errorf("payer-only selection should pass: %v", err)
 	}
-	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAlias: "example-payer", Aliases: []string{"quay"}}); err == nil {
+	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAliases: []string{"example-payer"}, Aliases: []string{"quay"}}); err == nil {
 		t.Error("--account-alias with --payer should fail")
 	}
-	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAlias: "example-payer", TagKey: "env"}); err == nil {
+	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAliases: []string{"example-payer"}, TagKey: "env"}); err == nil {
 		t.Error("--tag with --payer should fail")
+	}
+	if err := validateExecSummarySelection(cmd, costTargetSelector{PayerAliases: []string{"payer-a", "payer-b"}}); err == nil {
+		t.Error("multiple --payer values should fail until multi-payer support lands")
 	}
 }
 
@@ -37,7 +40,7 @@ func TestValidateExecSummarySelectionPeriodFlags(t *testing.T) {
 	if err := daysCmd.Flags().Set("days", "30"); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateExecSummarySelection(daysCmd, costTargetSelector{PayerAlias: "example-payer"}); err == nil {
+	if err := validateExecSummarySelection(daysCmd, costTargetSelector{PayerAliases: []string{"example-payer"}}); err == nil {
 		t.Error("--days should fail for exec-summary")
 	}
 
@@ -45,7 +48,7 @@ func TestValidateExecSummarySelectionPeriodFlags(t *testing.T) {
 	if err := fromCmd.Flags().Set("from", "2026-01-01"); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateExecSummarySelection(fromCmd, costTargetSelector{PayerAlias: "example-payer"}); err == nil {
+	if err := validateExecSummarySelection(fromCmd, costTargetSelector{PayerAliases: []string{"example-payer"}}); err == nil {
 		t.Error("--from should fail for exec-summary")
 	}
 
@@ -53,7 +56,7 @@ func TestValidateExecSummarySelectionPeriodFlags(t *testing.T) {
 	if err := monthsCmd.Flags().Set("months", "3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateExecSummarySelection(monthsCmd, costTargetSelector{PayerAlias: "example-payer"}); err != nil {
+	if err := validateExecSummarySelection(monthsCmd, costTargetSelector{PayerAliases: []string{"example-payer"}}); err != nil {
 		t.Errorf("--months should be allowed for exec-summary: %v", err)
 	}
 }
