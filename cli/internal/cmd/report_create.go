@@ -34,7 +34,7 @@ var reportCreateCmd = &cobra.Command{
 	Long: `Create a report for configured cloud accounts.
 
 AWS account selection matches finops account get-cost (--ou/--payer select ACTIVE
-members only).
+members only). --payer accepts comma-separated aliases for org, OU, and tag selection.
 
 Example:
   finops report list
@@ -43,6 +43,7 @@ Example:
   finops report create costs --account-id 333333333333 --payer rhc -o member.html
   finops report create costs --ou ou-abcd-12345678 --payer rh-control -o ou-costs.html
   finops report create costs --payer rh-control -o all-members.html
+  finops report create costs --payer rh-control,osd-staging-1 -o all-payers.html
   finops report create costs --payer rh-control --tag env=prod -o prod.html
   finops report create hcp-hierarchy --snowflake-alias rhsandbox -o hcp-hierarchy.html`,
 	Args: cobra.ExactArgs(1),

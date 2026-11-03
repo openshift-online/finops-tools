@@ -52,7 +52,7 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 		opts.Now = time.Now()
 	}
 	if opts.NewCostExplorer == nil {
-		opts.NewCostExplorer = defaultCostExplorerFactory()
+		opts.NewCostExplorer = costExplorerFactory()
 	}
 
 	plan, ok := planBulkFetch(targets)
@@ -193,7 +193,7 @@ func fetchAWSDailyNetAmortizedBulk(ctx context.Context, q CostQuery, targets []A
 		opts.Now = time.Now()
 	}
 	if opts.NewCostExplorer == nil {
-		opts.NewCostExplorer = defaultCostExplorerFactory()
+		opts.NewCostExplorer = costExplorerFactory()
 	}
 
 	plan, ok := planBulkFetch(targets)

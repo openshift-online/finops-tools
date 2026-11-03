@@ -39,6 +39,18 @@ func ParseAccountAliases(s string) ([]string, error) {
 	return aliases, nil
 }
 
+// ParsePayerAliases parses --payer. Entries are trimmed, empties dropped, and duplicates removed.
+func ParsePayerAliases(s string) ([]string, error) {
+	aliases, err := account.ParseCommaSeparated(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(aliases) == 0 {
+		return nil, errors.New("at least one payer alias is required")
+	}
+	return aliases, nil
+}
+
 // ResolveCostTargets builds cost.AccountTarget values from account IDs and/or aliases.
 // When payerAlias is set, each --account-id value is queried through that payer's Cost Explorer
 // credentials; member accounts need not be registered (only the payer must be).

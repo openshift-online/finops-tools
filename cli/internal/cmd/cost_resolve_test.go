@@ -14,7 +14,7 @@ func TestValidateCostTargetSelectorOU(t *testing.T) {
 	if _, err := validateCostTargetSelector(costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}}); err == nil {
 		t.Fatal("expected error when --ou without --payer")
 	}
-	mode, err := validateCostTargetSelector(costTargetSelector{PayerAlias: "rh-control"})
+	mode, err := validateCostTargetSelector(costTargetSelector{PayerAliases: []string{"rh-control"}})
 	if err != nil {
 		t.Fatalf("payer alone should select org: %v", err)
 	}
@@ -22,8 +22,8 @@ func TestValidateCostTargetSelectorOU(t *testing.T) {
 		t.Fatalf("mode = %v, want org", mode)
 	}
 	if _, err := validateCostTargetSelector(costTargetSelector{
-		OUs:        []configstore.OUSelector{{ID: "ou-abcd-12345678"}},
-		PayerAlias: "rh-control",
+		OUs:          []configstore.OUSelector{{ID: "ou-abcd-12345678"}},
+		PayerAliases: []string{"rh-control"},
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

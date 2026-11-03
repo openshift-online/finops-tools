@@ -23,6 +23,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestExtendedSupportListPayerFlagDocumentsMultipleAliases(t *testing.T) {
+	usage := extendedSupportListCmd.Flags().Lookup("payer").Usage
+	if !strings.Contains(usage, "comma-separated") || !strings.Contains(usage, "--full-scan") {
+		t.Fatalf("payer usage = %q", usage)
+	}
+}
+
 func TestExtendedSupportListPreRunRejectsUnknownService(t *testing.T) {
 	extendedSupportListAccount = "123456789012"
 	extendedSupportListAccountAliases = ""

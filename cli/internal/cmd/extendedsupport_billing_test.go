@@ -40,14 +40,14 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 		fullScan, empty, failed, invalidDays bool
 		want                                 int
 	}{
-		{name: "payer filters", sel: costTargetSelector{PayerAlias: "payer"}, want: 1},
-		{name: "empty billed selection", sel: costTargetSelector{PayerAlias: "payer"}, empty: true},
-		{name: "full scan bypass", sel: costTargetSelector{PayerAlias: "payer"}, fullScan: true, want: 2},
-		{name: "explicit bypass", sel: costTargetSelector{AccountIDs: []string{"111111111111"}, PayerAlias: "payer"}, want: 2},
-		{name: "OU bypass", sel: costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAlias: "payer"}, want: 2},
-		{name: "tag bypass", sel: costTargetSelector{TagKey: "team", PayerAlias: "payer"}, want: 2},
-		{name: "API failure", sel: costTargetSelector{PayerAlias: "payer"}, failed: true},
-		{name: "invalid lookback", sel: costTargetSelector{PayerAlias: "payer"}, invalidDays: true},
+		{name: "payer filters", sel: costTargetSelector{PayerAliases: []string{"payer"}}, want: 1},
+		{name: "empty billed selection", sel: costTargetSelector{PayerAliases: []string{"payer"}}, empty: true},
+		{name: "full scan bypass", sel: costTargetSelector{PayerAliases: []string{"payer"}}, fullScan: true, want: 2},
+		{name: "explicit bypass", sel: costTargetSelector{AccountIDs: []string{"111111111111"}, PayerAliases: []string{"payer"}}, want: 2},
+		{name: "OU bypass", sel: costTargetSelector{OUs: []configstore.OUSelector{{ID: "ou-abcd-12345678"}}, PayerAliases: []string{"payer"}}, want: 2},
+		{name: "tag bypass", sel: costTargetSelector{TagKey: "team", PayerAliases: []string{"payer"}}, want: 2},
+		{name: "API failure", sel: costTargetSelector{PayerAliases: []string{"payer"}}, failed: true},
+		{name: "invalid lookback", sel: costTargetSelector{PayerAliases: []string{"payer"}}, invalidDays: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			previousLoad, previousDiscover := loadAWSConfigForCredentialsAccount, discoverExtendedSupportBillingCandidates
@@ -72,10 +72,12 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 					return extendedsupport.BillingCandidates{}, failure
 				}
 				ids := []string{"222222222222", "123456789012", "999999999999"}
+				usageTypes := []string{"RDS:ExtendedSupport"}
 				if tc.empty {
 					ids = nil
+					usageTypes = nil
 				}
-				return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport"}, AccountIDs: ids}, nil
+				return extendedsupport.BillingCandidates{Period: period, UsageTypes: usageTypes, AccountIDs: ids}, nil
 			}
 			cmd := &cobra.Command{}
 			cmd.SetContext(context.Background())
@@ -85,7 +87,7 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 			}
 			selected, metadata, err := filterExtendedSupportBillingTargets(cmd, cfg, tc.sel, targets, tc.fullScan, days, time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC), nil)
 			if tc.failed {
-				if !errors.Is(err, failure) || !strings.Contains(err.Error(), "--full-scan") || selected != nil || metadata != nil {
+				if !errors.Is(err, failure) || !strings.Contains(err.Error(), "--full-scan") || !strings.Contains(err.Error(), "payer (123456789012)") || selected != nil || metadata != nil {
 					t.Fatalf("selected=%v metadata=%+v error=%v", selected, metadata, err)
 				}
 				return
@@ -104,7 +106,11 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 					t.Fatalf("bypass made a billing query: metadata=%+v loads=%d queries=%d", metadata, loads, queries)
 				}
 			} else {
-				if loads != 1 || queries != 1 || metadata == nil || metadata.EligibleAccountCount != 2 || metadata.SelectedAccountCount != tc.want || metadata.PayerAccountID != "123456789012" {
+				wantUsageTypes := []string{"RDS:ExtendedSupport"}
+				if tc.empty {
+					wantUsageTypes = []string{}
+				}
+				if loads != 1 || queries != 1 || metadata == nil || metadata.EligibleAccountCount != 2 || metadata.SelectedAccountCount != tc.want || metadata.PayerAccountID != "123456789012" || !reflect.DeepEqual(metadata.PayerAccountIDs, []string{"123456789012"}) || !reflect.DeepEqual(metadata.UsageTypes, wantUsageTypes) {
 					t.Fatalf("metadata=%+v loads=%d queries=%d", metadata, loads, queries)
 				}
 				if !tc.empty && !reflect.DeepEqual(selected[0], targets[1]) {
@@ -112,6 +118,66 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFilterExtendedSupportBillingTargetsMultiPayerMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "payer-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.RegisterAWSAccount(path, "987654321098", "payer-b"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := configstore.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []cost.AccountTarget{
+		{AccountID: "111111111111", PayerAccountID: "123456789012"},
+		{AccountID: "222222222222", PayerAccountID: "987654321098"},
+	}
+
+	previousLoad, previousDiscover := loadAWSConfigForCredentialsAccount, discoverExtendedSupportBillingCandidates
+	t.Cleanup(func() {
+		loadAWSConfigForCredentialsAccount, discoverExtendedSupportBillingCandidates = previousLoad, previousDiscover
+	})
+	loadAWSConfigForCredentialsAccount = func(_ context.Context, _ configstore.File, id, _ string) (aws.Config, error) {
+		return aws.Config{Region: id}, nil
+	}
+	discoverExtendedSupportBillingCandidates = func(_ context.Context, cfg aws.Config, period cost.DateRange) (extendedsupport.BillingCandidates, error) {
+		switch cfg.Region {
+		case "123456789012":
+			return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport"}, AccountIDs: []string{"111111111111"}}, nil
+		case "987654321098":
+			return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport", "ElastiCache:ExtendedSupport"}, AccountIDs: []string{"222222222222"}}, nil
+		default:
+			return extendedsupport.BillingCandidates{}, errors.New("unexpected credentials account " + cfg.Region)
+		}
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	sel := costTargetSelector{PayerAliases: []string{"payer-a", "payer-b"}}
+	selected, metadata, err := filterExtendedSupportBillingTargets(cmd, cfg, sel, targets, false, 30, time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 2 {
+		t.Fatalf("selected = %+v", selected)
+	}
+	if metadata == nil || metadata.PayerAccountID != "" || !reflect.DeepEqual(metadata.PayerAccountIDs, []string{"123456789012", "987654321098"}) {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+	if !reflect.DeepEqual(metadata.UsageTypes, []string{"RDS:ExtendedSupport", "ElastiCache:ExtendedSupport"}) {
+		t.Fatalf("usage types = %v", metadata.UsageTypes)
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"payer_account_ids":["123456789012","987654321098"]`) || !strings.Contains(string(encoded), `"payer_account_id":""`) {
+		t.Fatalf("json = %s", encoded)
 	}
 }
 

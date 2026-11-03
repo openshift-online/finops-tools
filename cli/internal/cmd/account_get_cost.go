@@ -36,10 +36,10 @@ var accountGetCostCmd = &cobra.Command{
 	Long: `Fetch the sum of AWS Cost Explorer NetAmortizedCost for one or more payer or linked accounts.
 
 Account selection (exactly one mode):
-  --account-id / --account-alias   Explicit accounts (optional --payer for unregistered member IDs)
-  --payer                       All member accounts in the payer's organization (ACTIVE only unless --include-closed-accounts)
-  --payer --ou                  Accounts under an OU or org root (ACTIVE only unless --include-closed-accounts)
-  --payer --tag KEY[=VALUE]     Accounts matching an Organizations tag
+  --account-id / --account-alias   Explicit accounts (optional single --payer for unregistered member IDs)
+  --payer                       All member accounts in the payer organization(s). Comma-separated aliases union members (ACTIVE only unless --include-closed-accounts)
+  --payer --ou                  Accounts under an OU or org root. Each OU is resolved in every listed payer
+  --payer --tag KEY[=VALUE]     Accounts matching an Organizations tag in every listed payer
 
 --ou scope suffixes (per ID):
   ou-xxxx / r-xxxx      all accounts under parent (default)
@@ -53,10 +53,12 @@ Period (default: last 30 calendar days, or defaults.cost.* in config):
 Examples:
   finops account get-cost --account-alias rh-control
   finops account get-cost --payer rh-control
+  finops account get-cost --payer rh-control,osd-staging-1
   finops account get-cost --payer rh-control --account-id 111111111111,222222222222
   finops account get-cost --payer rh-control --tag organization
   finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
   finops account get-cost --ou ou-abcd-12345678 --payer rh-control
+  finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-control,osd-staging-1
   finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
   finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
   finops account get-cost --payer rh-control --group-by ou

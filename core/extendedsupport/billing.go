@@ -36,8 +36,11 @@ type BillingCandidates struct {
 
 // BillingSelection describes the historical evidence used to narrow a live scan.
 // Accounts outside this selection are not scan failures or skipped accounts.
+// PayerAccountID holds the single payer behind the scan and is empty when
+// several payers were listed; PayerAccountIDs lists every payer queried.
 type BillingSelection struct {
 	PayerAccountID       string   `json:"payer_account_id"`
+	PayerAccountIDs      []string `json:"payer_account_ids,omitempty"`
 	Start                string   `json:"start"`
 	EndExclusive         string   `json:"end_exclusive"`
 	UsageTypes           []string `json:"usage_types"`
