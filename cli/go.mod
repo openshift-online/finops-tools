@@ -14,6 +14,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/openshift-online/finops-tools/core v0.0.0
 	github.com/spf13/cobra v1.9.1
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/term v0.45.0
 	google.golang.org/api v0.295.0
