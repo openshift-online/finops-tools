@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	"github.com/openshift-online/finops-tools/core/awsregions"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
@@ -38,6 +39,7 @@ func Scan(ctx context.Context, q Query) (Result, error) {
 	err := parallel.ForEach(ctx, q.Workers, len(q.Targets), func(ctx context.Context, i int) error {
 		target := q.Targets[i]
 		inv, err := q.scanner.scanAccount(ctx, q, target)
+		inv.ExcludedRegions = awsregions.Normalize(q.SkipRegions)
 		n := int(completed.Add(1))
 		reportAccountScanned(q.OnProgress, target, n, len(q.Targets))
 		if err != nil {
@@ -47,8 +49,9 @@ func Scan(ctx context.Context, q Query) (Result, error) {
 			// Isolate account-level failures so one bad assume-role or region list
 			// does not cancel inventory (and emails) for the rest of the batch.
 			accounts[i] = AccountInventory{
-				AccountID: strings.TrimSpace(target.AccountID),
-				Warnings:  []string{err.Error()},
+				AccountID:       strings.TrimSpace(target.AccountID),
+				Warnings:        []string{err.Error()},
+				ExcludedRegions: awsregions.Normalize(q.SkipRegions),
 			}
 			return nil
 		}
@@ -138,6 +141,7 @@ func (defaultAccountScanner) scanAccount(ctx context.Context, q Query, target Ac
 	if err != nil {
 		return AccountInventory{}, fmt.Errorf("list regions: %w", err)
 	}
+	regions = awsregions.Exclude(regions, q.SkipRegions)
 	if q.OnProgress != nil {
 		q.OnProgress(fmt.Sprintf("Scanning inventory for %s (%d regions)…", label, len(regions)))
 	}

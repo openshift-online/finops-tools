@@ -101,6 +101,7 @@ type Query struct {
 	Targets         []AccountTarget
 	Services        []Service
 	Regions         []string
+	SkipRegions     []string // Excluded from regional discovery and EKS catalog preloading.
 	AccountProgress AccountProgress
 	Now             time.Time
 	// EKSVersionCatalog is shared across accounts and may be retained for retries.
@@ -120,13 +121,20 @@ type Query struct {
 
 // Record is one resource past standard support or at end of life.
 type Record struct {
-	AccountID              string            `json:"account_id"`
-	Region                 string            `json:"region"`
-	Service                Service           `json:"service"`
-	ResourceType           ResourceType      `json:"resource_type"`
-	ResourceID             string            `json:"resource_id"`
-	Engine                 string            `json:"engine"`
-	EngineVersion          string            `json:"engine_version"`
+	AccountID     string       `json:"account_id"`
+	Region        string       `json:"region"`
+	Service       Service      `json:"service"`
+	ResourceType  ResourceType `json:"resource_type"`
+	ResourceID    string       `json:"resource_id"`
+	Engine        string       `json:"engine"`
+	EngineVersion string       `json:"engine_version"`
+	// MajorEngineVersion uses service-specific version granularity:
+	//   - RDS/Aurora: MajorEngineVersion returned by DescribeDBEngineVersions.
+	//   - EKS: Kubernetes major.minor version, identical to EngineVersion.
+	//   - ElastiCache: first dot-separated segment of EngineVersion.
+	//   - OpenSearch: numeric major.minor version, identical to EngineVersion.
+	//
+	// Consumers should interpret this value together with Service and Engine.
 	MajorEngineVersion     string            `json:"major_engine_version"`
 	StandardSupportEndDate time.Time         `json:"standard_support_end_date,omitzero"`
 	ExtendedSupportEndDate *time.Time        `json:"extended_support_end_date,omitempty"`
@@ -187,6 +195,7 @@ type Summary struct {
 	ByService             []ServiceSummary  `json:"by_service,omitempty"`
 	ByAccount             []AccountSummary  `json:"by_account,omitempty"`
 	SkippedRegions        []RegionWarning   `json:"skipped_regions,omitempty"`
+	ExcludedRegions       []string          `json:"excluded_regions,omitempty"`
 	SkippedAccounts       []AccountWarning  `json:"skipped_accounts,omitempty"`
 	UnclassifiedResources []ResourceWarning `json:"unclassified_resources,omitempty"`
 	BillingSelection      *BillingSelection `json:"billing_selection,omitempty"`

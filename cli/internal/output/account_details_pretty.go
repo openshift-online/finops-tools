@@ -161,6 +161,11 @@ func writeAccountDetailsPrettyResources(w io.Writer, s styler, d accountreview.A
 	if err := writeSectionTitle(w, s, "Resources"); err != nil {
 		return err
 	}
+	if note := d.InventoryScopeNote(); note != "" {
+		if _, err := fmt.Fprintf(w, "  %s\n", note); err != nil {
+			return err
+		}
+	}
 	tables := d.NonemptyInventoryTables()
 	counts := d.NonzeroInventoryCounts()
 	for _, table := range tables {

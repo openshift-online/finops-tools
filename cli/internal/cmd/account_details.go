@@ -37,6 +37,7 @@ var (
 	detailsRole              string
 	detailsSend              bool
 	detailsSkipOrgCache      bool
+	detailsSkipRegions       []string
 	detailsRefreshOrgCache   bool
 	detailsSnowflakeAlias    string
 	detailsSubjectPrefix     string
@@ -124,6 +125,9 @@ Examples:
 		if err := validateWorkers(detailsWorkers); err != nil {
 			return err
 		}
+		if _, err := skipRegionsForCommand(cmd, detailsSkipRegions); err != nil {
+			return err
+		}
 		if err := validateOrgCacheFlags(detailsSkipOrgCache, detailsRefreshOrgCache); err != nil {
 			return err
 		}
@@ -139,6 +143,7 @@ Examples:
 
 func init() {
 	accountCmd.AddCommand(accountDetailsCmd)
+	bindSkipRegionsFlag(accountDetailsCmd, &detailsSkipRegions)
 	bindAWSTargetFlags(accountDetailsCmd, awsTargetFlagRefs{
 		Account:         &detailsAccount,
 		AccountAliases:  &detailsAccountAliases,
@@ -298,6 +303,10 @@ func validateAccountDetailsEmailTemplateFlags(send bool, f accountDetailsEmailTe
 }
 
 func runAccountDetails(cmd *cobra.Command, _ []string) error {
+	skipRegions, err := skipRegionsForCommand(cmd, detailsSkipRegions)
+	if err != nil {
+		return err
+	}
 	format, err := output.ParseFormat(detailsFormat)
 	if err != nil {
 		return err
@@ -387,6 +396,7 @@ func runAccountDetails(cmd *cobra.Command, _ []string) error {
 	buildResult, err := accountReviewBuild(awsCtx, accountreview.BuildInput{
 		CostTargets:       costTargets,
 		InventoryTargets:  invTargets,
+		SkipRegions:       skipRegions,
 		Months:            detailsMonths,
 		ExcludeRecentDays: detailsExcludeRecentDays,
 		Workers:           detailsWorkers,

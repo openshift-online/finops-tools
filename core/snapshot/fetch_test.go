@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -22,7 +23,8 @@ func (f fakeRegionLister) ListEnabledRegions(_ context.Context, _ aws.Config, _ 
 }
 
 type fakeEBSLister struct {
-	records []Record
+	records        []Record
+	errorsByRegion map[string]error
 }
 
 func (f fakeEBSLister) ListEBSSnapshots(
@@ -32,6 +34,9 @@ func (f fakeEBSLister) ListEBSSnapshots(
 	_ time.Time,
 	_ float64,
 ) ([]Record, float64, error) {
+	if err := f.errorsByRegion[region]; err != nil {
+		return nil, 0, err
+	}
 	out := make([]Record, 0, len(f.records))
 	for _, rec := range f.records {
 		if rec.Region == region && rec.AccountID == accountID {
@@ -73,12 +78,12 @@ func (f fakeRDSLister) GetRDSRegionContext(
 		return RDSRegionContext{}, f.contextErr
 	}
 	return RDSRegionContext{
-		FreePoolGiB:      f.FreePoolGiB,
+		FreePoolGiB:    f.FreePoolGiB,
 		TotalBackupGiB: f.TotalBackupGiB,
 	}, nil
 }
 
-func TestFetchSkipsRDSRegionContextWhenFilteredRecordsEmpty(t *testing.T) {
+func TestFetchIncludesRDSRunRateWhenFilteredRecordsEmpty(t *testing.T) {
 	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	clusterOnly := Record{
 		AccountID:  "111111111111",
@@ -89,10 +94,10 @@ func TestFetchSkipsRDSRegionContextWhenFilteredRecordsEmpty(t *testing.T) {
 	}
 
 	result, err := Fetch(context.Background(), Query{
-		Targets:   []AccountTarget{{AccountID: "111111111111"}},
-		OlderThan: 180 * 24 * time.Hour,
-		Types:     []Kind{KindRDSSnapshot},
-		Now:       now,
+		Targets:      []AccountTarget{{AccountID: "111111111111"}},
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindRDSSnapshot},
+		Now:          now,
 		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
 		rdsLister: fakeRDSLister{
 			records:        []Record{clusterOnly},
@@ -106,11 +111,52 @@ func TestFetchSkipsRDSRegionContextWhenFilteredRecordsEmpty(t *testing.T) {
 	if len(result.Records) != 0 {
 		t.Fatalf("records = %d, want 0 after kind filter", len(result.Records))
 	}
-	if result.Summary.RDSBackupRegionalExcessGiB != 0 {
-		t.Fatalf("regional excess GiB = %v, want 0 for empty filtered region", result.Summary.RDSBackupRegionalExcessGiB)
+	if result.Summary.RDSBackupRegionalExcessGiB != 1000 {
+		t.Fatalf("regional excess GiB = %v, want 1000 for scanned region", result.Summary.RDSBackupRegionalExcessGiB)
 	}
-	if result.Summary.RDSBackupEstimatedMonthlyRunRateUSD != 0 {
-		t.Fatalf("regional run rate = %v, want 0 for empty filtered region", result.Summary.RDSBackupEstimatedMonthlyRunRateUSD)
+	if result.Summary.RDSBackupEstimatedMonthlyRunRateUSD != 95 {
+		t.Fatalf("regional run rate = %v, want 95 for scanned region", result.Summary.RDSBackupEstimatedMonthlyRunRateUSD)
+	}
+}
+
+func TestScanScopeIncludesEmptyRegionsAndExcludesFailures(t *testing.T) {
+	result, err := Fetch(context.Background(), Query{
+		Targets: []AccountTarget{
+			{AccountID: "111111111111"},
+			{AccountID: "222222222222", ConfigLoader: func(context.Context) (aws.Config, error) {
+				return aws.Config{}, errors.New("assume role failed")
+			}},
+		},
+		OlderThan: 24 * time.Hour, Types: []Kind{KindEBSSnapshot},
+		regionLister: fakeRegionLister{regions: []string{"us-east-1", "us-west-2"}},
+		ebsLister:    fakeEBSLister{errorsByRegion: map[string]error{"us-west-2": errors.New("scan failed")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) != 0 || len(result.Summary.ScanScopes) != 2 || !reflect.DeepEqual(result.Summary.ScanScopes[0].Regions, []string{"us-east-1"}) || len(result.Summary.ScanScopes[1].Regions) != 0 {
+		t.Fatalf("scan scopes = %+v", result.Summary.ScanScopes)
+	}
+	if len(result.Summary.SkippedRegions) != 1 || len(result.Summary.SkippedAccounts) != 1 {
+		t.Fatalf("missing scan failures: %+v", result.Summary)
+	}
+}
+
+func TestScanScopeMarksUnavailableRDSContext(t *testing.T) {
+	result, err := Fetch(context.Background(), Query{
+		Targets:   []AccountTarget{{AccountID: "111111111111"}},
+		OlderThan: 24 * time.Hour, Types: []Kind{KindRDSSnapshot},
+		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
+		rdsLister: fakeRDSLister{
+			records:    []Record{{AccountID: "111111111111", Region: "us-east-1", Kind: KindRDSSnapshot, SizeGiB: 100}},
+			contextErr: errors.New("backup context unavailable"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Summary.ScanScopes) != 1 || !result.Summary.ScanScopes[0].RDSCostEstimationIncomplete || len(result.Records) != 1 || result.Records[0].CostBasis != CostBasisVolumeSizeEstimate {
+		t.Fatalf("incomplete context should retain estimates: %+v", result)
 	}
 }
 
@@ -125,10 +171,10 @@ func TestFetchPropagatesRDSRegionContextCancellation(t *testing.T) {
 	}
 
 	_, err := Fetch(context.Background(), Query{
-		Targets:   []AccountTarget{{AccountID: "111111111111"}},
-		OlderThan: 180 * 24 * time.Hour,
-		Types:     []Kind{KindRDSSnapshot},
-		Now:       now,
+		Targets:      []AccountTarget{{AccountID: "111111111111"}},
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindRDSSnapshot},
+		Now:          now,
 		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
 		rdsLister: fakeRDSLister{
 			records:    []Record{rds},
@@ -160,10 +206,10 @@ func TestFetchAggregatesRecordsAndSummary(t *testing.T) {
 	}
 
 	result, err := Fetch(context.Background(), Query{
-		Targets: []AccountTarget{{AccountID: "111111111111"}},
-		OlderThan: 180 * 24 * time.Hour,
-		Types: []Kind{KindEBSSnapshot, KindRDSSnapshot, KindRDSClusterSnapshot},
-		Now: now,
+		Targets:      []AccountTarget{{AccountID: "111111111111"}},
+		OlderThan:    180 * 24 * time.Hour,
+		Types:        []Kind{KindEBSSnapshot, KindRDSSnapshot, KindRDSClusterSnapshot},
+		Now:          now,
 		regionLister: fakeRegionLister{regions: []string{"us-east-1"}},
 		ebsLister:    fakeEBSLister{records: []Record{ebs}},
 		rdsLister: fakeRDSLister{
@@ -672,4 +718,3 @@ func TestFetchScansRegionsEnabledPerAccount(t *testing.T) {
 		t.Fatalf("scanned eu-west-1 for account 111 which did not enable it")
 	}
 }
-

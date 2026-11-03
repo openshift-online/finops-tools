@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,35 @@ import (
 	"github.com/openshift-online/finops-tools/core/cost"
 	"github.com/openshift-online/finops-tools/core/inventory"
 )
+
+func TestBuildPassesRegionalExclusionsToInventoryAndDetails(t *testing.T) {
+	t.Parallel()
+	excluded := []string{"us-west-2"}
+	result, err := Build(context.Background(), BuildInput{
+		CostTargets:      []cost.AccountTarget{{AccountID: "111111111111"}},
+		InventoryTargets: []inventory.AccountTarget{{AccountID: "111111111111"}},
+		SkipRegions:      excluded,
+		listTags: func(context.Context, aws.Config, string) ([]coreaccount.Tag, error) {
+			return nil, nil
+		},
+		fetchMonthly: func(context.Context, cost.CostQuery) ([]cost.AccountMonthlyCosts, error) {
+			return nil, nil
+		},
+		scanInventory: func(_ context.Context, q inventory.Query) (inventory.Result, error) {
+			if !reflect.DeepEqual(q.SkipRegions, excluded) {
+				t.Fatalf("inventory exclusions = %v", q.SkipRegions)
+			}
+			return inventory.Result{Accounts: []inventory.AccountInventory{{AccountID: "111111111111", ExcludedRegions: q.SkipRegions}}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := DetailsFrom(result.Reports[0])
+	if !reflect.DeepEqual(details.ExcludedRegions, excluded) || details.InventoryError != "" || details.NoneFoundLine() != "" {
+		t.Fatalf("details = %+v", details)
+	}
+}
 
 func TestBuildSkipsInventoryScanWhenNoTargets(t *testing.T) {
 	t.Parallel()

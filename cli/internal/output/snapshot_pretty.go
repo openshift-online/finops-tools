@@ -30,6 +30,9 @@ func writeSnapshotPretty(w io.Writer, r snapshot.Result) error {
 }
 
 func writeSnapshotSummary(w io.Writer, s styler, r snapshot.Result) error {
+	if err := writeExcludedRegions(w, r.Summary.ExcludedRegions); err != nil {
+		return err
+	}
 	costCtx := newSnapshotCostContext(r.Summary)
 	lines := buildSnapshotSummaryLines(r.Summary, costCtx)
 	labelWidth := 0
@@ -231,26 +234,44 @@ type snapshotSummaryLine struct {
 }
 
 type snapshotCostContext struct {
-	billedEBS    float64
-	billedRDS    float64
-	billedPeriod string
-	ebsCEScale   float64
-	rdsCEScale   float64
+	billedEBS          float64
+	billedRDS          float64
+	regionalEBS        float64
+	regionalRDS        float64
+	hasRegionalBilling bool
+	billedPeriod       string
+	ebsCEScale         float64
+	rdsCEScale         float64
+	ebsAttributed      bool
+	rdsAttributed      bool
 }
 
 func newSnapshotCostContext(summary snapshot.Summary) snapshotCostContext {
 	ctx := snapshotCostContext{
-		billedEBS: sumBilledEBSSnapshotUSD(summary.BilledCosts),
-		billedRDS: sumBilledRDSBackupUSD(summary.BilledCosts),
+		billedEBS:          sumBilledEBSSnapshotUSD(summary.BilledCosts),
+		billedRDS:          sumBilledRDSBackupUSD(summary.BilledCosts),
+		regionalEBS:        sumBilledEBSSnapshotUSD(summary.RegionalBilledCosts),
+		regionalRDS:        sumBilledRDSBackupUSD(summary.RegionalBilledCosts),
+		hasRegionalBilling: len(summary.RegionalBilledCosts) > 0,
 	}
 	if len(summary.BilledCosts) > 0 {
 		ctx.billedPeriod = snapshotBillingPeriodLabel(summary.BilledCosts[0].Period)
+	} else if ctx.hasRegionalBilling {
+		ctx.billedPeriod = snapshotBillingPeriodLabel(summary.RegionalBilledCosts[0].Period)
 	}
-	if ctx.billedEBS > 0 && summary.EBSEstimatedMonthlyRunRateUSD > 0 {
-		ctx.ebsCEScale = ctx.billedEBS / summary.EBSEstimatedMonthlyRunRateUSD
+	if ctx.hasRegionalBilling && ctx.regionalEBS >= 0 && summary.EBSEstimatedMonthlyRunRateUSD > 0 {
+		ctx.ebsCEScale = ctx.regionalEBS / summary.EBSEstimatedMonthlyRunRateUSD
+		ctx.ebsAttributed = true
 	}
-	if ctx.billedRDS > 0 && summary.RDSBackupEstimatedMonthlyRunRateUSD > 0 {
-		ctx.rdsCEScale = ctx.billedRDS / summary.RDSBackupEstimatedMonthlyRunRateUSD
+	rdsComplete := true
+	for _, scope := range summary.ScanScopes {
+		if scope.RDSCostEstimationIncomplete {
+			rdsComplete = false
+		}
+	}
+	if ctx.hasRegionalBilling && ctx.regionalRDS >= 0 && summary.RDSBackupEstimatedMonthlyRunRateUSD > 0 && rdsComplete {
+		ctx.rdsCEScale = ctx.regionalRDS / summary.RDSBackupEstimatedMonthlyRunRateUSD
+		ctx.rdsAttributed = true
 	}
 	return ctx
 }
@@ -269,7 +290,7 @@ func buildSnapshotSummaryLines(summary snapshot.Summary, ctx snapshotCostContext
 
 	switch summaryListedCostBasis(summary, ctx) {
 	case snapshotListedCostAttributed:
-		if listedCost > 0 {
+		if listedCost > 0 || (listedCost == 0 && summary.TotalCount > 0) {
 			lines = append(lines, snapshotSummaryLine{
 				label:     fmt.Sprintf("Attributed cost (listed snapshots, %s)", period),
 				value:     format.FormatMoney(listedCost, "USD"),
@@ -277,7 +298,7 @@ func buildSnapshotSummaryLines(summary snapshot.Summary, ctx snapshotCostContext
 			})
 		}
 	case snapshotListedCostMixed:
-		if listedCost > 0 {
+		if listedCost > 0 || (listedCost == 0 && summary.TotalCount > 0) {
 			lines = append(lines, snapshotSummaryLine{
 				label:     fmt.Sprintf("Cost (listed snapshots, %s)", period),
 				value:     format.FormatMoney(listedCost, "USD"),
@@ -294,20 +315,40 @@ func buildSnapshotSummaryLines(summary snapshot.Summary, ctx snapshotCostContext
 		}
 	}
 
-	if ctx.billedEBS > 0 {
+	if len(summary.BilledCosts) > 0 {
 		lines = append(lines, snapshotSummaryLine{
 			label: fmt.Sprintf("Billed EBS snapshot storage (account-wide, %s)", period),
 			value: format.FormatMoney(ctx.billedEBS, "USD"),
 		})
 	}
-	if ctx.billedRDS > 0 {
+	if len(summary.BilledCosts) > 0 {
 		lines = append(lines, snapshotSummaryLine{
 			label: fmt.Sprintf("Billed RDS backup storage (account-wide, %s)", period),
 			value: format.FormatMoney(ctx.billedRDS, "USD"),
 		})
 	}
+	if ctx.hasRegionalBilling {
+		lines = append(lines,
+			snapshotSummaryLine{
+				label: fmt.Sprintf("Billed EBS snapshot storage (scanned regions, %s)", period),
+				value: regionalSnapshotCostComparison(ctx.regionalEBS, ctx.billedEBS),
+			},
+			snapshotSummaryLine{
+				label: fmt.Sprintf("Billed RDS backup storage (scanned regions, %s)", period),
+				value: regionalSnapshotCostComparison(ctx.regionalRDS, ctx.billedRDS),
+			},
+		)
+	}
 
 	return lines
+}
+
+func regionalSnapshotCostComparison(regional, accountWide float64) string {
+	value := format.FormatMoney(regional, "USD")
+	if accountWide > 0 {
+		value += fmt.Sprintf(" (%.1f%% of account-wide)", 100*regional/accountWide)
+	}
+	return value
 }
 
 type snapshotListedCostBasis int
@@ -321,9 +362,9 @@ const (
 func snapshotKindUsesCEScale(kind snapshot.Kind, ctx snapshotCostContext) bool {
 	switch kind {
 	case snapshot.KindEBSSnapshot:
-		return ctx.ebsCEScale > 0
+		return ctx.ebsAttributed
 	case snapshot.KindRDSSnapshot, snapshot.KindRDSClusterSnapshot:
-		return ctx.rdsCEScale > 0
+		return ctx.rdsAttributed
 	default:
 		return false
 	}
@@ -358,7 +399,7 @@ func summaryListedCostBasis(summary snapshot.Summary, ctx snapshotCostContext) s
 			return snapshotListedCostEstimated
 		}
 	}
-	if ctx.billedEBS > 0 && ctx.ebsCEScale > 0 && summary.RDSBackupEstimatedMonthlyRunRateUSD == 0 && summary.RDSBackupRegionalExcessGiB == 0 {
+	if ctx.ebsAttributed && summary.RDSBackupEstimatedMonthlyRunRateUSD == 0 && summary.RDSBackupRegionalExcessGiB == 0 {
 		return snapshotListedCostAttributed
 	}
 	return snapshotListedCostEstimated
@@ -387,16 +428,14 @@ func snapshotRecordCostBasis(records []snapshot.Record, ctx snapshotCostContext)
 }
 
 func listedSnapshotCostUSD(summary snapshot.Summary, ctx snapshotCostContext) float64 {
-	if ctx.billedEBS > 0 || ctx.billedRDS > 0 {
+	if len(summary.ByKind) > 0 {
 		var total float64
 		for _, ks := range summary.ByKind {
 			total += scaleSnapshotCost(ks.EstimatedMonthlyCostUSD, ks.Kind, ctx)
 		}
-		if total > 0 {
-			return total
-		}
+		return total
 	}
-	if ctx.billedEBS > 0 && ctx.ebsCEScale > 0 && summary.RDSBackupEstimatedMonthlyRunRateUSD == 0 && summary.RDSBackupRegionalExcessGiB == 0 {
+	if ctx.ebsAttributed && summary.RDSBackupEstimatedMonthlyRunRateUSD == 0 && summary.RDSBackupRegionalExcessGiB == 0 {
 		return summary.EstimatedMonthlyCostUSD * ctx.ebsCEScale
 	}
 	return summary.EstimatedMonthlyCostUSD
@@ -431,10 +470,8 @@ func snapshotMonthlyCostColumnHeader(records []snapshot.Record, ctx snapshotCost
 
 func snapshotRecordMonthlyCost(rec snapshot.Record, ctx snapshotCostContext) string {
 	cost := scaleSnapshotCost(rec.EstimatedMonthlyCostUSD, rec.Kind, ctx)
-	if rec.Kind == snapshot.KindEBSSnapshot {
-		if cost <= 0 {
-			return "—"
-		}
+	if rec.Kind == snapshot.KindEBSSnapshot && rec.EstimatedMonthlyCostUSD <= 0 {
+		return "—"
 	}
 	return format.FormatMoney(cost, "USD")
 }
@@ -450,14 +487,14 @@ func scaleSnapshotCost(apiCost float64, kind snapshot.Kind, ctx snapshotCostCont
 }
 
 func scaleRDSCost(apiCost float64, kind snapshot.Kind, ctx snapshotCostContext) float64 {
-	if (kind != snapshot.KindRDSSnapshot && kind != snapshot.KindRDSClusterSnapshot) || apiCost <= 0 || ctx.rdsCEScale <= 0 {
+	if (kind != snapshot.KindRDSSnapshot && kind != snapshot.KindRDSClusterSnapshot) || apiCost <= 0 || !ctx.rdsAttributed {
 		return apiCost
 	}
 	return apiCost * ctx.rdsCEScale
 }
 
 func scaleEBSCost(apiCost float64, kind snapshot.Kind, ctx snapshotCostContext) float64 {
-	if kind != snapshot.KindEBSSnapshot || apiCost <= 0 || ctx.ebsCEScale <= 0 {
+	if kind != snapshot.KindEBSSnapshot || apiCost <= 0 || !ctx.ebsAttributed {
 		return apiCost
 	}
 	return apiCost * ctx.ebsCEScale

@@ -63,6 +63,11 @@ func writeAccountDetailsCSVAccount(cw *csv.Writer, d accountreview.AccountDetail
 			return err
 		}
 	}
+	for _, region := range d.ExcludedRegions {
+		if err := cw.Write(accountDetailsCSVRow(d, accountreview.SectionExcludedRegion, region, "", "", "", "", "", "", "", "")); err != nil {
+			return err
+		}
+	}
 	mc := d.MonthlyCosts
 	if mc.Error != "" {
 		if err := cw.Write(accountDetailsCSVRow(d, accountreview.SectionMonth, "", "", mc.Error, "", "", "", "", "", mc.Currency)); err != nil {
@@ -139,7 +144,7 @@ func writeAccountDetailsCSVAccount(cw *csv.Writer, d accountreview.AccountDetail
 // csvInventoryCounts omits zeros when the scan was incomplete so CSV consumers
 // cannot treat missing regions as confirmed-empty inventory.
 func csvInventoryCounts(d accountreview.AccountDetails) []accountreview.ResourceCount {
-	if strings.TrimSpace(d.InventoryError) != "" {
+	if strings.TrimSpace(d.InventoryError) != "" || len(d.ExcludedRegions) > 0 {
 		return d.NonzeroInventoryCounts()
 	}
 	return d.InventoryCounts()

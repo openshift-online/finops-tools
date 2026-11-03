@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/smithy-go"
+	"github.com/openshift-online/finops-tools/core/awsregions"
 	"github.com/openshift-online/finops-tools/core/parallel"
 )
 
@@ -29,11 +30,10 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 
 	now := q.Now.UTC()
 	serviceSet := serviceSet(q.Services)
-	if _, cache := serviceSet[ServiceElastiCache]; cache {
-		if err := q.HealthLifecycleCatalog.preload(ctx, q); err != nil {
-			return Result{}, err
-		}
-	} else if _, search := serviceSet[ServiceOpenSearch]; search {
+	_, cache := serviceSet[ServiceElastiCache]
+	_, search := serviceSet[ServiceOpenSearch]
+	needsHealthCatalog := cache || search
+	if needsHealthCatalog {
 		if err := q.HealthLifecycleCatalog.preload(ctx, q); err != nil {
 			return Result{}, err
 		}
@@ -94,9 +94,8 @@ func Fetch(ctx context.Context, q Query) (Result, error) {
 	}
 
 	result := buildResult(records, warnings, unclassified, skippedAccounts, now)
-	if _, cache := serviceSet[ServiceElastiCache]; cache {
-		result.Summary.LifecycleWarnings = q.HealthLifecycleCatalog.warnings()
-	} else if _, search := serviceSet[ServiceOpenSearch]; search {
+	result.Summary.ExcludedRegions = awsregions.Normalize(q.SkipRegions)
+	if needsHealthCatalog {
 		result.Summary.LifecycleWarnings = q.HealthLifecycleCatalog.warnings()
 	}
 	return result, nil
@@ -207,6 +206,10 @@ func scanAccountRegions(
 		return regionScanResult{}, skip, nil
 	}
 
+	// The current implementation treats regional deadline errors as warnings, preserving findings from completed regions.
+	// parallel.ForEach is an option, but could make an expired parent deadline abort the operation and discard those partial results...
+	// because the helper propagates context errors while waiting for a worker slot.
+	regions = awsregions.Exclude(regions, q.SkipRegions)
 	sem := make(chan struct{}, defaultRegionConcurrency)
 	var (
 		wg      sync.WaitGroup

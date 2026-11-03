@@ -19,6 +19,7 @@ const (
 	SectionMonth          = "month"
 	SectionTopService     = "top_service"
 	SectionInventoryError = "inventory_error"
+	SectionExcludedRegion = "excluded_region"
 	SectionEC2            = "ec2"
 	SectionRDS            = "rds"
 	SectionRDSCluster     = "rds_cluster"
@@ -57,6 +58,7 @@ type AccountDetails struct {
 	OpenShiftClusters      []OpenShiftClusterDetail `json:"openshift_clusters,omitempty"`
 	ResourceCounts         ResourceCounts           `json:"resource_counts"`
 	InventoryError         string                   `json:"inventory_error,omitempty"`
+	ExcludedRegions        []string                 `json:"excluded_regions,omitempty"`
 	OpenShiftClustersError string                   `json:"openshift_clusters_error,omitempty"`
 	GeneratedAt            time.Time                `json:"generated_at"`
 }
@@ -171,6 +173,7 @@ func DetailsFrom(r AccountReport) AccountDetails {
 			VPCs:             len(inv.VPCs),
 		},
 		InventoryError:         r.InventoryError,
+		ExcludedRegions:        append([]string(nil), inv.ExcludedRegions...),
 		OpenShiftClustersError: r.OpenShiftClustersError,
 		GeneratedAt:            r.GeneratedAt,
 	}
@@ -342,9 +345,9 @@ func (d AccountDetails) NonzeroInventoryCounts() []ResourceCount {
 
 // EmptyInventoryTitles lists AWS resource types that were scanned and found empty,
 // in the same order as InventoryTables then InventoryCounts.
-// When InventoryError is set the scan was incomplete, so zeros are not confirmed empty.
+// Failures or intentional regional exclusions prevent account-wide empty claims.
 func (d AccountDetails) EmptyInventoryTitles() []string {
-	if strings.TrimSpace(d.InventoryError) != "" {
+	if strings.TrimSpace(d.InventoryError) != "" || len(d.ExcludedRegions) > 0 {
 		return nil
 	}
 	var titles []string
@@ -386,11 +389,19 @@ func (d AccountDetails) OpenShiftNoneFoundLine() string {
 	return NoneFoundInventoryPrefix + "OpenShift clusters"
 }
 
-// MarshalJSON omits zero resource_counts fields when InventoryError is set so
-// JSON consumers cannot treat an incomplete scan as confirmed-empty inventory.
+// InventoryScopeNote describes intentional exclusions without labeling them failures.
+func (d AccountDetails) InventoryScopeNote() string {
+	if len(d.ExcludedRegions) == 0 {
+		return ""
+	}
+	return "Excluded regions (regional inventory): " + strings.Join(d.ExcludedRegions, ", ") + ". S3 and Route53 inventory remains account-wide."
+}
+
+// MarshalJSON omits zero resource_counts fields for incomplete or region-limited
+// scans so JSON consumers cannot mistake missing resources for account-wide zeros.
 func (d AccountDetails) MarshalJSON() ([]byte, error) {
 	type detailsJSON AccountDetails
-	if strings.TrimSpace(d.InventoryError) == "" {
+	if strings.TrimSpace(d.InventoryError) == "" && len(d.ExcludedRegions) == 0 {
 		return json.Marshal(detailsJSON(d))
 	}
 	return json.Marshal(struct {

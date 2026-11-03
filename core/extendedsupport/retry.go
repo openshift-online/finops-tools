@@ -82,6 +82,7 @@ func RetrySkippedAccounts(ctx context.Context, q Query, result Result) (Result, 
 		q.Now,
 	)
 	merged.Summary.BillingSelection = result.Summary.BillingSelection
+	merged.Summary.ExcludedRegions = retry.Summary.ExcludedRegions
 	merged.Summary.LifecycleWarnings = retry.Summary.LifecycleWarnings
 	return merged, nil
 }

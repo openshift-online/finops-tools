@@ -68,6 +68,13 @@ func sanitizeAccountDetailsForTTY(d accountreview.AccountDetails) accountreview.
 	d.OwnerEmail = SanitizeTerminal(d.OwnerEmail)
 	d.OwnerError = SanitizeTerminal(d.OwnerError)
 	d.InventoryError = SanitizeTerminal(d.InventoryError)
+	if len(d.ExcludedRegions) > 0 {
+		regions := make([]string, len(d.ExcludedRegions))
+		for i, region := range d.ExcludedRegions {
+			regions[i] = SanitizeTerminal(region)
+		}
+		d.ExcludedRegions = regions
+	}
 	d.OpenShiftClustersError = SanitizeTerminal(d.OpenShiftClustersError)
 	d.MonthlyCosts = sanitizeMonthlyCostsForTTY(d.MonthlyCosts)
 	if n := len(d.Tags); n > 0 {

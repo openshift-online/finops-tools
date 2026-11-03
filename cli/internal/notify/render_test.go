@@ -10,6 +10,16 @@ import (
 	"github.com/openshift-online/finops-tools/core/inventory"
 )
 
+func TestAccountEmailExplainsRegionalExclusions(t *testing.T) {
+	details := accountreview.AccountDetails{AccountID: "111111111111", ExcludedRegions: []string{"us-west-2"}}
+	msg := RenderAccountEmail(details, RenderOptions{})
+	for _, body := range []string{msg.TextBody, msg.HTMLBody} {
+		if !strings.Contains(body, "Excluded regions (regional inventory): us-west-2") || !strings.Contains(body, "S3 and Route53 inventory remains account-wide") || strings.Contains(body, "None found (scanned)") || strings.Contains(body, incompleteInventoryNote) {
+			t.Fatal(body)
+		}
+	}
+}
+
 func TestRenderAccountEmail(t *testing.T) {
 	msg := RenderAccountEmail(accountreview.DetailsFrom(accountreview.AccountReport{
 		AccountID:   "111111111111",

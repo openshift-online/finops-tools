@@ -2,7 +2,9 @@ package output
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -169,19 +171,46 @@ func TestWriteExtendedSupportEndOfLifeWithoutSupportDates(t *testing.T) {
 }
 
 func TestWriteExtendedSupportListResultCSV(t *testing.T) {
-	buf := new(bytes.Buffer)
-	if err := WriteExtendedSupportListResult(buf, FormatCSV, fixtureExtendedSupportResult()); err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(lines))
-	}
-	if !strings.Contains(lines[0], "standard_support_end_date") {
-		t.Fatalf("header = %q", lines[0])
-	}
-	if !strings.Contains(lines[1], "db-old") || !strings.Contains(lines[1], "2026-12-31") {
-		t.Fatalf("row = %q", lines[1])
+	endOfLife := time.Date(2027, 10, 22, 12, 30, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name      string
+		endOfLife *time.Time
+		wantDate  string
+	}{
+		{name: "end of life unavailable"},
+		{name: "end of life available", endOfLife: &endOfLife, wantDate: "2027-10-22"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := fixtureExtendedSupportResult()
+			result.Records[0].EndOfLifeDate = tc.endOfLife
+			var buf bytes.Buffer
+			if err := WriteExtendedSupportListResult(&buf, FormatCSV, result); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := csv.NewReader(&buf).ReadAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 2 {
+				t.Fatalf("rows = %d, want 2", len(rows))
+			}
+			wantHeader := []string{
+				"account_id", "region", "service", "resource_type", "resource_id",
+				"engine", "engine_version", "major_engine_version",
+				"standard_support_end_date", "extended_support_end_date", "end_of_life_date", "engine_lifecycle_support",
+			}
+			if !slices.Equal(rows[0], wantHeader) {
+				t.Fatalf("header = %q, want %q", rows[0], wantHeader)
+			}
+			wantRow := []string{
+				"111111111111", "us-east-1", "rds", "rds-instance", "db-old",
+				"postgres", "15.4", "15", "2026-01-01", "2026-12-31", tc.wantDate,
+				"open-source-rds-extended-support",
+			}
+			if !slices.Equal(rows[1], wantRow) {
+				t.Fatalf("row = %q, want %q", rows[1], wantRow)
+			}
+		})
 	}
 }
 

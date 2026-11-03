@@ -23,11 +23,20 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenListedIsMostOfAccount(t *te
 				EBSSnapshotUSD: 4798.21,
 			},
 		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{
+				Period: snapshot.BilledSnapshotPeriod{
+					StartDate: "2026-05-01",
+					EndDate:   "2026-05-31",
+				},
+				EBSSnapshotUSD: 4798.21,
+			},
+		},
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
 
-	if len(lines) != 3 {
-		t.Fatalf("lines = %d, want count + attributed + account-wide billed", len(lines))
+	if len(lines) != 6 {
+		t.Fatalf("lines = %d, want count + attributed + account-wide and regional billed", len(lines))
 	}
 	if lines[1].label != "Attributed cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
@@ -55,10 +64,16 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenPartial(t *testing.T) {
 				EBSSnapshotUSD: 5000,
 			},
 		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{
+				Period:         snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+				EBSSnapshotUSD: 5000,
+			},
+		},
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
-	if len(lines) != 3 {
-		t.Fatalf("lines = %d, want 3", len(lines))
+	if len(lines) != 6 {
+		t.Fatalf("lines = %d, want 6", len(lines))
 	}
 	if lines[1].label != "Attributed cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
@@ -76,6 +91,7 @@ func TestBuildSnapshotSummaryLinesShowsAttributedWhenPartial(t *testing.T) {
 
 func TestBuildSnapshotSummaryLinesShowsNeutralLabelWhenMixed(t *testing.T) {
 	summary := snapshot.Summary{
+		ScanScopes:                          []snapshot.AccountScanScope{{RDSCostEstimationIncomplete: true}},
 		EstimatedMonthlyCostUSD:             700,
 		EBSEstimatedMonthlyRunRateUSD:       500,
 		RDSBackupEstimatedMonthlyRunRateUSD: 200,
@@ -88,14 +104,21 @@ func TestBuildSnapshotSummaryLinesShowsNeutralLabelWhenMixed(t *testing.T) {
 				RDSBackupUSD:   0,
 			},
 		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{
+				Period:         snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+				EBSSnapshotUSD: 5000,
+				RDSBackupUSD:   0,
+			},
+		},
 		ByKind: []snapshot.KindSummary{
 			{Kind: snapshot.KindEBSSnapshot, Count: 5, EstimatedMonthlyCostUSD: 500},
 			{Kind: snapshot.KindRDSSnapshot, Count: 5, EstimatedMonthlyCostUSD: 200},
 		},
 	}
 	lines := buildSnapshotSummaryLines(summary, newSnapshotCostContext(summary))
-	if len(lines) != 3 {
-		t.Fatalf("lines = %d, want 3", len(lines))
+	if len(lines) != 6 {
+		t.Fatalf("lines = %d, want 6", len(lines))
 	}
 	if lines[1].label != "Cost (listed snapshots, May 2026)" {
 		t.Fatalf("label = %q", lines[1].label)
@@ -117,6 +140,9 @@ func TestSnapshotKindCostSuffixReflectsScale(t *testing.T) {
 		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
 			{EBSSnapshotUSD: 50},
 		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{EBSSnapshotUSD: 50},
+		},
 	})
 	if got := snapshotKindCostSuffix(snapshot.KindEBSSnapshot, ctx); got != "attributed" {
 		t.Fatalf("EBS suffix = %q", got)
@@ -130,6 +156,9 @@ func TestSnapshotMonthlyCostColumnHeaderMixed(t *testing.T) {
 	ctx := newSnapshotCostContext(snapshot.Summary{
 		EBSEstimatedMonthlyRunRateUSD: 100,
 		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{EBSSnapshotUSD: 50},
+		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
 			{EBSSnapshotUSD: 50},
 		},
 	})
@@ -171,6 +200,9 @@ func TestSnapshotRecordMonthlyCostUsesDashForZeroIncremental(t *testing.T) {
 		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
 			{EBSSnapshotUSD: 500},
 		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{EBSSnapshotUSD: 500},
+		},
 	})
 	got := snapshotRecordMonthlyCost(snapshot.Record{
 		Kind:                    snapshot.KindEBSSnapshot,
@@ -185,6 +217,9 @@ func TestScaleRDSCostUsesBilledRunRate(t *testing.T) {
 	summary := snapshot.Summary{
 		RDSBackupEstimatedMonthlyRunRateUSD: 342,
 		BilledCosts: []snapshot.AccountBilledSnapshotCosts{
+			{RDSBackupUSD: 0.77},
+		},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
 			{RDSBackupUSD: 0.77},
 		},
 	}
@@ -211,6 +246,12 @@ func TestWriteSnapshotByTypeScalesRDSWithCE(t *testing.T) {
 					RDSBackupUSD: 0.77,
 				},
 			},
+			RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{
+				{
+					Period:       snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+					RDSBackupUSD: 0.77,
+				},
+			},
 			ByKind: []snapshot.KindSummary{
 				{Kind: snapshot.KindRDSSnapshot, Count: 6, EstimatedMonthlyCostUSD: 342},
 			},
@@ -225,5 +266,110 @@ func TestWriteSnapshotByTypeScalesRDSWithCE(t *testing.T) {
 	}
 	if strings.Contains(out, "USD 342.00") {
 		t.Fatalf("output still shows unscaled RDS estimate:\n%s", out)
+	}
+}
+
+func TestSnapshotCostsUseRegionalBillingAndCompareAccountWideTotals(t *testing.T) {
+	summary := snapshot.Summary{
+		TotalCount: 2, OlderThanDays: 365, EstimatedMonthlyCostUSD: 60,
+		EBSEstimatedMonthlyRunRateUSD: 100, RDSBackupEstimatedMonthlyRunRateUSD: 100,
+		BilledCosts: []snapshot.AccountBilledSnapshotCosts{{
+			AccountID: "111111111111", Period: snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+			EBSSnapshotUSD: 1000, RDSBackupUSD: 500,
+		}},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{{
+			AccountID: "111111111111", Period: snapshot.BilledSnapshotPeriod{StartDate: "2026-05-01"},
+			EBSSnapshotUSD: 100, RDSBackupUSD: 50,
+		}},
+		ByKind: []snapshot.KindSummary{
+			{Kind: snapshot.KindEBSSnapshot, Count: 1, EstimatedMonthlyCostUSD: 20},
+			{Kind: snapshot.KindRDSSnapshot, Count: 1, EstimatedMonthlyCostUSD: 40},
+		},
+	}
+	records := []snapshot.Record{
+		{AccountID: "111111111111", Region: "us-east-1", Kind: snapshot.KindEBSSnapshot, ResourceID: "snap-ebs", EstimatedMonthlyCostUSD: 20},
+		{AccountID: "111111111111", Region: "us-east-1", Kind: snapshot.KindRDSSnapshot, ResourceID: "snap-rds", EstimatedMonthlyCostUSD: 40},
+	}
+	ctx := newSnapshotCostContext(summary)
+	for _, rec := range records {
+		if got := snapshotRecordMonthlyCost(rec, ctx); got != "USD 20.00" {
+			t.Fatalf("%s attributed cost = %s, want regional share USD 20.00", rec.Kind, got)
+		}
+	}
+	lines := buildSnapshotSummaryLines(summary, ctx)
+	want := map[string]string{
+		"Attributed cost (listed snapshots, May 2026)":            "USD 40.00",
+		"Billed EBS snapshot storage (account-wide, May 2026)":    "USD 1,000.00",
+		"Billed RDS backup storage (account-wide, May 2026)":      "USD 500.00",
+		"Billed EBS snapshot storage (scanned regions, May 2026)": "USD 100.00 (10.0% of account-wide)",
+		"Billed RDS backup storage (scanned regions, May 2026)":   "USD 50.00 (10.0% of account-wide)",
+	}
+	for _, line := range lines {
+		if value, ok := want[line.label]; ok {
+			if line.value != value {
+				t.Fatalf("%s = %s, want %s", line.label, line.value, value)
+			}
+			delete(want, line.label)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing cost comparison lines: %v", want)
+	}
+	var buf bytes.Buffer
+	if err := WriteSnapshotListResult(&buf, FormatPrettyPrint, snapshot.Result{Summary: summary, Records: records}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(buf.String(), "USD 20.00 attributed") != 2 || !strings.Contains(buf.String(), "snap-ebs") || strings.Contains(buf.String(), "USD 200.00") {
+		t.Fatalf("per-type and detail costs must use regional billing: %s", buf.String())
+	}
+}
+
+func TestSnapshotAttributionRequiresRegionalBilling(t *testing.T) {
+	summary := snapshot.Summary{
+		EstimatedMonthlyCostUSD: 20, EBSEstimatedMonthlyRunRateUSD: 100,
+		BilledCosts: []snapshot.AccountBilledSnapshotCosts{{EBSSnapshotUSD: 1000}},
+	}
+	ctx := newSnapshotCostContext(summary)
+	if ctx.ebsAttributed || listedSnapshotCostUSD(summary, ctx) != 20 || scaleEBSCost(20, snapshot.KindEBSSnapshot, ctx) != 20 {
+		t.Fatalf("account-wide billing must not replace unavailable regional billing: %+v", ctx)
+	}
+}
+
+func TestZeroRegionalBillDoesNotFallBackToEstimates(t *testing.T) {
+	summary := snapshot.Summary{
+		TotalCount:              2,
+		EstimatedMonthlyCostUSD: 60, EBSEstimatedMonthlyRunRateUSD: 100, RDSBackupEstimatedMonthlyRunRateUSD: 100,
+		BilledCosts:         []snapshot.AccountBilledSnapshotCosts{{EBSSnapshotUSD: 1000, RDSBackupUSD: 500}},
+		RegionalBilledCosts: []snapshot.AccountBilledSnapshotCosts{{}},
+		ByKind: []snapshot.KindSummary{
+			{Kind: snapshot.KindEBSSnapshot, EstimatedMonthlyCostUSD: 20},
+			{Kind: snapshot.KindRDSSnapshot, EstimatedMonthlyCostUSD: 40},
+		},
+	}
+	ctx := newSnapshotCostContext(summary)
+	if !ctx.ebsAttributed || !ctx.rdsAttributed || listedSnapshotCostUSD(summary, ctx) != 0 || scaleEBSCost(20, snapshot.KindEBSSnapshot, ctx) != 0 || scaleRDSCost(40, snapshot.KindRDSSnapshot, ctx) != 0 {
+		t.Fatalf("confirmed zero regional spending must stay zero: %+v", ctx)
+	}
+	if got := regionalSnapshotCostComparison(ctx.regionalEBS, ctx.billedEBS); got != "USD 0.00 (0.0% of account-wide)" {
+		t.Fatal(got)
+	}
+	if got := snapshotRecordMonthlyCost(snapshot.Record{Kind: snapshot.KindEBSSnapshot, EstimatedMonthlyCostUSD: 20}, ctx); got != "USD 0.00" {
+		t.Fatalf("zero billed cost should not claim there are no incremental blocks: %s", got)
+	}
+	lines := buildSnapshotSummaryLines(summary, ctx)
+	if !strings.HasPrefix(lines[1].label, "Attributed cost") || lines[1].value != "USD 0.00" {
+		t.Fatalf("zero attribution should remain visible: %+v", lines)
+	}
+}
+
+func TestIncompleteRDSRunRateRetainsEstimates(t *testing.T) {
+	summary := snapshot.Summary{
+		RDSBackupEstimatedMonthlyRunRateUSD: 100,
+		RegionalBilledCosts:                 []snapshot.AccountBilledSnapshotCosts{{RDSBackupUSD: 1000}},
+		ScanScopes:                          []snapshot.AccountScanScope{{RDSCostEstimationIncomplete: true}},
+	}
+	ctx := newSnapshotCostContext(summary)
+	if ctx.rdsAttributed || scaleRDSCost(20, snapshot.KindRDSSnapshot, ctx) != 20 {
+		t.Fatalf("incomplete RDS denominator must not scale estimates: %+v", ctx)
 	}
 }

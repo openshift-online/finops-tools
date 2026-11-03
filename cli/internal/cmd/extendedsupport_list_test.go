@@ -197,6 +197,9 @@ func TestExtendedSupportListPreRunRejectsInvalidWorkers(t *testing.T) {
 }
 
 func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
+	prevSkip := extendedSupportListSkipRegions
+	extendedSupportListSkipRegions = []string{" us-west-2 ", "us-west-2"}
+	t.Cleanup(func() { extendedSupportListSkipRegions = prevSkip })
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
@@ -219,6 +222,9 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 		}
 		if len(q.Services) != 1 || q.Services[0] != extendedsupport.ServiceRDS {
 			t.Fatalf("services = %#v", q.Services)
+		}
+		if !reflect.DeepEqual(q.SkipRegions, []string{"us-west-2"}) {
+			t.Fatalf("skip regions = %v", q.SkipRegions)
 		}
 		return extendedsupport.Result{
 			Records: []extendedsupport.Record{{
@@ -284,6 +290,9 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 }
 
 func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
+	prevSkip := extendedSupportListSkipRegions
+	extendedSupportListSkipRegions = []string{"us-west-2"}
+	t.Cleanup(func() { extendedSupportListSkipRegions = prevSkip })
 	for _, tc := range []struct {
 		name                                                            string
 		services                                                        string
@@ -391,6 +400,9 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			retryFailure := errors.New("retry canceled")
 			extendedSupportListRetry = func(_ context.Context, q extendedsupport.Query, result extendedsupport.Result) (extendedsupport.Result, error) {
 				retryCalls++
+				if !reflect.DeepEqual(q.SkipRegions, []string{"us-west-2"}) {
+					t.Fatalf("retry skip regions = %v", q.SkipRegions)
+				}
 				wantTargets := 2
 				if tc.allSkipped {
 					wantTargets = 3

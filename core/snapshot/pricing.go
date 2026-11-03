@@ -28,6 +28,8 @@ func EstimateMonthlyCost(kind Kind, sizeGiB float64, storageTier, _ string) floa
 
 // RDSRegionContext holds regional inputs for RDS backup free-tier pricing.
 type RDSRegionContext struct {
+	// Unavailable marks a failed context lookup; its snapshots retain API estimates.
+	Unavailable       bool
 	FreePoolGiB       float64
 	TotalBackupGiB    float64
 	BillableBackupGiB float64
