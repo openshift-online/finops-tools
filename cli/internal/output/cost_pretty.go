@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	barWidth       = 24
-	maxServiceLen  = 44
+	barWidth             = 24
+	maxServiceLen        = 44
+	maxPrettyAccountList = 50
 )
 
 func writePrettyPrint(w io.Writer, r cost.CostResult) error {
@@ -171,13 +172,47 @@ func formatAccountList(names, ids string) string {
 	nameParts := strings.Split(names, ", ")
 	idParts := strings.Split(ids, ", ")
 	if len(nameParts) != len(idParts) {
+		// Account IDs do not contain the ", " separator, so they stay a reliable
+		// count when an account name itself contains ", ".
+		return formatUnpairedAccountList(names, ids, idParts)
+	}
+	return formatPairedAccountList(nameParts, idParts)
+}
+
+func formatPairedAccountList(nameParts, idParts []string) string {
+	shown := len(nameParts)
+	extra := 0
+	if shown > maxPrettyAccountList {
+		extra = shown - maxPrettyAccountList
+		shown = maxPrettyAccountList
+	}
+	parts := make([]string, shown)
+	for i := 0; i < shown; i++ {
+		parts[i] = fmt.Sprintf("%s (%s)", strings.TrimSpace(nameParts[i]), strings.TrimSpace(idParts[i]))
+	}
+	return strings.Join(parts, ", ") + accountListRemainder(extra)
+}
+
+func formatUnpairedAccountList(names, ids string, idParts []string) string {
+	if strings.TrimSpace(ids) == "" || len(idParts) <= maxPrettyAccountList {
 		return fmt.Sprintf("%s (%s)", names, ids)
 	}
-	var parts []string
-	for i := range nameParts {
-		parts = append(parts, fmt.Sprintf("%s (%s)", strings.TrimSpace(nameParts[i]), strings.TrimSpace(idParts[i])))
+	shown := make([]string, maxPrettyAccountList)
+	for i := 0; i < maxPrettyAccountList; i++ {
+		shown[i] = strings.TrimSpace(idParts[i])
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(shown, ", ") + accountListRemainder(len(idParts)-maxPrettyAccountList)
+}
+
+func accountListRemainder(extra int) string {
+	if extra == 0 {
+		return ""
+	}
+	noun := "accounts"
+	if extra == 1 {
+		noun = "account"
+	}
+	return fmt.Sprintf(" + %d %s", extra, noun)
 }
 
 func cell(s styler, fn func(string) string, text string) string {
