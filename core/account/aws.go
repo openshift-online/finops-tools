@@ -30,6 +30,15 @@ func SetAccountTags(ctx context.Context, cfg aws.Config, accountID string, tags 
 	return setAccountTagsWithClient(ctx, newOrganizationsClient(cfg), accountID, tags)
 }
 
+// SetAccountTagsAfterTransfer is SetAccountTags with retries on TargetNotFoundException.
+// Use after an account joins a destination organization, when TagResource can race with
+// Organizations eventual consistency.
+func SetAccountTagsAfterTransfer(ctx context.Context, cfg aws.Config, accountID string, tags []Tag) error {
+	return retryOnTargetNotFound(ctx, defaultTargetNotFoundRetries, func() error {
+		return SetAccountTags(ctx, cfg, accountID, tags)
+	})
+}
+
 func listTagsWithClient(ctx context.Context, client OrganizationsAPI, accountID string) ([]Tag, error) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {

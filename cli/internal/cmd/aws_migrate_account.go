@@ -31,7 +31,7 @@ var (
 	migrateAccountUpdateTrust        = coreaccount.UpdateLinkedRoleTrust
 	migrateAccountMove               = coreaccount.MoveAccountToParent
 	migrateAccountListTags           = coreaccount.ListTags
-	migrateAccountSetTags            = coreaccount.SetAccountTags
+	migrateAccountSetTags            = coreaccount.SetAccountTagsAfterTransfer
 	migrateAccountUpdateConfig       = configstore.UpdateLinkedAccountPayer
 	migrateAccountInvalidateOrgCache = invalidateOrgCacheForPayer
 
@@ -322,6 +322,8 @@ func migrateOneAccount(
 
 	// Restore tags immediately after acceptance so a later trust/OU failure
 	// does not leave the transferred account without its Organizations tags.
+	// migrateAccountSetTags retries TargetNotFoundException for Organizations
+	// eventual consistency after the account joins the destination org.
 	if len(preservedTags) > 0 {
 		if err := migrateAccountSetTags(awsCtx, toCfg, accountID, preservedTags); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
