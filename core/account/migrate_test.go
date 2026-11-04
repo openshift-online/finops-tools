@@ -86,6 +86,10 @@ func (f *fakeMigrateOrganizations) SetAccountTag(context.Context, string, string
 	return errors.New("not implemented")
 }
 
+func (f *fakeMigrateOrganizations) SetAccountTags(context.Context, string, []Tag) error {
+	return errors.New("not implemented")
+}
+
 func (f *fakeMigrateOrganizations) DescribeOrganization(
 	context.Context,
 	*organizations.DescribeOrganizationInput,

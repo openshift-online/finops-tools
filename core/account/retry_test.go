@@ -32,6 +32,18 @@ func TestIsThrottleError(t *testing.T) {
 	}
 }
 
+func TestIsTargetNotFoundError(t *testing.T) {
+	if !isTargetNotFoundError(throttleAPIError{code: "TargetNotFoundException"}) {
+		t.Fatal("expected target not found")
+	}
+	if isTargetNotFoundError(throttleAPIError{code: "AccessDeniedException"}) {
+		t.Fatal("expected non-retryable")
+	}
+	if isTargetNotFoundError(errors.New("boom")) {
+		t.Fatal("expected non-api error")
+	}
+}
+
 func TestRetryOnThrottleEventuallySucceeds(t *testing.T) {
 	calls := 0
 	err := retryOnThrottle(context.Background(), 4, func() error {
@@ -72,5 +84,55 @@ func TestRetryOnThrottleNonThrottleFailsFast(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("calls = %d, want 1", calls)
+	}
+}
+
+func TestRetryOnTargetNotFoundEventuallySucceeds(t *testing.T) {
+	calls := 0
+	err := retryOnTargetNotFound(context.Background(), 4, func() error {
+		calls++
+		if calls < 3 {
+			return throttleAPIError{code: "TargetNotFoundException"}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("retryOnTargetNotFound() error = %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
+	}
+}
+
+func TestRetryOnTargetNotFoundNonRetryableFailsFast(t *testing.T) {
+	want := fmt.Errorf("access denied")
+	calls := 0
+	err := retryOnTargetNotFound(context.Background(), 4, func() error {
+		calls++
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("retryOnTargetNotFound() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+}
+
+func TestRetryOnTargetNotFoundExhaustsAttempts(t *testing.T) {
+	calls := 0
+	err := retryOnTargetNotFound(context.Background(), 3, func() error {
+		calls++
+		return throttleAPIError{code: "TargetNotFoundException"}
+	})
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "TargetNotFoundException" {
+		t.Fatalf("error = %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
 	}
 }

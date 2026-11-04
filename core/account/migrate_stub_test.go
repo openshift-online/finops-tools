@@ -50,3 +50,7 @@ func (organizationsMigrateStub) MoveAccount(
 ) (*organizations.MoveAccountOutput, error) {
 	return nil, errors.New("not implemented")
 }
+
+func (organizationsMigrateStub) SetAccountTags(context.Context, string, []Tag) error {
+	return errors.New("not implemented")
+}

@@ -3,7 +3,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,6 +30,8 @@ var (
 	migrateAccountAccept             = coreaccount.AcceptInviteHandshake
 	migrateAccountUpdateTrust        = coreaccount.UpdateLinkedRoleTrust
 	migrateAccountMove               = coreaccount.MoveAccountToParent
+	migrateAccountListTags           = coreaccount.ListTags
+	migrateAccountSetTags            = coreaccount.SetAccountTagsAfterTransfer
 	migrateAccountUpdateConfig       = configstore.UpdateLinkedAccountPayer
 	migrateAccountInvalidateOrgCache = invalidateOrgCacheForPayer
 
@@ -49,6 +54,10 @@ Uses AWS Organizations direct transfer (invite from destination management accou
 accept from the member account via role assumption from the source payer), then
 rewrites the linked role trust policy to the destination management account.
 
+Snapshots AWS Organizations account tags from the source payer before the transfer
+and restores them on the destination payer immediately after handshake acceptance
+(AWS deletes account tags when an account leaves an organization).
+
 Requires management-account admin on both payers and OrganizationAccountAccessRole
 (or --role) in the member account. SCPs or Control Tower may still block the transfer.
 
@@ -57,6 +66,10 @@ destination organization while the role still trusts the source management accou
 Assume the linked role from --from-payer (still valid) and retry the trust update;
 do not treat that state as a rollback to the source org. An optional --destination-ou
 move that fails after trust update can be retried from the destination payer.
+When Organizations tags are present, a recovery snapshot is written next to the finops
+config before invite/accept (migrate-tag-recovery/<account-id>.json, mode 0600) and
+removed after a successful restore. If restore fails (or the CLI exits mid-transfer),
+re-apply from that file with finops tag add using --payer for the destination.
 
 Examples:
   finops aws migrate-account --account-id 111111111111 --from-payer rh-control --to-payer osd-staging-1 --dry-run
@@ -233,6 +246,11 @@ func migrateOneAccount(
 		return fmt.Errorf("account %s is already a member of destination payer %s", accountID, toAlias)
 	}
 
+	preservedTags, err := migrateAccountListTags(awsCtx, fromCfg, accountID)
+	if err != nil {
+		return fmt.Errorf("list Organizations account tags on source payer %s: %w", fromAlias, err)
+	}
+
 	destOU := strings.TrimSpace(migrateAccountDestOU)
 	displayAccount := accountID
 	if accountAlias != "" && accountAlias != accountID {
@@ -247,7 +265,8 @@ func migrateOneAccount(
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  destination OU:   %s\n", destOU)
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake → update role trust (to-payer)")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", formatMigratePreserveTagsLine(preservedTags))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  steps:            invite (to-payer) → assume role (from-payer) → accept handshake → restore account tags → update role trust (to-payer)")
 	if destOU != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), " → move to OU")
 	}
@@ -256,6 +275,18 @@ func migrateOneAccount(
 	if migrateAccountDryRun {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry run complete; no changes made.")
 		return nil
+	}
+
+	// Persist the tag snapshot before invite/accept so a lost response mid-transfer
+	// (or a later restore/write failure) still leaves key/value pairs on disk.
+	var tagRecoveryPath string
+	if len(preservedTags) > 0 {
+		path, writeErr := writeMigrateTagRecoveryFile(configPath, accountID, toAlias, preservedTags)
+		if writeErr != nil {
+			return fmt.Errorf("write Organizations tag recovery snapshot before migrate: %w", writeErr)
+		}
+		tagRecoveryPath = path
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Saved Organizations tag recovery snapshot to %s\n", tagRecoveryPath)
 	}
 
 	invite, err := migrateAccountInvite(awsCtx, toCfg, accountID, strings.TrimSpace(migrateAccountNotes))
@@ -289,6 +320,28 @@ func migrateOneAccount(
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Accepted handshake %s (state %s)\n", accepted.HandshakeID, accepted.State)
 
+	// Restore tags immediately after acceptance so a later trust/OU failure
+	// does not leave the transferred account without its Organizations tags.
+	// migrateAccountSetTags retries TargetNotFoundException for Organizations
+	// eventual consistency after the account joins the destination org.
+	if len(preservedTags) > 0 {
+		if err := migrateAccountSetTags(awsCtx, toCfg, accountID, preservedTags); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+				"warning: AWS migrate succeeded but restoring Organizations account tags failed: %v\n"+
+					"  Keys on destination payer %s: %s\n"+
+					"  Tag key/value snapshot: %s\n"+
+					"  Re-apply with: finops tag add --account-id %s --payer %s --tag-key <key> --tag-value '<value>'\n",
+				err, toAlias, formatMigrateTagKeys(preservedTags), tagRecoveryPath, accountID, toAlias)
+		} else {
+			if removeErr := removeMigrateTagRecoveryFile(tagRecoveryPath); removeErr != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"warning: restored Organizations account tags but could not remove recovery snapshot %s: %v\n",
+					tagRecoveryPath, removeErr)
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored %d Organizations account tag(s)\n", len(preservedTags))
+		}
+	}
+
 	// Invited accounts keep the old management account in the role trust policy;
 	// rewrite it while the source-payer assume session is still valid.
 	if err := migrateAccountUpdateTrust(awsCtx, memberCfg, roleName, fromPayerID, toPayerID); err != nil {
@@ -313,6 +366,65 @@ func migrateOneAccount(
 	_ = migrateAccountInvalidateOrgCache(configPath, toPayerID)
 
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Migration complete.")
+	return nil
+}
+
+func formatMigratePreserveTagsLine(tags []coreaccount.Tag) string {
+	if len(tags) == 0 {
+		return "preserve tags:    0"
+	}
+	return fmt.Sprintf("preserve tags:    %d (%s)", len(tags), formatMigrateTagKeys(tags))
+}
+
+func formatMigrateTagKeys(tags []coreaccount.Tag) string {
+	keys := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		keys = append(keys, tag.Key)
+	}
+	return strings.Join(keys, ", ")
+}
+
+// migrateTagRecoveryFile is written before invite/accept so operators can re-apply
+// key/value pairs if restore fails or the CLI exits mid-transfer, without logging
+// values to stderr. It is removed after a successful restore.
+type migrateTagRecoveryFile struct {
+	AccountID string            `json:"account_id"`
+	Payer     string            `json:"payer"`
+	Tags      []coreaccount.Tag `json:"tags"`
+}
+
+func writeMigrateTagRecoveryFile(configPath, accountID, payerAlias string, tags []coreaccount.Tag) (string, error) {
+	dir := filepath.Join(filepath.Dir(configPath), "migrate-tag-recovery")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create migrate tag recovery dir: %w", err)
+	}
+	path := filepath.Join(dir, accountID+".json")
+	payload, err := json.MarshalIndent(migrateTagRecoveryFile{
+		AccountID: accountID,
+		Payer:     payerAlias,
+		Tags:      append([]coreaccount.Tag(nil), tags...),
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode migrate tag recovery: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
+		return "", fmt.Errorf("write migrate tag recovery: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("replace migrate tag recovery: %w", err)
+	}
+	return path, nil
+}
+
+func removeMigrateTagRecoveryFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
 

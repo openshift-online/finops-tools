@@ -284,16 +284,28 @@ type fakeOrganizationsTagMutator struct {
 	lastAccountID string
 	lastTagKey    string
 	lastTagValue  string
+	lastTags      []Tag
 	err           error
 }
 
 func (f *fakeOrganizationsTagMutator) SetAccountTag(
-	_ context.Context,
+	ctx context.Context,
 	accountID, tagKey, tagValue string,
 ) error {
+	return f.SetAccountTags(ctx, accountID, []Tag{{Key: tagKey, Value: tagValue}})
+}
+
+func (f *fakeOrganizationsTagMutator) SetAccountTags(
+	_ context.Context,
+	accountID string,
+	tags []Tag,
+) error {
 	f.lastAccountID = accountID
-	f.lastTagKey = tagKey
-	f.lastTagValue = tagValue
+	f.lastTags = append([]Tag(nil), tags...)
+	if len(tags) > 0 {
+		f.lastTagKey = tags[0].Key
+		f.lastTagValue = tags[0].Value
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -652,6 +664,31 @@ func TestSetAccountTagWithClient(t *testing.T) {
 	}
 }
 
+func TestSetAccountTagsWithClient(t *testing.T) {
+	client := &fakeOrganizationsTagMutator{}
+	tags := []Tag{
+		{Key: "owner", Value: "team-a"},
+		{Key: "organization", Value: "Hybrid Platform"},
+	}
+	err := setAccountTagsWithClient(context.Background(), client, "123456789012", tags)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := client.lastAccountID; got != "123456789012" {
+		t.Fatalf("resource id = %q", got)
+	}
+	if len(client.lastTags) != 2 {
+		t.Fatalf("lastTags len = %d, want 2", len(client.lastTags))
+	}
+	if client.lastTags[0] != tags[0] || client.lastTags[1] != tags[1] {
+		t.Fatalf("lastTags = %#v, want %#v", client.lastTags, tags)
+	}
+
+	if err := setAccountTagsWithClient(context.Background(), client, "123456789012", nil); err != nil {
+		t.Fatalf("empty tags should be no-op: %v", err)
+	}
+}
+
 func TestSetAccountTagWithClientValidationAndErrors(t *testing.T) {
 	client := &fakeOrganizationsTagMutator{}
 	for _, tc := range []struct {
@@ -661,8 +698,7 @@ func TestSetAccountTagWithClientValidationAndErrors(t *testing.T) {
 		tagValue  string
 	}{
 		{name: "missing account id", accountID: " ", tagKey: "owner", tagValue: "team-a"},
-		{name: "missing tag key", accountID: "123456789012", tagKey: " ", tagValue: "team-a"},
-		{name: "missing tag value", accountID: "123456789012", tagKey: "owner", tagValue: " "},
+		{name: "missing tag key", accountID: "123456789012", tagKey: "", tagValue: "team-a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := setAccountTagWithClient(context.Background(), client, tc.accountID, tc.tagKey, tc.tagValue); err == nil {
@@ -676,6 +712,27 @@ func TestSetAccountTagWithClientValidationAndErrors(t *testing.T) {
 	err := setAccountTagWithClient(context.Background(), client, "123456789012", "owner", "team-a")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected wrapped error %v, got %v", wantErr, err)
+	}
+}
+
+func TestSetAccountTagsWithClientTrimsKeysAndValues(t *testing.T) {
+	client := &fakeOrganizationsTagMutator{}
+	tags := []Tag{
+		{Key: " owner ", Value: ""},
+		{Key: "note", Value: " trailing "},
+	}
+	if err := setAccountTagsWithClient(context.Background(), client, "123456789012", tags); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []Tag{
+		{Key: "owner", Value: ""},
+		{Key: "note", Value: "trailing"},
+	}
+	if len(client.lastTags) != 2 {
+		t.Fatalf("lastTags len = %d, want 2", len(client.lastTags))
+	}
+	if client.lastTags[0] != want[0] || client.lastTags[1] != want[1] {
+		t.Fatalf("lastTags = %#v, want %#v", client.lastTags, want)
 	}
 }
 

@@ -22,6 +22,9 @@ Pass either --account-alias or --account-id.
 By default, the command fails when the tag key does not exist.
 Use --force to create the tag when it is missing.
 
+Tag keys and values are trimmed. Empty values are allowed after trimming
+(AWS Organizations permits them).
+
 Examples:
   finops tag update --account-alias rh-control --tag-key owner --tag-value team-b
   finops tag update --account-alias osd-tenant-1 --tag-key env --tag-value stage --force
@@ -47,7 +50,7 @@ var (
 func init() {
 	tagCmd.AddCommand(tagUpdateCmd)
 	tagUpdateCmd.Flags().StringVar(&accountUpdateTagKey, "tag-key", "", "Tag key")
-	tagUpdateCmd.Flags().StringVar(&accountUpdateTagValue, "tag-value", "", "Tag value")
+	tagUpdateCmd.Flags().StringVar(&accountUpdateTagValue, "tag-value", "", "Tag value (trimmed; empty allowed)")
 	tagUpdateCmd.Flags().BoolVar(&accountUpdateTagForce, "force", false, "Create the tag when the key does not already exist")
 	bindAWSAccountSelectorFlags(tagUpdateCmd, awsAccountSelectorFlagRefs{
 		Payer:     &accountUpdateTagPayer,
@@ -61,10 +64,13 @@ func runTagUpdate(cmd *cobra.Command, args []string) error {
 	if tagKey == "" {
 		return fmt.Errorf("tag key is required (--tag-key)")
 	}
-	tagValue := strings.TrimSpace(accountUpdateTagValue)
-	if tagValue == "" {
+	// Trim values (accidental whitespace is harmful). Require the flag so a
+	// missing --tag-value is still an error; empty after trim is allowed.
+	// Tests may set the package var directly without marking the flag changed.
+	if !cmd.Flags().Changed("tag-value") && accountUpdateTagValue == "" {
 		return fmt.Errorf("tag value is required (--tag-value)")
 	}
+	tagValue := strings.TrimSpace(accountUpdateTagValue)
 
 	configPath, err := configstore.ResolvePath(awsFlags.ConfigPath)
 	if err != nil {

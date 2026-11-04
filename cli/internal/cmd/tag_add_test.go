@@ -165,3 +165,102 @@ func TestRunAccountAddTagForceOnLinkedAliasUsesPayerCredentials(t *testing.T) {
 		t.Fatalf("unexpected output: %s", buf.String())
 	}
 }
+
+func TestRunAccountAddTagTrimsValuesAndAllowsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := configstore.RegisterAWSAccount(path, "123456789012", "rh-control"); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "empty", value: "", want: ""},
+		{name: "trimmed spaces", value: " padded ", want: "padded"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			awsFlags.ConfigPath = path
+			awsFlags.AuthMethod = "profile"
+			accountAddTagKey = "owner"
+			accountAddTagValue = tc.value
+			accountAddTagForce = false
+			accountAddTagPayer = ""
+			accountAddTagAlias = "rh-control"
+			accountAddTagAccountID = ""
+			t.Cleanup(func() {
+				awsFlags.ConfigPath = ""
+				awsFlags.AuthMethod = ""
+				accountAddTagKey = ""
+				accountAddTagValue = ""
+				accountAddTagForce = false
+				accountAddTagPayer = ""
+				accountAddTagAlias = ""
+				accountAddTagAccountID = ""
+				_ = tagAddCmd.Flags().Set("tag-value", "")
+				tagAddCmd.Flags().Lookup("tag-value").Changed = false
+			})
+
+			// Mark --tag-value present so an empty value is accepted.
+			if err := tagAddCmd.Flags().Set("tag-value", tc.value); err != nil {
+				t.Fatal(err)
+			}
+
+			origEnsure := accountAddTagEnsureCredentialsFn
+			origLoad := accountAddTagLoadConfigFn
+			origList := accountAddTagListTagsFn
+			origSet := accountAddTagSetAccountTagFn
+			origDetect := accountAddTagDetectKindFn
+			t.Cleanup(func() {
+				accountAddTagEnsureCredentialsFn = origEnsure
+				accountAddTagLoadConfigFn = origLoad
+				accountAddTagListTagsFn = origList
+				accountAddTagSetAccountTagFn = origSet
+				accountAddTagDetectKindFn = origDetect
+			})
+
+			accountAddTagEnsureCredentialsFn = func(context.Context, awsauth.EnsureOptions) (awsconfig.Result, error) {
+				return awsconfig.Result{Profile: "rh-control"}, nil
+			}
+			accountAddTagLoadConfigFn = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+				return aws.Config{}, nil
+			}
+			accountAddTagListTagsFn = func(context.Context, aws.Config, string) ([]coreaccount.Tag, error) {
+				return nil, nil
+			}
+			var gotValue string
+			accountAddTagSetAccountTagFn = func(_ context.Context, _ aws.Config, _, _, value string) error {
+				gotValue = value
+				return nil
+			}
+			accountAddTagDetectKindFn = func(context.Context, aws.Config, string) (coreaccount.AccountKind, error) {
+				return coreaccount.AccountKindPayer, nil
+			}
+
+			if err := runTagAdd(tagAddCmd, nil); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if gotValue != tc.want {
+				t.Fatalf("set value = %q, want %q", gotValue, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunAccountAddTagRequiresTagValueFlag(t *testing.T) {
+	accountAddTagKey = "owner"
+	accountAddTagValue = ""
+	t.Cleanup(func() {
+		accountAddTagKey = ""
+		accountAddTagValue = ""
+		tagAddCmd.Flags().Lookup("tag-value").Changed = false
+	})
+	err := runTagAdd(tagAddCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "tag value is required") {
+		t.Fatalf("expected missing tag-value error, got %v", err)
+	}
+}
