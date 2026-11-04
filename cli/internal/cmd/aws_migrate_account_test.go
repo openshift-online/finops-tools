@@ -522,9 +522,16 @@ func TestAWSMigrateAccountRestoresTags(t *testing.T) {
 	if !strings.Contains(out.String(), "Restored 1 Organizations account tag(s)") {
 		t.Fatalf("missing restore success line: %q", out.String())
 	}
+	recoveryPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+	if !strings.Contains(out.String(), "Saved Organizations tag recovery snapshot to "+recoveryPath) {
+		t.Fatalf("missing recovery snapshot save line: %q", out.String())
+	}
+	if _, err := os.Stat(recoveryPath); !os.IsNotExist(err) {
+		t.Fatalf("expected recovery file removed after successful restore, stat err=%v", err)
+	}
 }
 
-func TestAWSMigrateAccountWritesTagRecoveryOnRestoreFailure(t *testing.T) {
+func TestAWSMigrateAccountKeepsTagRecoveryOnRestoreFailure(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	cfg := configstore.Default()
@@ -645,6 +652,9 @@ func TestAWSMigrateAccountWritesTagRecoveryOnRestoreFailure(t *testing.T) {
 	}
 
 	recoveryPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+	if !strings.Contains(out.String(), "Saved Organizations tag recovery snapshot to "+recoveryPath) {
+		t.Fatalf("missing recovery snapshot save line: %q", out.String())
+	}
 	if !strings.Contains(errOut.String(), recoveryPath) {
 		t.Fatalf("stderr missing recovery path %q: %q", recoveryPath, errOut.String())
 	}
@@ -691,6 +701,127 @@ func TestWriteMigrateTagRecoveryFile(t *testing.T) {
 	wantPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
 	if path != wantPath {
 		t.Fatalf("path = %q, want %q", path, wantPath)
+	}
+	if err := removeMigrateTagRecoveryFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected recovery file removed, stat err=%v", err)
+	}
+	if err := removeMigrateTagRecoveryFile(path); err != nil {
+		t.Fatalf("remove missing file should be no-op: %v", err)
+	}
+}
+
+func TestAWSMigrateAccountWritesTagRecoveryBeforeInvite(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := configstore.Default()
+	var err error
+	cfg, err = cfg.SetAWSAlias("rh-control", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = cfg.SetAWSAlias("osd-staging-1", "987654321098")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = cfg.SetLinkedAccount("tenant-a", configstore.LinkedAccount{
+		AccountID:  "111111111111",
+		PayerAlias: "rh-control",
+		Role:       "OrganizationAccountAccessRole",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := configstore.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	origEnsure := migrateAccountEnsureCredentials
+	origLoad := migrateAccountLoadConfigForCreds
+	origContains := migrateAccountContains
+	origInvite := migrateAccountInvite
+	origListTags := migrateAccountListTags
+	origSetTags := migrateAccountSetTags
+	defer func() {
+		migrateAccountEnsureCredentials = origEnsure
+		migrateAccountLoadConfigForCreds = origLoad
+		migrateAccountContains = origContains
+		migrateAccountInvite = origInvite
+		migrateAccountListTags = origListTags
+		migrateAccountSetTags = origSetTags
+	}()
+
+	migrateAccountEnsureCredentials = func(context.Context, awsauth.EnsureOptions) (awsconfig.Result, error) {
+		return awsconfig.Result{}, nil
+	}
+	migrateAccountLoadConfigForCreds = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	containsCalls := 0
+	migrateAccountContains = func(_ context.Context, _ aws.Config, accountID string) (bool, error) {
+		containsCalls++
+		if accountID != "111111111111" {
+			return false, nil
+		}
+		return containsCalls == 1, nil
+	}
+	migrateAccountListTags = func(context.Context, aws.Config, string) ([]coreaccount.Tag, error) {
+		return []coreaccount.Tag{{Key: "owner", Value: "jdoe"}}, nil
+	}
+	migrateAccountInvite = func(context.Context, aws.Config, string, string) (coreaccount.InviteResult, error) {
+		recoveryPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+		if _, err := os.Stat(recoveryPath); err != nil {
+			t.Fatalf("expected recovery file before invite: %v", err)
+		}
+		return coreaccount.InviteResult{}, fmt.Errorf("invite denied")
+	}
+	migrateAccountSetTags = func(context.Context, aws.Config, string, []coreaccount.Tag) error {
+		t.Fatal("set tags should not run when invite fails")
+		return nil
+	}
+
+	migrateAccountIDFlag = "111111111111"
+	migrateAccountFromPayer = "rh-control"
+	migrateAccountToPayer = "osd-staging-1"
+	migrateAccountDestOU = ""
+	migrateAccountRole = ""
+	migrateAccountNotes = ""
+	migrateAccountDryRun = false
+	migrateAccountYes = true
+	awsFlags.ConfigPath = configPath
+	defer func() {
+		migrateAccountIDFlag = ""
+		migrateAccountFromPayer = ""
+		migrateAccountToPayer = ""
+		migrateAccountDryRun = false
+		migrateAccountYes = false
+		awsFlags.ConfigPath = ""
+	}()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("role", "", "")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	err = runAWSMigrateAccount(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "invite denied") {
+		t.Fatalf("expected invite error, got %v", err)
+	}
+	recoveryPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+	if !strings.Contains(out.String(), "Saved Organizations tag recovery snapshot to "+recoveryPath) {
+		t.Fatalf("missing recovery snapshot save line: %q", out.String())
+	}
+	data, readErr := os.ReadFile(recoveryPath)
+	if readErr != nil {
+		t.Fatalf("recovery file should remain after invite failure: %v", readErr)
+	}
+	var got migrateTagRecoveryFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode recovery: %v", err)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != (coreaccount.Tag{Key: "owner", Value: "jdoe"}) {
+		t.Fatalf("recovery tags = %#v", got.Tags)
 	}
 }
 
@@ -820,6 +951,10 @@ func TestAWSMigrateAccountRestoresTagsBeforeTrustFailure(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Restored 1 Organizations account tag(s)") {
 		t.Fatalf("missing restore success line: %q", out.String())
+	}
+	recoveryPath := filepath.Join(dir, "migrate-tag-recovery", "111111111111.json")
+	if _, err := os.Stat(recoveryPath); !os.IsNotExist(err) {
+		t.Fatalf("expected recovery file removed after successful restore, stat err=%v", err)
 	}
 }
 
