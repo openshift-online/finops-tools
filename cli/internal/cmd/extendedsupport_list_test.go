@@ -216,12 +216,27 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 	prevFetch := extendedSupportListFetch
 	prevPrepare := prepareExtendedSupportTargets
 	prevEnsure := ensureExtendedSupportCredentials
+	prevCosts := extendedSupportListEnrichCosts
 	t.Cleanup(func() {
 		extendedSupportListFetch = prevFetch
 		prepareExtendedSupportTargets = prevPrepare
 		ensureExtendedSupportCredentials = prevEnsure
+		extendedSupportListEnrichCosts = prevCosts
 		awsFlags.ConfigPath = ""
 	})
+	costCalls := 0
+	extendedSupportListEnrichCosts = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, scan extendedsupport.Query, result extendedsupport.Result) (extendedsupport.Result, error) {
+		costCalls++
+		if len(targets) != 1 || len(result.Records) != 1 || !reflect.DeepEqual(scan.Services, []extendedsupport.Service{extendedsupport.ServiceRDS}) {
+			t.Fatal("default cost enrichment ran with the wrong inventory or service scope")
+		}
+		amount := 15.24
+		charges := &extendedsupport.SupportCharges{Amount: &amount, Currency: "USD"}
+		result.Summary.ByAccount = []extendedsupport.AccountSummary{{AccountID: targets[0].AccountID, Count: 1, SupportCost: charges}}
+		result.Summary.ByService = []extendedsupport.ServiceSummary{{Service: extendedsupport.ServiceRDS, Count: 1, SupportCost: charges}}
+		result.Summary.Costs = &extendedsupport.ListCostSummary{Metric: "NetUnblendedCost"}
+		return result, nil
+	}
 
 	extendedSupportListFetch = func(_ context.Context, q extendedsupport.Query) (extendedsupport.Result, error) {
 		if len(q.Targets) != 1 || q.Targets[0].AccountID != "123456789012" {
@@ -282,6 +297,9 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte(`"resource_id": "db-old"`)) {
 		t.Fatalf("output = %s", buf.String())
 	}
+	if costCalls != 1 || !strings.Contains(buf.String(), `"amount": 15.24`) || !strings.Contains(buf.String(), `"costs"`) {
+		t.Fatal("list omitted default cost summaries", buf.String())
+	}
 	if !strings.Contains(notices.String(), "AWS Health lifecycle catalog unavailable") || !strings.Contains(buf.String(), "lifecycle_warnings") {
 		t.Fatal(buf.String(), notices.String())
 	}
@@ -294,6 +312,9 @@ func TestRunExtendedSupportListUsesFetchHook(t *testing.T) {
 	if !strings.Contains(notices.String(), "AWS Health lifecycle catalog unavailable") || strings.Contains(buf.String(), "catalog unavailable") || !strings.Contains(buf.String(), "db-old") {
 		t.Fatal(buf.String(), notices.String())
 	}
+	if costCalls != 2 {
+		t.Fatal("list did not enrich costs by default")
+	}
 }
 
 func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
@@ -305,11 +326,14 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 		services                                                        string
 		wantServices                                                    []extendedsupport.Service
 		allSkipped, preparationSkipped, noSkipped, canceled, retryError bool
+		emptyScan, emptyRetry                                           bool
 	}{
-		{name: "some accounts skipped"},
+		{name: "default costs after retry"},
 		{name: "all accounts skipped", allSkipped: true},
 		{name: "all accounts skipped during preparation", allSkipped: true, preparationSkipped: true},
-		{name: "no skipped accounts", noSkipped: true},
+		{name: "default costs without retry", noSkipped: true},
+		{name: "empty scan includes cost period and checks recent charges", noSkipped: true, emptyScan: true},
+		{name: "recovered account with no findings checks recent charges", emptyRetry: true},
 		{name: "canceled scan", canceled: true},
 		{name: "retry error", retryError: true},
 		{name: "RDS and EKS share catalog through retry", services: "rds,eks", wantServices: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS}},
@@ -326,10 +350,14 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				}
 			}
 			prevFetch, prevRetry := extendedSupportListFetch, extendedSupportListRetry
+			prevCosts := extendedSupportListEnrichCosts
+			prevCheck := extendedSupportListCheckCharges
 			prevPrepare, prevEnsure := prepareExtendedSupportTargets, ensureExtendedSupportCredentials
 			prevFlags := awsFlags
 			t.Cleanup(func() {
 				extendedSupportListFetch, extendedSupportListRetry = prevFetch, prevRetry
+				extendedSupportListEnrichCosts = prevCosts
+				extendedSupportListCheckCharges = prevCheck
 				prepareExtendedSupportTargets, ensureExtendedSupportCredentials = prevPrepare, prevEnsure
 				awsFlags = prevFlags
 				extendedSupportListAccountAliases = ""
@@ -355,6 +383,47 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			cmd.SetOut(out)
 			cmd.SetErr(notices)
 			prepareCalls, fetchCalls, retryCalls := 0, 0, 0
+			costCalls := 0
+			checkCalls := 0
+			extendedSupportListCheckCharges = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, scan extendedsupport.Query, result extendedsupport.Result) (extendedsupport.Result, error) {
+				checkCalls++
+				candidates := extendedsupport.AccountsWithoutFindings(targets, result)
+				want := 3
+				if tc.emptyRetry {
+					want = 1
+					if retryCalls != 1 || candidates[0].AccountID != "222222222222" {
+						t.Fatal("recent-charge check ran before retries or included skipped accounts")
+					}
+				}
+				if (!tc.emptyScan && !tc.emptyRetry) || len(candidates) != want || scan.Now.IsZero() || !reflect.DeepEqual(scan.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(scan.SkipRegions, []string{"us-west-2"}) {
+					t.Fatal("recent-charge check has the wrong scope")
+				}
+				result.Summary.ChargesWithoutFindings = &extendedsupport.ChargesWithoutFindingsSummary{
+					ListCostSummary: extendedsupport.ListCostSummary{Warnings: []string{"test recent-charge warning"}},
+					Accounts:        []extendedsupport.AccountChargesWithoutFindings{{AccountID: candidates[0].AccountID, Amount: 5, Currency: "USD"}},
+				}
+				return result, nil
+			}
+			extendedSupportListEnrichCosts = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, scan extendedsupport.Query, result extendedsupport.Result) (extendedsupport.Result, error) {
+				costCalls++
+				if len(targets) != 3 || scan.Now.IsZero() || !reflect.DeepEqual(scan.Regions, []string{"us-east-1"}) || !reflect.DeepEqual(scan.SkipRegions, []string{"us-west-2"}) {
+					t.Fatal("default costs have the wrong scope")
+				}
+				if !tc.noSkipped {
+					wantRecords := 2
+					if tc.emptyRetry {
+						wantRecords = 1
+					}
+					if retryCalls != 1 || len(result.Records) != wantRecords {
+						t.Fatal("default costs ran before retries completed")
+					}
+					if !tc.emptyRetry && result.Records[1].ResourceID != "recovered" {
+						t.Fatal("default costs lost the recovered account")
+					}
+				}
+				result.Summary.Costs = &extendedsupport.ListCostSummary{Warnings: []string{"test billing failure retains inventory"}}
+				return result, nil
+			}
 			var scanTime time.Time
 			var catalog *extendedsupport.EKSVersionCatalog
 			var healthCatalog *extendedsupport.HealthLifecycleCatalog
@@ -396,6 +465,9 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				var result extendedsupport.Result
 				for _, target := range q.Targets {
 					if tc.noSkipped || (!tc.allSkipped && target.AccountID == original.AccountID) {
+						if tc.emptyScan {
+							continue
+						}
 						result.Records = append(result.Records, extendedsupport.Record{AccountID: target.AccountID, ResourceID: "original", Service: extendedsupport.ServiceRDS})
 						result.Summary.TotalCount++
 					} else {
@@ -429,6 +501,9 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 				if tc.retryError {
 					return extendedsupport.Result{}, retryFailure
 				}
+				if tc.emptyRetry {
+					return extendedsupport.Result{Records: []extendedsupport.Record{original}, Summary: extendedsupport.Summary{TotalCount: 1, SkippedAccounts: []extendedsupport.AccountWarning{{AccountID: "333333333333", Message: "latest failure"}}}}, nil
+				}
 				return extendedsupport.Result{
 					Records: []extendedsupport.Record{original, {AccountID: "222222222222", ResourceID: "recovered"}},
 					Summary: extendedsupport.Summary{TotalCount: 2, SkippedAccounts: []extendedsupport.AccountWarning{{AccountID: "333333333333", Message: "latest failure"}}},
@@ -436,13 +511,13 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			}
 			err := runExtendedSupportList(cmd, nil)
 			if tc.canceled {
-				if !errors.Is(err, context.Canceled) || retryCalls != 0 || prepareCalls != 1 {
+				if !errors.Is(err, context.Canceled) || retryCalls != 0 || prepareCalls != 1 || costCalls != 0 {
 					t.Fatalf("error=%v retryCalls=%d prepareCalls=%d", err, retryCalls, prepareCalls)
 				}
 				return
 			}
 			if tc.retryError {
-				if !errors.Is(err, retryFailure) || retryCalls != 1 {
+				if !errors.Is(err, retryFailure) || retryCalls != 1 || costCalls != 0 {
 					t.Fatalf("error=%v retryCalls=%d", err, retryCalls)
 				}
 				return
@@ -454,8 +529,24 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 				t.Fatalf("invalid JSON: %v: %s", err, out)
 			}
+			if costCalls != 1 || result.Summary.Costs == nil {
+				t.Fatalf("list omitted default costs: calls=%d", costCalls)
+			}
+			if !strings.Contains(notices.String(), "test billing failure retains inventory") {
+				t.Fatal("cost failure was not reported", notices.String())
+			}
+			if (checkCalls == 1) != (tc.emptyScan || tc.emptyRetry) || (result.Summary.ChargesWithoutFindings != nil) != (tc.emptyScan || tc.emptyRetry) {
+				t.Fatalf("recent-charge check calls=%d", checkCalls)
+			}
+			if (tc.emptyScan || tc.emptyRetry) && !strings.Contains(notices.String(), "test recent-charge warning") {
+				t.Fatal("recent-charge warning was lost")
+			}
 			if tc.noSkipped {
-				if retryCalls != 0 || prepareCalls != 1 || result.Summary.TotalCount != 3 {
+				wantCount := 3
+				if tc.emptyScan {
+					wantCount = 0
+				}
+				if retryCalls != 0 || prepareCalls != 1 || result.Summary.TotalCount != wantCount {
 					t.Fatalf("result=%+v retryCalls=%d prepareCalls=%d", result, retryCalls, prepareCalls)
 				}
 				return
@@ -464,7 +555,11 @@ func TestRunExtendedSupportListRetriesSkippedAccountsOnce(t *testing.T) {
 			if tc.preparationSkipped {
 				wantFetchCalls = 0
 			}
-			if prepareCalls != 2 || fetchCalls != wantFetchCalls || retryCalls != 1 || result.Summary.TotalCount != 2 || len(result.Records) != 2 || len(result.Summary.SkippedAccounts) != 1 || result.Summary.SkippedAccounts[0].Message != "latest failure" || !bytes.Contains(notices.Bytes(), []byte("Retrying")) {
+			wantCount := 2
+			if tc.emptyRetry {
+				wantCount = 1
+			}
+			if prepareCalls != 2 || fetchCalls != wantFetchCalls || retryCalls != 1 || result.Summary.TotalCount != wantCount || len(result.Records) != wantCount || len(result.Summary.SkippedAccounts) != 1 || result.Summary.SkippedAccounts[0].Message != "latest failure" || !bytes.Contains(notices.Bytes(), []byte("Retrying")) {
 				t.Fatalf("result=%+v prepareCalls=%d fetchCalls=%d retryCalls=%d notices=%s", result, prepareCalls, fetchCalls, retryCalls, notices)
 			}
 		})

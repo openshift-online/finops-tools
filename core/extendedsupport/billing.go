@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -29,9 +30,19 @@ type BillingAPI interface {
 // Period. Billing data is historical evidence; callers must scan live resources
 // to confirm their current support status.
 type BillingCandidates struct {
-	Period     cost.DateRange
-	UsageTypes []string
-	AccountIDs []string
+	Period            cost.DateRange
+	UsageTypes        []string
+	AccountIDs        []string
+	AccountUsageTypes map[string][]string
+}
+
+// BillingSelectedAccount records the evidence for an account selected before
+// scanning. UsageTypes is the union of exact matches across queried payers.
+type BillingSelectedAccount struct {
+	AccountID    string   `json:"account_id"`
+	DisplayName  string   `json:"display_name,omitempty"`
+	DisplayAlias string   `json:"display_alias,omitempty"`
+	UsageTypes   []string `json:"usage_types"`
 }
 
 // BillingSelection describes the historical evidence used to narrow a live scan.
@@ -39,15 +50,16 @@ type BillingCandidates struct {
 // PayerAccountID holds the single payer behind the scan and is empty when
 // several payers were listed; PayerAccountIDs lists every payer queried.
 type BillingSelection struct {
-	PayerAccountID       string   `json:"payer_account_id"`
-	PayerAccountIDs      []string `json:"payer_account_ids,omitempty"`
-	Start                string   `json:"start"`
-	EndExclusive         string   `json:"end_exclusive"`
-	UsageTypes           []string `json:"usage_types"`
-	BilledAccountCount   int      `json:"billed_account_count"`
-	EligibleAccountCount int      `json:"eligible_account_count"`
-	SelectedAccountCount int      `json:"selected_account_count"`
-	Notice               string   `json:"notice"`
+	PayerAccountID       string                   `json:"payer_account_id"`
+	PayerAccountIDs      []string                 `json:"payer_account_ids,omitempty"`
+	Start                string                   `json:"start"`
+	EndExclusive         string                   `json:"end_exclusive"`
+	UsageTypes           []string                 `json:"usage_types"`
+	SelectedAccounts     []BillingSelectedAccount `json:"selected_accounts"`
+	BilledAccountCount   int                      `json:"billed_account_count"`
+	EligibleAccountCount int                      `json:"eligible_account_count"`
+	SelectedAccountCount int                      `json:"selected_account_count"`
+	Notice               string                   `json:"notice"`
 }
 
 // BillingLookbackRange includes today and the preceding days-1 UTC calendar days.
@@ -83,7 +95,7 @@ func discoverBillingCandidatesWithClient(ctx context.Context, client BillingAPI,
 	if err != nil {
 		return BillingCandidates{}, err
 	}
-	accounts := make(map[string]bool)
+	accounts := make(map[string]map[string]bool)
 	for offset := 0; offset < len(usageTypes); offset += billingUsageTypeBatchSize {
 		end := min(offset+billingUsageTypeBatchSize, len(usageTypes))
 		if err := listBilledExtendedSupportAccounts(ctx, client, interval, usageTypes[offset:end], accounts); err != nil {
@@ -91,11 +103,16 @@ func discoverBillingCandidatesWithClient(ctx context.Context, client BillingAPI,
 		}
 	}
 	ids := make([]string, 0, len(accounts))
-	for id := range accounts {
+	accountUsageTypes := make(map[string][]string, len(accounts))
+	for id, usages := range accounts {
 		ids = append(ids, id)
+		for usage := range usages {
+			accountUsageTypes[id] = append(accountUsageTypes[id], usage)
+		}
+		sort.Strings(accountUsageTypes[id])
 	}
 	sort.Strings(ids)
-	return BillingCandidates{Period: period, UsageTypes: usageTypes, AccountIDs: ids}, nil
+	return BillingCandidates{Period: period, UsageTypes: usageTypes, AccountIDs: ids, AccountUsageTypes: accountUsageTypes}, nil
 }
 
 func listExtendedSupportUsageTypes(ctx context.Context, client BillingAPI, interval *cetypes.DateInterval) ([]string, error) {
@@ -142,7 +159,7 @@ func listExtendedSupportUsageTypes(ctx context.Context, client BillingAPI, inter
 	return values, nil
 }
 
-func listBilledExtendedSupportAccounts(ctx context.Context, client BillingAPI, interval *cetypes.DateInterval, usageTypes []string, accounts map[string]bool) error {
+func listBilledExtendedSupportAccounts(ctx context.Context, client BillingAPI, interval *cetypes.DateInterval, usageTypes []string, accounts map[string]map[string]bool) error {
 	seenTokens := make(map[string]bool)
 	var token *string
 	for {
@@ -156,7 +173,10 @@ func listBilledExtendedSupportAccounts(ctx context.Context, client BillingAPI, i
 				Key: cetypes.DimensionUsageType, Values: usageTypes,
 				MatchOptions: []cetypes.MatchOption{cetypes.MatchOptionEquals},
 			}},
-			GroupBy: []cetypes.GroupDefinition{{Type: cetypes.GroupDefinitionTypeDimension, Key: aws.String("LINKED_ACCOUNT")}},
+			GroupBy: []cetypes.GroupDefinition{
+				{Type: cetypes.GroupDefinitionTypeDimension, Key: aws.String("LINKED_ACCOUNT")},
+				{Type: cetypes.GroupDefinitionTypeDimension, Key: aws.String("USAGE_TYPE")},
+			},
 		}
 		apilog.LogGetCostAndUsage(ctx, input)
 		out, err := client.GetCostAndUsage(ctx, input)
@@ -168,10 +188,13 @@ func listBilledExtendedSupportAccounts(ctx context.Context, client BillingAPI, i
 		}
 		for _, period := range out.ResultsByTime {
 			for _, group := range period.Groups {
-				if len(group.Keys) != 1 || !billingAccountIDPattern.MatchString(group.Keys[0]) {
-					return fmt.Errorf("CostExplorer.GetCostAndUsage returned invalid LINKED_ACCOUNT group %q", group.Keys)
+				if len(group.Keys) != 2 || !billingAccountIDPattern.MatchString(group.Keys[0]) || !slices.Contains(usageTypes, group.Keys[1]) {
+					return fmt.Errorf("CostExplorer.GetCostAndUsage returned invalid LINKED_ACCOUNT/USAGE_TYPE group %q", group.Keys)
 				}
-				accounts[group.Keys[0]] = true
+				if accounts[group.Keys[0]] == nil {
+					accounts[group.Keys[0]] = make(map[string]bool)
+				}
+				accounts[group.Keys[0]][group.Keys[1]] = true
 			}
 		}
 		next := aws.ToString(out.NextPageToken)

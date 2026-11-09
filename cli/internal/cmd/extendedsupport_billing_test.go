@@ -77,7 +77,7 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 					ids = nil
 					usageTypes = nil
 				}
-				return extendedsupport.BillingCandidates{Period: period, UsageTypes: usageTypes, AccountIDs: ids}, nil
+				return extendedsupport.BillingCandidates{Period: period, UsageTypes: usageTypes, AccountIDs: ids, AccountUsageTypes: map[string][]string{"222222222222": {"RDS:ExtendedSupport"}}}, nil
 			}
 			cmd := &cobra.Command{}
 			cmd.SetContext(context.Background())
@@ -116,6 +116,15 @@ func TestFilterExtendedSupportBillingTargets(t *testing.T) {
 				if !tc.empty && !reflect.DeepEqual(selected[0], targets[1]) {
 					t.Fatal("target display metadata or role routing was lost")
 				}
+				if len(metadata.SelectedAccounts) != tc.want {
+					t.Fatal("selected account audit does not match scan selection", metadata.SelectedAccounts)
+				}
+				if !tc.empty {
+					want := extendedsupport.BillingSelectedAccount{AccountID: "222222222222", DisplayName: "Member Two", DisplayAlias: "two", UsageTypes: []string{"RDS:ExtendedSupport"}}
+					if !reflect.DeepEqual(metadata.SelectedAccounts[0], want) {
+						t.Fatalf("selected account=%+v want=%+v", metadata.SelectedAccounts[0], want)
+					}
+				}
 			}
 		})
 	}
@@ -148,9 +157,9 @@ func TestFilterExtendedSupportBillingTargetsMultiPayerMetadata(t *testing.T) {
 	discoverExtendedSupportBillingCandidates = func(_ context.Context, cfg aws.Config, period cost.DateRange) (extendedsupport.BillingCandidates, error) {
 		switch cfg.Region {
 		case "123456789012":
-			return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport"}, AccountIDs: []string{"111111111111"}}, nil
+			return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport"}, AccountIDs: []string{"111111111111"}, AccountUsageTypes: map[string][]string{"111111111111": {"RDS:ExtendedSupport"}}}, nil
 		case "987654321098":
-			return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport", "ElastiCache:ExtendedSupport"}, AccountIDs: []string{"222222222222"}}, nil
+			return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport", "ElastiCache:ExtendedSupport"}, AccountIDs: []string{"111111111111", "222222222222"}, AccountUsageTypes: map[string][]string{"111111111111": {"RDS:ExtendedSupport", "ElastiCache:ExtendedSupport"}, "222222222222": {"ElastiCache:ExtendedSupport"}}}, nil
 		default:
 			return extendedsupport.BillingCandidates{}, errors.New("unexpected credentials account " + cfg.Region)
 		}
@@ -171,6 +180,13 @@ func TestFilterExtendedSupportBillingTargetsMultiPayerMetadata(t *testing.T) {
 	}
 	if !reflect.DeepEqual(metadata.UsageTypes, []string{"RDS:ExtendedSupport", "ElastiCache:ExtendedSupport"}) {
 		t.Fatalf("usage types = %v", metadata.UsageTypes)
+	}
+	wantSelected := []extendedsupport.BillingSelectedAccount{
+		{AccountID: "111111111111", UsageTypes: []string{"ElastiCache:ExtendedSupport", "RDS:ExtendedSupport"}},
+		{AccountID: "222222222222", UsageTypes: []string{"ElastiCache:ExtendedSupport"}},
+	}
+	if !reflect.DeepEqual(metadata.SelectedAccounts, wantSelected) {
+		t.Fatalf("selected accounts=%+v want=%+v", metadata.SelectedAccounts, wantSelected)
 	}
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
@@ -195,6 +211,8 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 			prevLoad, prevDiscover := loadAWSConfigForCredentialsAccount, discoverExtendedSupportBillingCandidates
 			prevList, prevRoot, prevCostEnsure := listOrganizationMemberAccounts, organizationRootID, ensureCostCredentials
 			prevEnsure, prevPrepare, prevFetch, prevRetry := ensureExtendedSupportCredentials, prepareExtendedSupportTargets, extendedSupportListFetch, extendedSupportListRetry
+			prevCheck := extendedSupportListCheckCharges
+			prevEnrich := extendedSupportListEnrichCosts
 			t.Cleanup(func() {
 				awsFlags = prevFlags
 				extendedSupportListPayer, extendedSupportListAccountAliases, extendedSupportListAccount, extendedSupportListOU, extendedSupportListTag = prevPayer, prevAliases, prevAccount, prevOU, prevTag
@@ -203,6 +221,8 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 				loadAWSConfigForCredentialsAccount, discoverExtendedSupportBillingCandidates = prevLoad, prevDiscover
 				listOrganizationMemberAccounts, organizationRootID, ensureCostCredentials = prevList, prevRoot, prevCostEnsure
 				ensureExtendedSupportCredentials, prepareExtendedSupportTargets, extendedSupportListFetch, extendedSupportListRetry = prevEnsure, prevPrepare, prevFetch, prevRetry
+				extendedSupportListCheckCharges = prevCheck
+				extendedSupportListEnrichCosts = prevEnrich
 			})
 			awsFlags.ConfigPath = path
 			extendedSupportListPayer, extendedSupportListAccountAliases, extendedSupportListAccount, extendedSupportListOU, extendedSupportListTag = "payer", "", "", "", ""
@@ -217,6 +237,30 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 				return []coreaccount.OrganizationAccount{{ID: "111111111111", Name: "One"}, {ID: "222222222222", Name: "Two"}, {ID: "333333333333", Name: "Three"}}, nil
 			}
 			queries, prepared, fetched, retried, ensured := 0, 0, 0, 0, 0
+			checks := 0
+			costCalls := 0
+			extendedSupportListEnrichCosts = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, scan extendedsupport.Query, result extendedsupport.Result) (extendedsupport.Result, error) {
+				costCalls++
+				wantTargets := 1
+				if scenario == "full scan" {
+					wantTargets = 3
+				}
+				if scenario == "no billed accounts" {
+					wantTargets = 0
+				}
+				if len(targets) != wantTargets || !reflect.DeepEqual(scan.Services, []extendedsupport.Service{extendedsupport.ServiceRDS}) {
+					t.Fatal("default costs lost the selected account/service scope")
+				}
+				result.Summary.Costs = &extendedsupport.ListCostSummary{Services: scan.Services}
+				return result, nil
+			}
+			extendedSupportListCheckCharges = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _ extendedsupport.Query, result extendedsupport.Result) (extendedsupport.Result, error) {
+				checks++
+				if scenario != "full scan" || len(extendedsupport.AccountsWithoutFindings(targets, result)) != 3 {
+					t.Fatal("billing check queried an account outside the completed empty scan")
+				}
+				return result, nil
+			}
 			discoverExtendedSupportBillingCandidates = func(_ context.Context, _ aws.Config, period cost.DateRange) (extendedsupport.BillingCandidates, error) {
 				queries++
 				if scenario == "billing failure" {
@@ -226,7 +270,7 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 				if scenario == "no billed accounts" {
 					ids = nil
 				}
-				return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport"}, AccountIDs: ids}, nil
+				return extendedsupport.BillingCandidates{Period: period, UsageTypes: []string{"RDS:ExtendedSupport"}, AccountIDs: ids, AccountUsageTypes: map[string][]string{"222222222222": {"RDS:ExtendedSupport"}}}, nil
 			}
 			ensureExtendedSupportCredentials = func(_ *cobra.Command, _ configstore.File, targets []cost.AccountTarget, _, _, _ string) error {
 				ensured++
@@ -273,7 +317,7 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 			cmd.SetErr(new(bytes.Buffer))
 			err := runExtendedSupportList(cmd, nil)
 			if scenario == "billing failure" {
-				if err == nil || out.Len() != 0 || prepared+fetched+retried+ensured != 0 {
+				if err == nil || out.Len() != 0 || prepared+fetched+retried+ensured+costCalls != 0 {
 					t.Fatalf("error=%v output=%s calls=%d/%d/%d/%d", err, out, prepared, fetched, retried, ensured)
 				}
 				return
@@ -285,6 +329,9 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
+			if costCalls != 1 || result.Summary.Costs == nil {
+				t.Fatal("default cost summaries are missing")
+			}
 			switch scenario {
 			case "selected account recovers":
 				if queries != 1 || prepared != 2 || fetched != 1 || retried != 1 || result.Summary.BillingSelection == nil || result.Summary.BillingSelection.SelectedAccountCount != 1 || result.Summary.BillingSelection.EligibleAccountCount != 3 || result.Summary.TotalCount != 1 || len(result.Summary.SkippedAccounts) != 0 {
@@ -295,7 +342,7 @@ func TestRunExtendedSupportListBillingSelectionControlsScanning(t *testing.T) {
 					t.Fatalf("result=%+v calls=%d/%d/%d/%d", result, queries, prepared, fetched, retried)
 				}
 			case "full scan":
-				if queries != 0 || prepared != 1 || fetched != 1 || result.Summary.BillingSelection != nil {
+				if queries != 0 || prepared != 1 || fetched != 1 || checks != 1 || result.Summary.BillingSelection != nil {
 					t.Fatalf("result=%+v calls=%d/%d/%d", result, queries, prepared, fetched)
 				}
 			}

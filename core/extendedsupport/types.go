@@ -145,14 +145,16 @@ type Record struct {
 
 // ServiceSummary aggregates records by service.
 type ServiceSummary struct {
-	Service Service `json:"service"`
-	Count   int     `json:"count"`
+	Service     Service         `json:"service"`
+	Count       int             `json:"count"`
+	SupportCost *SupportCharges `json:"support_cost,omitempty"`
 }
 
 // AccountSummary aggregates records by account.
 type AccountSummary struct {
-	AccountID string `json:"account_id"`
-	Count     int    `json:"count"`
+	AccountID   string          `json:"account_id"`
+	Count       int             `json:"count"`
+	SupportCost *SupportCharges `json:"support_cost,omitempty"`
 }
 
 // RegionWarning records a service discovery failure in a region.
@@ -191,15 +193,17 @@ type regionScanResult struct {
 
 // Summary holds aggregate totals for an extended-support scan.
 type Summary struct {
-	TotalCount            int               `json:"total_count"`
-	ByService             []ServiceSummary  `json:"by_service,omitempty"`
-	ByAccount             []AccountSummary  `json:"by_account,omitempty"`
-	SkippedRegions        []RegionWarning   `json:"skipped_regions,omitempty"`
-	ExcludedRegions       []string          `json:"excluded_regions,omitempty"`
-	SkippedAccounts       []AccountWarning  `json:"skipped_accounts,omitempty"`
-	UnclassifiedResources []ResourceWarning `json:"unclassified_resources,omitempty"`
-	BillingSelection      *BillingSelection `json:"billing_selection,omitempty"`
-	LifecycleWarnings     []string          `json:"lifecycle_warnings,omitempty"`
+	TotalCount             int                            `json:"total_count"`
+	ByService              []ServiceSummary               `json:"by_service,omitempty"`
+	ByAccount              []AccountSummary               `json:"by_account,omitempty"`
+	SkippedRegions         []RegionWarning                `json:"skipped_regions,omitempty"`
+	ExcludedRegions        []string                       `json:"excluded_regions,omitempty"`
+	SkippedAccounts        []AccountWarning               `json:"skipped_accounts,omitempty"`
+	UnclassifiedResources  []ResourceWarning              `json:"unclassified_resources,omitempty"`
+	BillingSelection       *BillingSelection              `json:"billing_selection,omitempty"`
+	LifecycleWarnings      []string                       `json:"lifecycle_warnings,omitempty"`
+	Costs                  *ListCostSummary               `json:"costs,omitempty"`
+	ChargesWithoutFindings *ChargesWithoutFindingsSummary `json:"charges_without_findings,omitempty"`
 
 	// PastExtendedSupportResources have reached a known extended-support end or end-of-life date.
 	// They are excluded from TotalCount, ByService, ByAccount, and UnclassifiedResources.
