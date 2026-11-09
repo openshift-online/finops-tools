@@ -10,8 +10,13 @@ import (
 	"github.com/openshift-online/finops-tools/core/report/execsummary"
 )
 
-// execSummaryDefaultMonths is the default completed-month window.
-const execSummaryDefaultMonths = 5
+const (
+	// execSummaryDefaultMonths is the default completed-month window.
+	execSummaryDefaultMonths = 5
+	// maxExecSummaryMonths caps --months so ComputeWindow cannot be asked to
+	// allocate an unbounded month list before any Cost Explorer request.
+	maxExecSummaryMonths = 120
+)
 
 // fetchMonthlyAccountService is stubbable for tests.
 var fetchMonthlyAccountService = cost.FetchMonthlyAccountService
@@ -21,6 +26,9 @@ type execSummaryGenerator struct{}
 func (execSummaryGenerator) Validate(in GenerateInput) error {
 	if err := validateTemplateFormat(TemplateExecSummary, in.Format); err != nil {
 		return err
+	}
+	if in.Months > maxExecSummaryMonths {
+		return fmt.Errorf("exec-summary report supports at most %d months, got %d", maxExecSummaryMonths, in.Months)
 	}
 	if len(in.Targets) == 0 {
 		return fmt.Errorf("exec-summary report requires a payer target (--payer)")

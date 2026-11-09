@@ -165,6 +165,30 @@ func TestBuildReportAccounts(t *testing.T) {
 	}
 }
 
+func TestBuildReportZeroSpendAccountsTallied(t *testing.T) {
+	res := sampleResult()
+	// Three selected accounts (payer + two members) plus two with no rows.
+	names := map[string]string{
+		payerID:  "Payer",
+		memberA:  "Member A",
+		memberB:  "Member B",
+		"333333333333": "Idle One",
+		"444444444444": "Idle Two",
+	}
+	rep, err := BuildReport("example-payer", res, fiveMonthWindow(), names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.ZeroSpendAccounts != 2 {
+		t.Errorf("ZeroSpendAccounts = %d, want 2", rep.ZeroSpendAccounts)
+	}
+	for _, a := range rep.Accounts {
+		if a.AccountID == "333333333333" || a.AccountID == "444444444444" {
+			t.Errorf("zero-spend account %s should not be listed in Accounts", a.AccountID)
+		}
+	}
+}
+
 func TestBuildReportRowOutsideWindowFails(t *testing.T) {
 	res := sampleResult()
 	res.Rows = append(res.Rows, cost.MonthlyGroupedCost{Month: "2026-07", AccountID: memberA, Service: "Amazon EC2", Amount: 5})

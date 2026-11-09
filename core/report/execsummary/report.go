@@ -62,6 +62,10 @@ type Report struct {
 	Accounts []AccountSummary
 	// Rows are the raw (month, account, service) cells retained for drill-down tables.
 	Rows []cost.MonthlyGroupedCost
+	// ZeroSpendAccounts counts selected accounts with no spend over the whole
+	// window. They are not listed in Accounts; the report surfaces them as a
+	// tally so the account population stays visible.
+	ZeroSpendAccounts int
 }
 
 // LatestMonth returns the most recent MonthSummary in the window.
@@ -168,15 +172,26 @@ func BuildReport(
 		return accountList[i].AccountID < accountList[j].AccountID
 	})
 
+	// Selected accounts (from names) that never appeared in a cost row spent
+	// nothing over the window; keep them as a tally instead of dropping them
+	// silently. The payer is always ensured above, so it is never counted here.
+	zeroSpend := 0
+	for id := range names {
+		if _, ok := accounts[id]; !ok {
+			zeroSpend++
+		}
+	}
+
 	return Report{
-		PayerAlias:     payerAlias,
-		PayerAccountID: res.PayerAccountID,
-		Currency:       res.Currency,
-		StartMonth:     MonthLabel(window.Start),
-		EndMonth:       MonthLabel(window.End),
-		Months:         months,
-		Accounts:       accountList,
-		Rows:           res.Rows,
+		PayerAlias:        payerAlias,
+		PayerAccountID:    res.PayerAccountID,
+		Currency:          res.Currency,
+		StartMonth:        MonthLabel(window.Start),
+		EndMonth:          MonthLabel(window.End),
+		Months:            months,
+		Accounts:          accountList,
+		Rows:              res.Rows,
+		ZeroSpendAccounts: zeroSpend,
 	}, nil
 }
 

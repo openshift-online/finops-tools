@@ -90,6 +90,9 @@ type ExecSummaryReportView struct {
 	Months         []ExecSummaryMonthView
 	Accounts       []ExecSummaryAccountView
 	ServiceRows    []ExecSummaryAccountServiceView
+	// ZeroSpendNote is rendered when selected accounts had no spend over the
+	// window, e.g. "12 account(s) with $0.00 in spend over the window".
+	ZeroSpendNote string
 }
 
 // NewExecSummaryReportView maps a core execsummary.Report to the template context.
@@ -168,6 +171,11 @@ func NewExecSummaryReportView(r execsummary.Report, generatedAt time.Time) ExecS
 			})
 		}
 		view.Accounts = append(view.Accounts, av)
+	}
+
+	if r.ZeroSpendAccounts > 0 {
+		view.ZeroSpendNote = fmt.Sprintf("%d account(s) with %s in spend over the window",
+			r.ZeroSpendAccounts, format.FormatMoney(0, r.Currency))
 	}
 
 	// Full per-month account/service rows for the drill-down table.

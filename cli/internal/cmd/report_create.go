@@ -123,8 +123,14 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
-		return err
+	// Cost-period config defaults (defaults.cost.*) target get-cost semantics and
+	// can set a cost.to that resolveCostPeriod legitimately rejects; exec-summary
+	// derives its window from --months alone, so skip them there. Flag-only mode
+	// checks already ran in validatePeriodFlags during PreRunE.
+	if templateName != reportpkg.TemplateExecSummary {
+		if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
+			return err
+		}
 	}
 
 	status := progress.New(cmd.ErrOrStderr(), reportGenerateQuiet)
@@ -165,9 +171,15 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	dateRange, err := resolveCostPeriod(time.Now().UTC())
-	if err != nil {
-		return err
+	// Exec-summary computes its own completed-month window in Generate and never
+	// uses in.Range; resolving the cost period here would only give config
+	// defaults a chance to block generation.
+	var dateRange cost.DateRange
+	if templateName != reportpkg.TemplateExecSummary {
+		dateRange, err = resolveCostPeriod(time.Now().UTC())
+		if err != nil {
+			return err
+		}
 	}
 
 	in := reportpkg.GenerateInput{

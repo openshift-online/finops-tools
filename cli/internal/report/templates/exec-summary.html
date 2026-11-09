@@ -93,6 +93,7 @@
 <section>
   <h2>Cost by Linked Account</h2>
   <p class="meta">Monthly totals per account; the payer's own spend is listed as a separate row.</p>
+  {{ if .ZeroSpendNote }}<p class="meta">{{ .ZeroSpendNote }}</p>{{ end }}
   {{ range .Accounts }}
   <div class="account-block">
     <h3>{{ .AccountName }} ({{ .AccountID }}){{ if .IsPayer }} <span class="payer-badge">payer</span>{{ end }}</h3>

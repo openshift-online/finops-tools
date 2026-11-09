@@ -43,6 +43,12 @@ func TestExecSummaryGeneratorValidate(t *testing.T) {
 	if err := g.Validate(GenerateInput{Format: FormatHTML}); err == nil {
 		t.Error("missing targets should fail")
 	}
+	if err := g.Validate(GenerateInput{Format: FormatHTML, Months: maxExecSummaryMonths, Targets: []cost.AccountTarget{{AccountID: "123456789012"}}}); err != nil {
+		t.Errorf("months at the cap should pass: %v", err)
+	}
+	if err := g.Validate(GenerateInput{Format: FormatHTML, Months: maxExecSummaryMonths + 1, Targets: []cost.AccountTarget{{AccountID: "123456789012"}}}); err == nil {
+		t.Error("months above the cap should fail")
+	}
 }
 
 func TestExecSummaryGeneratorGenerateRendersHTML(t *testing.T) {
@@ -204,5 +210,33 @@ func TestRenderExecSummaryHTMLEscapingAndKPIs(t *testing.T) {
 	}
 	if strings.Contains(out, "&#9660;") || strings.Contains(out, "&amp;#") {
 		t.Error("MoM direction arrow is being HTML-escaped")
+	}
+}
+
+func TestRenderExecSummaryZeroSpendNote(t *testing.T) {
+	rep := execsummary.Report{
+		PayerAlias:        "example-payer",
+		PayerAccountID:    "123456789012",
+		Currency:          "USD",
+		StartMonth:        "2026-02",
+		EndMonth:          "2026-06",
+		ZeroSpendAccounts: 12,
+	}
+	var buf bytes.Buffer
+	if err := RenderExecSummaryHTML(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "12 account(s) with USD 0.00 in spend over the window") {
+		t.Error("zero-spend tally note missing from output")
+	}
+
+	buf.Reset()
+	rep.ZeroSpendAccounts = 0
+	if err := RenderExecSummaryHTML(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "account(s) with") {
+		t.Error("zero-spend tally note should be omitted when there are none")
 	}
 }
