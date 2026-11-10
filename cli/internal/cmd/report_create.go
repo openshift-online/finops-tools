@@ -63,6 +63,11 @@ Example:
 		if err := validateReportCostTargetSelector(templateName, sel, reportCreateSnowflakeAlias); err != nil {
 			return err
 		}
+		if templateName == reportpkg.TemplateExecSummary {
+			if err := validateExecSummarySelection(cmd, sel); err != nil {
+				return err
+			}
+		}
 		if err := validatePeriodFlags(cmd); err != nil {
 			return err
 		}
@@ -118,8 +123,14 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
-		return err
+	// Cost-period config defaults (defaults.cost.*) target get-cost semantics and
+	// can set a cost.to that resolveCostPeriod legitimately rejects; exec-summary
+	// derives its window from --months alone, so skip them there. Flag-only mode
+	// checks already ran in validatePeriodFlags during PreRunE.
+	if templateName != reportpkg.TemplateExecSummary {
+		if err := applyCostPeriodDefaults(cmd, cfg); err != nil {
+			return err
+		}
 	}
 
 	status := progress.New(cmd.ErrOrStderr(), reportGenerateQuiet)
@@ -148,11 +159,27 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if templateName == reportpkg.TemplateExecSummary {
+			// resolveCostTargets excludes the payer from member discovery; the
+			// executive summary reports payer own spend too.
+			payerAlias := sel.PayerAliases[0]
+			payerID, ok := cfg.PayerAccountIDForAlias(payerAlias)
+			if !ok {
+				return fmt.Errorf("unknown payer alias %q (register payer with: finops config account add aws <12-digit-id> --alias %s)", payerAlias, payerAlias)
+			}
+			targets = buildExecSummaryTargets(payerID, payerAlias, targets)
+		}
 	}
 
-	dateRange, err := resolveCostPeriod(time.Now().UTC())
-	if err != nil {
-		return err
+	// Exec-summary computes its own completed-month window in Generate and never
+	// uses in.Range; resolving the cost period here would only give config
+	// defaults a chance to block generation.
+	var dateRange cost.DateRange
+	if templateName != reportpkg.TemplateExecSummary {
+		dateRange, err = resolveCostPeriod(time.Now().UTC())
+		if err != nil {
+			return err
+		}
 	}
 
 	in := reportpkg.GenerateInput{
@@ -165,6 +192,11 @@ func runReportCreate(cmd *cobra.Command, args []string) error {
 		SnowflakeAlias:  snowflakeAlias,
 		Workers:         reportGenerateWorkers,
 		SelectionRootID: sel.SelectionRootID,
+	}
+	if templateName == reportpkg.TemplateExecSummary {
+		// For exec-summary the shared --months flag counts completed calendar months,
+		// and only when set explicitly (config cost-period defaults do not apply).
+		in.Months = execSummaryMonthsFromFlags(cmd, periodFlags.months)
 	}
 	if err := gen.Validate(in); err != nil {
 		return err

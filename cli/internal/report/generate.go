@@ -27,6 +27,9 @@ type GenerateInput struct {
 	SnowflakeAlias   string
 	Workers          int
 	SelectionRootID  string
+	// Months is the completed-month window size for templates that report on
+	// completed calendar months (exec-summary); 0 means the template default.
+	Months int
 }
 
 // SnowflakeMartOpener opens a Snowflake connection for mart-backed reports.
@@ -63,6 +66,7 @@ var generators = map[string]Generator{
 	TemplateCosts:         costsGenerator{},
 	TemplateSavingsPlans:  savingsPlansGenerator{},
 	TemplateCostAnomalies: costAnomaliesGenerator{},
+	TemplateExecSummary:   execSummaryGenerator{},
 }
 
 // AccountTargetMode describes whether a report uses AWS account targeting flags.
