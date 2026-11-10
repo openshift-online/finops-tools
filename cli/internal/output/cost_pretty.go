@@ -101,6 +101,8 @@ func writePrettyBreakdown(w io.Writer, s styler, r cost.CostResult) error {
 	table := tablewriter.NewWriter(w)
 	table.SetAutoWrapText(false)
 	table.SetBorder(false)
+	// Title()/ToUpper would turn SGR "\033[1m" into "\033[1M" (CSI Delete Line) and erase headers.
+	table.SetAutoFormatHeaders(false)
 	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 	table.SetAlignment(tablewriter.ALIGN_LEFT)
 	table.SetColumnAlignment([]int{
