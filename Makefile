@@ -14,12 +14,15 @@ GOLANGCI_MODULE_DIRS_STATUS := $(.SHELLSTATUS)
 #   make lint LINT_NEW_FROM=<push-before-sha>   # push
 # Default origin/main is resolved to a merge-base with HEAD (PR-style patch).
 LINT_NEW_FROM ?= origin/main
+# Match CI actions/setup-go go-version: "1.25". A newer host Go (e.g. Homebrew
+# 1.27) can break golangci-lint typecheck on stdlib export data.
+GOTOOLCHAIN_LINT ?= go1.25.5
 
 test:
 	go test ./core/... ./cli/... ./backend/...
 
 lint-install:
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+	GOTOOLCHAIN=$(GOTOOLCHAIN_LINT) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 
 $(GOLANGCI_LINT):
 	$(MAKE) lint-install
@@ -58,11 +61,11 @@ lint: $(GOLANGCI_LINT)
 	fi; \
 	for dir in $(GOLANGCI_MODULE_DIRS); do \
 		echo "golangci-lint $$dir (new vs $$baseline)"; \
-		( cd $$dir && $(GOLANGCI_LINT) run --new-from-rev=$$baseline ./... ) || exit $$?; \
+		( cd $$dir && GOTOOLCHAIN=$(GOTOOLCHAIN_LINT) $(GOLANGCI_LINT) run --new-from-rev=$$baseline ./... ) || exit $$?; \
 	done
 
 lint-all: $(GOLANGCI_LINT)
-	$(GOLANGCI_LINT) run $(GOLANGCI_PACKAGES)
+	GOTOOLCHAIN=$(GOTOOLCHAIN_LINT) $(GOLANGCI_LINT) run $(GOLANGCI_PACKAGES)
 
 # Copy the shared pre-push hook into this clone. Does not change core.hooksPath, so
 # existing hooks such as rh-multi-pre-commit stay in place. A different pre-push
