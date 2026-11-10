@@ -71,7 +71,7 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 	switch q.GroupBy {
 	case GroupByService:
 		return fetchAWSNetAmortizedBulkByService(ctx, ce, q, targets, plan, dr)
-	case GroupByAccount, GroupByNone, GroupByOU:
+	case GroupByAccount, GroupByNone, GroupByOU, GroupByAccountTag:
 		ids := sortedAccountIDs(plan.accountIDs)
 		batches := batchStrings(ids, linkedAccountFilterBatchSize)
 		type accountBatchResult struct {
@@ -118,6 +118,9 @@ func fetchAWSNetAmortizedBulk(ctx context.Context, q CostQuery, targets []Accoun
 		}
 		if q.GroupBy == GroupByOU {
 			out.Breakdown = rollupOUBreakdown(breakdown, q.AWSFetch)
+		}
+		if q.GroupBy == GroupByAccountTag {
+			out.Breakdown = rollupAccountTagBreakdown(breakdown, q.AWSFetch)
 		}
 		return out, nil
 	default:
@@ -251,16 +254,17 @@ func bulkMergedCostResult(targets []AccountTarget, q CostQuery, dr DateRange, am
 	}
 
 	return CostResult{
-		Provider:    ProviderAWS,
-		AccountName: strings.Join(names, ", "),
-		AccountID:   strings.Join(ids, ", "),
-		Metric:      MetricNetAmortized,
-		GroupBy:     q.GroupBy,
-		StartDate:   FormatDate(dr.Start),
-		EndDate:     FormatDate(dr.End.AddDate(0, 0, -1)),
-		Amount:      amount,
-		Currency:    currency,
-		Linked:      true,
+		Provider:      ProviderAWS,
+		AccountName:   strings.Join(names, ", "),
+		AccountID:     strings.Join(ids, ", "),
+		Metric:        MetricNetAmortized,
+		GroupBy:       q.GroupBy,
+		GroupByTagKey: strings.TrimSpace(q.TagKey),
+		StartDate:     FormatDate(dr.Start),
+		EndDate:       FormatDate(dr.End.AddDate(0, 0, -1)),
+		Amount:        amount,
+		Currency:      currency,
+		Linked:        true,
 	}
 }
 

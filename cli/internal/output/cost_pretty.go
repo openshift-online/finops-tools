@@ -43,7 +43,11 @@ func writePrettySummary(w io.Writer, s styler, r cost.CostResult) error {
 		{"Period", fmt.Sprintf("%s – %s", r.StartDate, r.EndDate)},
 	}
 	if r.GroupBy != cost.GroupByNone {
-		lines = append(lines, struct{ label, value string }{"Group by", string(r.GroupBy)})
+		groupByLabel := string(r.GroupBy)
+		if r.GroupBy == cost.GroupByAccountTag && strings.TrimSpace(r.GroupByTagKey) != "" {
+			groupByLabel = string(r.GroupBy) + ":" + r.GroupByTagKey
+		}
+		lines = append(lines, struct{ label, value string }{"Group by", groupByLabel})
 	}
 
 	labelWidth := 0
@@ -228,6 +232,8 @@ func breakdownTitles(groupBy cost.GroupBy) (title, keyHeader string) {
 		return "Cost by linked account", "ACCOUNT ID"
 	case cost.GroupByOU:
 		return "Cost by organizational unit (tree; amounts include nested OUs)", "OU"
+	case cost.GroupByAccountTag:
+		return "Cost by account tag", "TAG VALUE"
 	default:
 		return "Cost by service", "SERVICE"
 	}
