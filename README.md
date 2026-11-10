@@ -172,7 +172,7 @@ The optional `connection` field selects a named Snowflake environment (see below
 
 #### Snowflake
 
-Set `SNOWFLAKE_CONNECTIONS` to a comma-separated list of lowercase names (e.g. `sandbox`, or `preprod,sandbox` when both are configured). Each connection uses prefixed env vars: `SNOWFLAKE_CONN_<NAME>_*` where `<NAME>` is uppercased in the key (`sandbox` → `SNOWFLAKE_CONN_SANDBOX_ACCOUNT`). Omit all Snowflake variables to start without Snowflake (`/v1/snowflake/query` returns 503).
+Set `SNOWFLAKE_CONNECTIONS` to a comma-separated list of lowercase names (e.g. `sandbox`, or `preprod,sandbox,prod`). Each connection uses prefixed env vars: `SNOWFLAKE_CONN_<NAME>_*` where `<NAME>` is uppercased in the key (`sandbox` → `SNOWFLAKE_CONN_SANDBOX_ACCOUNT`). Omit all Snowflake variables to start without Snowflake (`/v1/snowflake/query` returns 503).
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -197,13 +197,15 @@ OpenShift uses split Secrets per connection (see [`deploy/openshift/deployment.y
 
 | Source | Contents |
 |--------|----------|
-| Deployment `env` | `SNOWFLAKE_CONNECTIONS`, `SNOWFLAKE_DEFAULT_CONNECTION` |
+| Deployment `env` | `SNOWFLAKE_CONNECTIONS=preprod,sandbox,prod`; default `preprod` on `mpp-w2-preprod` (use `prod` on MP+ prod — HCMFINOPS-389) |
 | `finops-backend-snowflake-preprod-config` | `SNOWFLAKE_CONN_PREPROD_*` env keys (including `PRIVATE_KEY_FILE` path) |
 | `finops-backend-snowflake-preprod-key` | `private_key` file mounted at `/etc/finops/snowflake/preprod/` |
 | `finops-backend-snowflake-sandbox-config` | `SNOWFLAKE_CONN_SANDBOX_*` env keys (including `PRIVATE_KEY_FILE` path) |
 | `finops-backend-snowflake-sandbox-key` | `private_key` file mounted at `/etc/finops/snowflake/sandbox/` |
+| `finops-backend-snowflake-prod-config` | `SNOWFLAKE_CONN_PROD_*` env keys (including `PRIVATE_KEY_FILE` path) |
+| `finops-backend-snowflake-prod-key` | `private_key` file mounted at `/etc/finops/snowflake/prod/` |
 
-Every name listed in `SNOWFLAKE_CONNECTIONS` must have matching config and key Secrets before the backend starts.
+Every name listed in `SNOWFLAKE_CONNECTIONS` must have matching config and key Secrets before the backend starts. Do not apply the Deployment until those Secrets exist, or new pods will stay Pending (`FailedMount`). Snowflake prod rejects egress from `mpp-w2-preprod`; keep the default as `preprod` there and use an MP+ prod cluster for `connection=prod`.
 
 See [`deploy/openshift/secret.yaml.example`](deploy/openshift/secret.yaml.example) for a full multi-Secret example.
 
@@ -236,7 +238,12 @@ curl -s 'http://localhost:8080/v1/aws/accounts/historical-count?aggregate=sum&fr
 
 ### OpenShift deployment
 
-Runtime namespace: **`finops-team--finops-tools-backend`** on cluster `mpp-w2-preprod`.
+Runtime namespace: **`finops-team--finops-tools-backend`** on:
+
+| Env | Cluster | Manifests | Snowflake connections |
+|-----|---------|-----------|------------------------|
+| preprod (default) | `mpp-w2-preprod` | [`deploy/openshift/`](deploy/openshift/) | `preprod,sandbox,prod` (default `preprod`) |
+| prod | `prod-mpp-spoke-aws-us-east-1` (`mpp-e1-prod`) | [`deploy/openshift-prod/`](deploy/openshift-prod/) | `prod` only |
 
 The TenantNamespace CR (`metadata.name: finops-tools-backend`) is applied in **`finops-team--config`**; the platform provisions **`finops-team--finops-tools-backend`**.
 
@@ -244,10 +251,11 @@ The TenantNamespace CR (`metadata.name: finops-tools-backend`) is applied in **`
 
 Creating the namespace requires a **TenantNamespace** in `finops-team--config`. Most developers do not have permission for this API.
 
-Ask a tenant admin to run once:
+Ask a tenant admin to run once (pick the matching manifests):
 
 ```bash
-oc apply -f deploy/openshift/tenantnamespace.yaml
+oc apply -f deploy/openshift/tenantnamespace.yaml          # mpp-w2-preprod
+oc apply -f deploy/openshift-prod/tenantnamespace.yaml     # mpp-e1-prod
 ```
 
 If you see `Forbidden` on `tenantnamespaces.tenant.paas.redhat.com`, you need that admin step — you cannot self-provision the namespace.
@@ -261,10 +269,13 @@ oc auth can-i create deployment -n finops-team--finops-tools-backend
 
 #### Deploy the API (developers)
 
+`make openshift-*` targets take `OPENSHIFT_ENV=preprod|prod` (default `preprod`). They check `oc` login against the matching API and apply the matching manifests.
+
 Full rebuild, push, and roll out:
 
 ```bash
-make openshift-refresh
+make openshift-refresh                 # preprod
+make openshift-refresh OPENSHIFT_ENV=prod
 ```
 
 Or step by step:
@@ -282,10 +293,22 @@ make podman-push
 make openshift-apply
 ```
 
-3. Create Snowflake Secrets when ready (config + key per connection listed in `SNOWFLAKE_CONNECTIONS`):
+3. Create Snowflake Secrets when ready (config + key per connection listed in `SNOWFLAKE_CONNECTIONS`). On `mpp-w2-preprod` the Deployment default is **preprod** (Snowflake prod is unreachable from that cluster until MP+ prod exists):
 
 ```bash
-# Preprod (default connection)
+# Prod (available when running on MP+ prod; optional on preprod cluster)
+oc create secret generic finops-backend-snowflake-prod-config \
+  --from-literal=SNOWFLAKE_CONN_PROD_ACCOUNT=example-prod \
+  --from-literal=SNOWFLAKE_CONN_PROD_USER=example-user \
+  --from-literal=SNOWFLAKE_CONN_PROD_WAREHOUSE=PROD_WH \
+  --from-literal=SNOWFLAKE_CONN_PROD_PRIVATE_KEY_FILE=/etc/finops/snowflake/prod/private_key \
+  -n finops-team--finops-tools-backend
+
+oc create secret generic finops-backend-snowflake-prod-key \
+  --from-file=private_key=./prod_rsa_key.p8 \
+  -n finops-team--finops-tools-backend
+
+# Preprod
 oc create secret generic finops-backend-snowflake-preprod-config \
   --from-literal=SNOWFLAKE_CONN_PREPROD_ACCOUNT=example-preprod \
   --from-literal=SNOWFLAKE_CONN_PREPROD_USER=example-user \
