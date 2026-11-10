@@ -39,6 +39,11 @@ func FetchCosts(ctx context.Context, q CostQuery) (CostResult, error) {
 		return result, nil
 	}
 	rows := make(map[string]*CostRow)
+	coverage := newCostCoverageTracker(q)
+	var serviceTotals map[Service]*CostRow
+	if !q.TotalsOnly && !q.allServices {
+		serviceTotals = make(map[Service]*CostRow)
+	}
 	usageTypes := make(map[string]bool)
 	services := q.Services
 	if q.allServices {
@@ -60,7 +65,7 @@ func FetchCosts(ctx context.Context, q CostQuery) (CostResult, error) {
 			for _, service := range services {
 				for offset := 0; offset < len(matched); offset += billingUsageTypeBatchSize {
 					batch := matched[offset:min(offset+billingUsageTypeBatchSize, len(matched))]
-					if err := fetchServiceCosts(ctx, client, q, service, interval, accounts, batch, &result, rows); err != nil {
+					if err := fetchServiceCosts(ctx, client, q, service, interval, accounts, batch, &result, rows, serviceTotals, coverage); err != nil {
 						if q.allServices {
 							return CostResult{}, fmt.Errorf("billing source %s, all services: %w", id, err)
 						}
@@ -92,6 +97,13 @@ func FetchCosts(ctx context.Context, q CostQuery) (CostResult, error) {
 		}
 		return a.AccountID < b.AccountID
 	})
+	for _, total := range serviceTotals {
+		result.ServiceTotals = append(result.ServiceTotals, *total)
+	}
+	sort.Slice(result.ServiceTotals, func(i, j int) bool {
+		return result.ServiceTotals[i].Service < result.ServiceTotals[j].Service
+	})
+	result.Coverage = coverage.result()
 	if q.allServices {
 		result.Notices = append(result.Notices, "Avoidable amounts are unavailable for charges across unclassified services.")
 	} else if result.AvoidableAmount == nil {
@@ -186,7 +198,7 @@ func costAccountBatches(targets []cost.AccountTarget) []*cetypes.Expression {
 	return batches
 }
 
-func fetchServiceCosts(ctx context.Context, client BillingAPI, q CostQuery, service Service, interval *cetypes.DateInterval, accounts *cetypes.Expression, usageTypes []string, result *CostResult, rows map[string]*CostRow) error {
+func fetchServiceCosts(ctx context.Context, client BillingAPI, q CostQuery, service Service, interval *cetypes.DateInterval, accounts *cetypes.Expression, usageTypes []string, result *CostResult, rows map[string]*CostRow, serviceTotals map[Service]*CostRow, coverage *costCoverageTracker) error {
 	filters := []cetypes.Expression{
 		{Dimensions: &cetypes.DimensionValues{Key: cetypes.DimensionUsageType, Values: usageTypes}},
 	}
@@ -201,6 +213,7 @@ func fetchServiceCosts(ctx context.Context, client BillingAPI, q CostQuery, serv
 	}
 	var token *string
 	seen := make(map[string]bool)
+	returnedPeriods := make([]bool, coverage.coverage.TotalPeriods)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -224,6 +237,7 @@ func fetchServiceCosts(ctx context.Context, client BillingAPI, q CostQuery, serv
 			if err != nil {
 				return err
 			}
+			coverage.observe(returnedPeriods, start, end, len(bucket.Groups) > 0)
 			if q.TotalsOnly {
 				start, end = result.StartDate, result.EndDate
 			}
@@ -260,10 +274,21 @@ func fetchServiceCosts(ctx context.Context, client BillingAPI, q CostQuery, serv
 				}
 				addCostAmounts(&rows[key].CostAmounts, values)
 				rows[key].Estimated = rows[key].Estimated || bucket.Estimated
+				if serviceTotals != nil {
+					if serviceTotals[service] == nil {
+						serviceTotals[service] = &CostRow{
+							StartDate: result.StartDate, EndDate: result.EndDate, Service: service,
+							CostAmounts: emptyCostAmounts(),
+						}
+					}
+					addCostAmounts(&serviceTotals[service].CostAmounts, values)
+					serviceTotals[service].Estimated = serviceTotals[service].Estimated || bucket.Estimated
+				}
 			}
 		}
 		next := aws.ToString(out.NextPageToken)
 		if next == "" {
+			coverage.finishQuery(returnedPeriods)
 			return nil
 		}
 		if seen[next] {

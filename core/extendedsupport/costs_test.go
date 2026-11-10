@@ -87,6 +87,21 @@ func TestSupportCostsBillingFiltersPaginationAndGrouping(t *testing.T) {
 			if dimensionCalls != 2 || usageCalls != 8 || result.Amount != 41.5 || result.KnownAvoidableAmount != 36 || result.AvoidableAmount != nil || !result.Estimated || result.Currency != "USD" {
 				t.Fatalf("result=%+v dimensions=%d usage=%d", result, dimensionCalls, usageCalls)
 			}
+			if len(result.ServiceTotals) != 4 {
+				t.Fatalf("missing service totals: %+v", result.ServiceTotals)
+			}
+			for i, total := range result.ServiceTotals {
+				want := 12.0
+				if total.Service == ServiceEKS {
+					want = 5.5
+				}
+				if total.Amount != want || total.StartDate != "2026-09-20" || total.EndDate != "2026-10-19" || total.AccountID != "" || !total.Estimated || (total.AvoidableAmount == nil) != (total.Service == ServiceEKS) {
+					t.Fatalf("service total=%+v", total)
+				}
+				if i > 0 && result.ServiceTotals[i-1].Service >= total.Service {
+					t.Fatalf("service totals are not sorted and unique: %+v", result.ServiceTotals)
+				}
+			}
 			wantRows := map[CostGroupBy]int{CostGroupByService: 4, CostGroupByAccount: 2, CostGroupByServiceAccount: 8}[grouping]
 			if len(result.Rows) != wantRows || !reflect.DeepEqual(result.UsageTypes, []string{"USE1-ExtendedSupport"}) {
 				t.Fatalf("result=%+v", result)
@@ -203,11 +218,13 @@ func TestSupportCostsMonthlyBucketsAndLargeAccountSelection(t *testing.T) {
 func TestSupportCostTotalsCombineMonthsAndPreserveGroupAmounts(t *testing.T) {
 	for _, grouping := range []CostGroupBy{CostGroupByService, CostGroupByAccount, CostGroupByServiceAccount} {
 		t.Run(string(grouping), func(t *testing.T) {
+			requests := 0
 			api := fakeBillingAPI{
 				dimensions: func(context.Context, *costexplorer.GetDimensionValuesInput) (*costexplorer.GetDimensionValuesOutput, error) {
 					return &costexplorer.GetDimensionValuesOutput{DimensionValues: billingDimensions("ExtendedSupport")}, nil
 				},
 				usage: func(_ context.Context, in *costexplorer.GetCostAndUsageInput) (*costexplorer.GetCostAndUsageOutput, error) {
+					requests++
 					if in.Granularity != cetypes.GranularityMonthly {
 						t.Fatalf("invalid billing granularity: %s", in.Granularity)
 					}
@@ -233,6 +250,9 @@ func TestSupportCostTotalsCombineMonthsAndPreserveGroupAmounts(t *testing.T) {
 			if r.Granularity != "total" || len(r.Rows) != wantRows || r.Amount != 52 || r.KnownAvoidableAmount != 34 || r.AvoidableAmount != nil || !r.Estimated {
 				t.Fatalf("totals=%+v", r)
 			}
+			if len(r.ServiceTotals) != 0 {
+				t.Fatalf("totals-only view duplicated service totals: %+v", r.ServiceTotals)
+			}
 			for _, row := range r.Rows {
 				if row.StartDate != "2026-09-20" || row.EndDate != "2026-10-19" || !row.Estimated {
 					t.Fatalf("row=%+v", row)
@@ -248,6 +268,29 @@ func TestSupportCostTotalsCombineMonthsAndPreserveGroupAmounts(t *testing.T) {
 				}
 				if row.Amount != want {
 					t.Fatalf("group amount=%+v, want %v", row, want)
+				}
+			}
+
+			q.TotalsOnly = false
+			r, err = FetchCosts(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if requests != 4 || r.Granularity != "monthly" || len(r.Rows) != 2*wantRows || r.Amount != 52 || len(r.ServiceTotals) != 2 {
+				t.Fatalf("monthly breakdown=%+v requests=%d", r, requests)
+			}
+			for i, total := range r.ServiceTotals {
+				wantService := []Service{ServiceEKS, ServiceRDS}[i]
+				wantAmount := []float64{18, 34}[i]
+				if total.Service != wantService || total.Amount != wantAmount || total.StartDate != "2026-09-20" || total.EndDate != "2026-10-19" || total.AccountID != "" || !total.Estimated {
+					t.Fatalf("monthly service total=%+v", total)
+				}
+				if total.Service == ServiceEKS {
+					if total.AvoidableAmount != nil || total.KnownAvoidableAmount != 0 {
+						t.Fatalf("EKS avoidable subtotal=%+v", total)
+					}
+				} else if total.AvoidableAmount == nil || *total.AvoidableAmount != 34 || total.KnownAvoidableAmount != 34 {
+					t.Fatalf("RDS avoidable subtotal=%+v", total)
 				}
 			}
 		})
@@ -308,7 +351,7 @@ func TestSupportCostsNeverTurnsIncompleteBillingIntoZero(t *testing.T) {
 			q.Targets = []cost.AccountTarget{{AccountID: "111111111111", PayerAccountID: "123456789012"}}
 			q.Services = []Service{ServiceRDS}
 			r, err := FetchCosts(ctx, q)
-			if err == nil || len(r.Rows) != 0 || r.Amount != 0 {
+			if err == nil || len(r.Rows) != 0 || r.Amount != 0 || r.Coverage != nil {
 				t.Fatalf("partial result=%+v err=%v", r, err)
 			}
 			if stage == "cancellation" && !errors.Is(err, context.Canceled) {

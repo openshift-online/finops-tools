@@ -49,10 +49,19 @@ the same period handling as account get-cost and AWS reports.
 The exclusion also applies to explicit periods: --from alone ends at the buffered
 cutoff, and --to cannot exceed that cutoff. Use --exclude-recent-days 0 to include
 recent complete days through yesterday.
-With no explicit period or granularity, show one total per service across the
-last 90 reliable Cost Explorer days. Explicit periods default to monthly buckets;
-use --granularity daily or monthly to request a time breakdown.
+Show one total per service across the selected period, including explicit
+--days, --months, or --from/--to ranges. With no period options, use the last
+90 reliable Cost Explorer days. Use --granularity daily or monthly to request
+a time breakdown alongside full-period service totals. The service totals
+remain available with every --group-by selection. JSON stores them separately
+under service_totals; CSV contains breakdown rows only.
 --group-by defaults to service; account and service,account are also supported.
+
+Period coverage distinguishes empty returned periods from periods omitted by
+Cost Explorer. Daily breakdowns report coverage by day; otherwise it is monthly,
+including totals-only reports. Explicit zero-cost records remain in the cost
+rows. Empty or omitted periods do not prove historical data is unavailable.
+JSON stores coverage separately under coverage; CSV contains cost rows only.
 
 --regions limits costs to the listed AWS billing regions (all by default).
 --skip-regions excludes regions and takes precedence over --regions. These
@@ -77,6 +86,7 @@ Output formats: pretty-print (default), json, csv.`,
 		Example: `  finops extended-support get-cost --payer rh-control
   finops extended-support get-cost --payer rh-control --services rds,eks
   finops extended-support get-cost --payer rh-control --regions us-east-1,us-west-2 --skip-regions us-west-2
+  finops extended-support get-cost --payer rh-control --from 2026-08-01 --to 2026-10-31
   finops extended-support get-cost --payer rh-control --from 2026-08-01 --to 2026-10-31 --group-by service --granularity monthly
   finops extended-support get-cost --payer rh-control --group-by service,account --format json
   finops extended-support get-cost --account-alias my-account --days 7 --format csv -o support-costs.csv`,
@@ -98,7 +108,7 @@ Output formats: pretty-print (default), json, csv.`,
 	cmd.Flags().Lookup("skip-regions").Usage = "Exclude AWS billing regions (comma-separated or repeatable; overrides --regions)"
 	cmd.Flags().StringVar(&f.groupBy, "group-by", "service", "Group by service, account, or service,account")
 	bindPeriodFlags(cmd, &f.period, periodFlagValues{days: 90, excludeRecentDays: 2})
-	cmd.Flags().StringVar(&f.granularity, "granularity", "", "daily or monthly (default: totals for the default period; monthly for an explicit period)")
+	cmd.Flags().StringVar(&f.granularity, "granularity", "", "daily or monthly breakdown with full-period service totals (default: one total per group across the selected period)")
 	cmd.Flags().StringVar(&f.metric, "metric", "NetUnblendedCost", "Cost metric: NetUnblendedCost or UnblendedCost")
 	cmd.Flags().StringVar(&f.format, "format", string(output.FormatPrettyPrint), "Output format: pretty-print, json, csv")
 	cmd.Flags().BoolVar(&f.quiet, "quiet", false, "Suppress progress messages on stderr")
@@ -149,9 +159,7 @@ func (f *extendedSupportCostFlags) query(cmd *cobra.Command, now time.Time) (ext
 		return q, sel, err
 	}
 	q.Granularity, err = extendedsupport.ParseCostGranularity(f.granularity)
-	q.TotalsOnly = !cmd.Flags().Changed("granularity") &&
-		!cmd.Flags().Changed("days") && !cmd.Flags().Changed("months") &&
-		!cmd.Flags().Changed("from") && !cmd.Flags().Changed("to")
+	q.TotalsOnly = !cmd.Flags().Changed("granularity")
 	return q, sel, err
 }
 
@@ -204,7 +212,8 @@ func (f *extendedSupportCostFlags) run(cmd *cobra.Command) error {
 	if len(sel.OUs) > 0 || sel.TagKey != "" {
 		result.Notices = append(result.Notices, "OU/tag account selection reflects current Organizations membership/tags, not historical membership during the billing period.")
 	}
-	if query.TotalsOnly {
+	if query.TotalsOnly && !cmd.Flags().Changed("days") && !cmd.Flags().Changed("months") &&
+		!cmd.Flags().Changed("from") && !cmd.Flags().Changed("to") {
 		notice := "Defaulting to totals for the last 90 reliable Cost Explorer days (90 complete UTC days with a two-day billing-update buffer)."
 		if f.period.excludeRecentDays != 2 {
 			notice = fmt.Sprintf("Defaulting to totals for the last 90 complete Cost Explorer days, excluding the %d most recent complete UTC days.", f.period.excludeRecentDays)

@@ -29,23 +29,28 @@ func TestExtendedSupportCostDefaultsAndPeriods(t *testing.T) {
 		args                    []string
 		start, end, granularity string
 		group                   extendedsupport.CostGroupBy
+		defaultPeriodNotice     bool
 	}{
-		{name: "defaults", start: "2026-08-04", end: "2026-11-02", granularity: "total", group: extendedsupport.CostGroupByService},
-		{name: "default account totals", args: []string{"--group-by", "account"}, start: "2026-08-04", end: "2026-11-02", granularity: "total", group: extendedsupport.CostGroupByAccount},
-		{name: "default service account totals", args: []string{"--group-by", "service,account"}, start: "2026-08-04", end: "2026-11-02", granularity: "total", group: extendedsupport.CostGroupByServiceAccount},
+		{name: "defaults", start: "2026-08-04", end: "2026-11-02", granularity: "total", group: extendedsupport.CostGroupByService, defaultPeriodNotice: true},
+		{name: "default account totals", args: []string{"--group-by", "account"}, start: "2026-08-04", end: "2026-11-02", granularity: "total", group: extendedsupport.CostGroupByAccount, defaultPeriodNotice: true},
+		{name: "default service account totals", args: []string{"--group-by", "service,account"}, start: "2026-08-04", end: "2026-11-02", granularity: "total", group: extendedsupport.CostGroupByServiceAccount, defaultPeriodNotice: true},
 		{name: "explicit monthly granularity", args: []string{"--granularity", "monthly"}, start: "2026-08-04", end: "2026-11-02", granularity: "monthly"},
-		{name: "explicit default flags", args: []string{"--days", "90", "--exclude-recent-days", "2"}, start: "2026-08-04", end: "2026-11-02", granularity: "monthly"},
-		{name: "disable exclusion", args: []string{"--exclude-recent-days", "0"}, start: "2026-08-06", end: "2026-11-04", granularity: "total"},
-		{name: "custom exclusion", args: []string{"--days", "7", "--exclude-recent-days", "1"}, start: "2026-10-27", end: "2026-11-03", granularity: "monthly"},
+		{name: "explicit default flags", args: []string{"--days", "90", "--exclude-recent-days", "2"}, start: "2026-08-04", end: "2026-11-02", granularity: "total"},
+		{name: "disable exclusion", args: []string{"--exclude-recent-days", "0"}, start: "2026-08-06", end: "2026-11-04", granularity: "total", defaultPeriodNotice: true},
+		{name: "custom exclusion", args: []string{"--days", "7", "--exclude-recent-days", "1"}, start: "2026-10-27", end: "2026-11-03", granularity: "total"},
 		{name: "default window daily override", args: []string{"--granularity", "daily"}, start: "2026-08-04", end: "2026-11-02", granularity: "daily"},
-		{name: "exactly 90 without exclusion", args: []string{"--from", "2026-08-06", "--to", "2026-11-03", "--exclude-recent-days", "0"}, start: "2026-08-06", end: "2026-11-04", granularity: "monthly"},
-		{name: "91 days without exclusion", args: []string{"--from", "2026-08-05", "--to", "2026-11-03", "--exclude-recent-days", "0"}, start: "2026-08-05", end: "2026-11-04", granularity: "monthly"},
-		{name: "explicit range at buffered cutoff", args: []string{"--from", "2026-10-01", "--to", "2026-11-01"}, start: "2026-10-01", end: "2026-11-02", granularity: "monthly"},
-		{name: "leap year 90", args: []string{"--from", "2024-02-01", "--to", "2024-04-30"}, start: "2024-02-01", end: "2024-05-01", granularity: "monthly"},
-		{name: "from only", args: []string{"--from", "2026-11-01"}, start: "2026-11-01", end: "2026-11-02", granularity: "monthly"},
-		{name: "from only no exclusion", args: []string{"--from", "2026-11-01", "--exclude-recent-days", "0"}, start: "2026-11-01", end: "2026-11-04", granularity: "monthly"},
-		{name: "short day override defaults monthly", args: []string{"--days", "7"}, start: "2026-10-26", end: "2026-11-02", granularity: "monthly"},
-		{name: "calendar months", args: []string{"--months", "3"}, start: "2026-08-01", end: "2026-11-02", granularity: "monthly"},
+		{name: "exactly 90 without exclusion", args: []string{"--from", "2026-08-06", "--to", "2026-11-03", "--exclude-recent-days", "0"}, start: "2026-08-06", end: "2026-11-04", granularity: "total"},
+		{name: "91 days without exclusion", args: []string{"--from", "2026-08-05", "--to", "2026-11-03", "--exclude-recent-days", "0"}, start: "2026-08-05", end: "2026-11-04", granularity: "total"},
+		{name: "explicit range at buffered cutoff", args: []string{"--from", "2026-10-01", "--to", "2026-11-01"}, start: "2026-10-01", end: "2026-11-02", granularity: "total"},
+		{name: "explicit range account totals", args: []string{"--from", "2026-08-01", "--to", "2026-10-31", "--group-by", "account"}, start: "2026-08-01", end: "2026-11-01", granularity: "total", group: extendedsupport.CostGroupByAccount},
+		{name: "explicit range service account totals", args: []string{"--from", "2026-08-01", "--to", "2026-10-31", "--group-by", "service,account"}, start: "2026-08-01", end: "2026-11-01", granularity: "total", group: extendedsupport.CostGroupByServiceAccount},
+		{name: "explicit range monthly override", args: []string{"--from", "2026-08-01", "--to", "2026-10-31", "--granularity", "monthly"}, start: "2026-08-01", end: "2026-11-01", granularity: "monthly"},
+		{name: "explicit range daily override", args: []string{"--from", "2026-08-01", "--to", "2026-10-31", "--granularity", "daily"}, start: "2026-08-01", end: "2026-11-01", granularity: "daily"},
+		{name: "leap year 90", args: []string{"--from", "2024-02-01", "--to", "2024-04-30"}, start: "2024-02-01", end: "2024-05-01", granularity: "total"},
+		{name: "from only", args: []string{"--from", "2026-11-01"}, start: "2026-11-01", end: "2026-11-02", granularity: "total"},
+		{name: "from only no exclusion", args: []string{"--from", "2026-11-01", "--exclude-recent-days", "0"}, start: "2026-11-01", end: "2026-11-04", granularity: "total"},
+		{name: "short day override defaults to totals", args: []string{"--days", "7"}, start: "2026-10-26", end: "2026-11-02", granularity: "total"},
+		{name: "calendar months", args: []string{"--months", "3"}, start: "2026-08-01", end: "2026-11-02", granularity: "total"},
 		{name: "one day monthly override", args: []string{"--from", "2026-10-01", "--to", "2026-10-01", "--granularity", "monthly"}, start: "2026-10-01", end: "2026-10-02", granularity: "monthly"},
 		{name: "long daily override", args: []string{"--days", "91", "--granularity", "daily", "--group-by", "service,account"}, start: "2026-08-03", end: "2026-11-02", granularity: "daily", group: extendedsupport.CostGroupByServiceAccount},
 	} {
@@ -92,7 +97,7 @@ func TestExtendedSupportCostDefaultsAndPeriods(t *testing.T) {
 			if result.StartDate != tc.start || result.EndDate != cost.FormatDate(end.AddDate(0, 0, -1)) || result.Granularity != tc.granularity || result.GroupBy != wantGroup || len(result.Services) != 4 || result.Metric != "NetUnblendedCost" {
 				t.Fatalf("result=%+v", result)
 			}
-			if strings.Contains(strings.Join(result.Notices, " "), "Defaulting to totals") != (tc.granularity == "total") {
+			if strings.Contains(strings.Join(result.Notices, " "), "Defaulting to totals") != tc.defaultPeriodNotice {
 				t.Fatalf("default-period notice=%v", result.Notices)
 			}
 		})
@@ -208,7 +213,7 @@ func TestExtendedSupportCostCommandUsesOnlyBillingCredentialsAndWritesOutput(t *
 		return aws.Config{Region: "billing"}, nil
 	}
 	fetchExtendedSupportCosts = func(_ context.Context, q extendedsupport.CostQuery) (extendedsupport.CostResult, error) {
-		if !reflect.DeepEqual(q.Services, []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS}) || q.GroupBy != extendedsupport.CostGroupByAccount || q.Granularity != "monthly" || len(q.Targets) != 2 || q.Targets[1].AWSConfig.Region != "billing" {
+		if !reflect.DeepEqual(q.Services, []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS}) || q.GroupBy != extendedsupport.CostGroupByAccount || q.Granularity != "monthly" || !q.TotalsOnly || len(q.Targets) != 2 || q.Targets[1].AWSConfig.Region != "billing" {
 			t.Fatalf("query=%+v", q)
 		}
 		if !reflect.DeepEqual(q.Regions, []string{"us-east-1", "us-west-2"}) || !reflect.DeepEqual(q.SkipRegions, []string{"eu-west-1", "us-west-2"}) {

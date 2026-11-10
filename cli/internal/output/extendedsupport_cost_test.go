@@ -13,7 +13,7 @@ import (
 
 func supportCostFixture() extendedsupport.CostResult {
 	avoidable := 1234.567
-	return extendedsupport.CostResult{
+	r := extendedsupport.CostResult{
 		StartDate: "2026-10-01", EndDate: "2026-10-31", Granularity: "monthly", GroupBy: extendedsupport.CostGroupByService,
 		Metric: "NetUnblendedCost", Currency: "USD", Estimated: true,
 		Services: []extendedsupport.Service{extendedsupport.ServiceRDS, extendedsupport.ServiceEKS},
@@ -27,6 +27,8 @@ func supportCostFixture() extendedsupport.CostResult {
 				CostAmounts: extendedsupport.CostAmounts{Amount: 6}},
 		},
 	}
+	r.ServiceTotals = append([]extendedsupport.CostRow(nil), r.Rows...)
+	return r
 }
 
 func TestExtendedSupportCostOutputPreservesUnknownAvoidableAmounts(t *testing.T) {
@@ -48,6 +50,9 @@ func TestExtendedSupportCostOutputPreservesUnknownAvoidableAmounts(t *testing.T)
 				}
 				if decoded.AvoidableAmount != nil || decoded.Rows[1].AvoidableAmount != nil || decoded.Rows[0].AvoidableAmount == nil || *decoded.Rows[0].AvoidableAmount != 1234.567 || decoded.KnownAvoidableAmount != 1234.567 || !decoded.Estimated {
 					t.Fatalf("JSON=%s", buf.String())
+				}
+				if len(decoded.ServiceTotals) != 2 || decoded.ServiceTotals[0].Amount != 1234.567 || decoded.ServiceTotals[0].AvoidableAmount == nil || decoded.ServiceTotals[1].AvoidableAmount != nil || !decoded.ServiceTotals[1].Estimated {
+					t.Fatalf("JSON service totals=%s", buf.String())
 				}
 				if strings.Join(decoded.Regions, ",") != "us-east-1,us-west-2" || strings.Join(decoded.ExcludedRegions, ",") != "us-west-2" {
 					t.Fatalf("JSON region scope=%s", buf.String())
@@ -103,8 +108,74 @@ func TestExtendedSupportCostTotalsTableShowsGroupsWithoutRepeatedDates(t *testin
 			t.Fatalf("missing %q: %s", want, text)
 		}
 	}
-	if strings.Contains(text, "FROM") || strings.Contains(text, "TO ") || strings.Contains(text, "ESTIMATED") || strings.Contains(text, "AVOIDABLE SURCHARGES") || strings.Count(text, "2026-10-01") != 1 {
+	if strings.Contains(text, "Totals by service for full period") || strings.Contains(text, "Time breakdown") || strings.Contains(text, "FROM") || strings.Contains(text, "TO ") || strings.Contains(text, "ESTIMATED") || strings.Contains(text, "AVOIDABLE SURCHARGES") || strings.Count(text, "2026-10-01") != 1 {
 		t.Fatalf("unexpected totals table columns: %s", text)
+	}
+}
+
+func TestExtendedSupportCostBreakdownShowsFullPeriodServiceTotals(t *testing.T) {
+	for _, granularity := range []string{"daily", "monthly"} {
+		for _, grouping := range []extendedsupport.CostGroupBy{extendedsupport.CostGroupByService, extendedsupport.CostGroupByAccount, extendedsupport.CostGroupByServiceAccount} {
+			t.Run(granularity+"/"+string(grouping), func(t *testing.T) {
+				r := supportCostFixture()
+				r.Granularity, r.GroupBy = granularity, grouping
+				r.EndDate = "2026-11-01"
+				r.Amount, r.KnownAvoidableAmount = 2512, 2500
+				r.ServiceTotals = []extendedsupport.CostRow{
+					{StartDate: r.StartDate, EndDate: r.EndDate, Service: extendedsupport.ServiceEKS, CostAmounts: extendedsupport.CostAmounts{Amount: 12}},
+					{StartDate: r.StartDate, EndDate: r.EndDate, Service: extendedsupport.ServiceRDS, CostAmounts: extendedsupport.CostAmounts{Amount: 2500}},
+				}
+				r.Rows = []extendedsupport.CostRow{
+					{StartDate: "2026-10-01", EndDate: "2026-10-01", Service: extendedsupport.ServiceRDS, CostAmounts: extendedsupport.CostAmounts{Amount: 1200}},
+					{StartDate: "2026-10-01", EndDate: "2026-10-01", Service: extendedsupport.ServiceEKS, CostAmounts: extendedsupport.CostAmounts{Amount: 6}},
+					{StartDate: "2026-11-01", EndDate: "2026-11-01", Service: extendedsupport.ServiceRDS, CostAmounts: extendedsupport.CostAmounts{Amount: 1300}},
+					{StartDate: "2026-11-01", EndDate: "2026-11-01", Service: extendedsupport.ServiceEKS, CostAmounts: extendedsupport.CostAmounts{Amount: 6}},
+				}
+				if granularity == "monthly" {
+					r.Rows[0].EndDate = "2026-10-31"
+					r.Rows[1].EndDate = "2026-10-31"
+				}
+				if grouping != extendedsupport.CostGroupByService {
+					for i := range r.Rows {
+						r.Rows[i].AccountID = "111111111111"
+						if r.Rows[i].Service == extendedsupport.ServiceEKS {
+							r.Rows[i].AccountID = "222222222222"
+						}
+						if grouping == extendedsupport.CostGroupByAccount {
+							r.Rows[i].Service = ""
+						}
+					}
+				}
+				var buf bytes.Buffer
+				if err := WriteExtendedSupportCostResult(&buf, FormatPrettyPrint, r); err != nil {
+					t.Fatal(err)
+				}
+				sections := strings.Split(buf.String(), "\nTime breakdown\n")
+				if len(sections) != 2 {
+					t.Fatalf("missing totals or breakdown: %s", &buf)
+				}
+				totals := strings.Split(sections[0], "Totals by service for full period\n")
+				if len(totals) != 2 {
+					t.Fatalf("missing service totals: %s", &buf)
+				}
+				for _, want := range []string{"SERVICE", "eks", "rds", "USD 12.00", "USD 2,500.00"} {
+					if !strings.Contains(totals[1], want) {
+						t.Fatalf("service totals missing %q: %s", want, totals[1])
+					}
+				}
+				for _, want := range []string{"FROM", "TO", "2026-10-01", "2026-11-01", "USD 1,200.00", "USD 1,300.00"} {
+					if !strings.Contains(sections[1], want) {
+						t.Fatalf("breakdown missing %q: %s", want, sections[1])
+					}
+				}
+				if strings.Contains(totals[1], "ACCOUNT") || strings.Contains(totals[1], "2026-") || strings.Contains(sections[1], "USD 2,500.00") {
+					t.Fatalf("totals and breakdown were mixed: %s", &buf)
+				}
+				if (grouping != extendedsupport.CostGroupByService) != strings.Contains(sections[1], "111111111111") {
+					t.Fatalf("account grouping changed: %s", sections[1])
+				}
+			})
+		}
 	}
 }
 

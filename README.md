@@ -989,7 +989,7 @@ finops extended-support get-cost --payer rh-control --format csv -o support-cost
 | `--days` | Defaults to **90** days ending at the buffered cutoff; mutually exclusive with `--months` and explicit dates. |
 | `--months` | Optional calendar-month window, using the same semantics as `account get-cost`; mutually exclusive with `--days` and explicit dates. |
 | `--exclude-recent-days` | Defaults to **2**, including with explicit period options. Use `0` to include recent complete UTC days through yesterday. |
-| `--granularity` | Optional `daily` or `monthly`. With no explicit period or granularity, shows **one period total per service**. Explicit `--days`, `--months`, or dates default to monthly buckets; specifying granularity requests that time breakdown even with the default period. |
+| `--granularity` | Optional `daily` or `monthly`. Defaults to **one period total per service**, including with explicit `--days`, `--months`, or dates. Specifying granularity requests that time breakdown alongside full-period service totals. |
 | `--metric` | Defaults to `NetUnblendedCost` for after-discount charges. `UnblendedCost` explicitly requests gross charges. Missing metrics fail the report rather than silently switching cost basis. |
 | `--format`, `--output` | Pretty-print, JSON, or CSV; optional `--output`/`-o` file. |
 
@@ -998,13 +998,46 @@ For example, on November 5 UTC, the default period is August 5–November 2 incl
 today is not included. This buffer gives recent billing data time to update;
 Cost Explorer estimated-data flags and billing-delay notices remain visible.
 
-With no `--days`, `--months`, `--from`, `--to`, or `--granularity`, the report combines
-the entire default window into one total for each service, with a note that it is
-defaulting to the last 90 reliable Cost Explorer days. An explicit `--group-by`
-still controls the grouping of these totals. JSON identifies this view with
+Without `--granularity`, the report combines the entire selected window into one
+total for each service. For example, `--from 2026-08-01 --to 2026-10-31` returns
+one total per service for August through October. When no period options are
+specified, a note explains that the report defaults to the last 90 reliable
+Cost Explorer days. An explicit `--group-by` still controls the grouping of these
+totals. JSON identifies this view with
 `granularity: "total"`; JSON/CSV row dates cover the full reporting window, and
 the pretty-print table omits repeated date columns. Region/service/account filters
-continue to apply. Explicit granularity or a period option restores time buckets.
+continue to apply. Use `--granularity daily` or `--granularity monthly` to request
+time buckets for any period.
+
+When granularity is requested, pretty-print output shows **Totals by service for
+full period** above the time breakdown, including with `--group-by account` or
+`--group-by service,account`. These totals combine all selected accounts and time
+buckets for each service using the same billing responses, with no extra AWS
+queries. JSON includes these full-period records under `service_totals`, with
+inclusive dates, cost amounts, and estimated-data flags; `rows` retains the
+requested breakdown. CSV contains only the breakdown rows so summing its amounts
+does not count the service totals again.
+
+Pretty-print output also shows **Period coverage**, including in totals-only
+reports. It counts days with matching records for daily requests, or months for
+monthly and totals-only requests. Periods with no matching records are listed
+as **No matching charges returned** when a period was returned with empty groups,
+or **No period returned** when every cost query omitted it. If only some cost
+queries returned a period, it is marked **some period responses missing**, even
+when other responses contain charges for that period. Pages of each query are
+combined before making this assessment. When no matching Extended Support usage
+types are discovered, coverage says **No matching usage types; costs not queried**.
+No extra billing requests are made for coverage.
+
+These statuses describe the filtered API responses; they cannot distinguish no
+usage from unavailable history. Totals include only returned billing records.
+Explicit zero-cost records remain zero-valued cost rows and count as matching
+records; zero and negative amounts do not imply a coverage gap. JSON retains
+every expected period with inclusive dates, status, and an `incomplete` flag
+where applicable under `coverage`, alongside `total_periods`,
+`periods_with_records`, and the coverage granularity. CSV contains cost rows
+only; use pretty-print or JSON to inspect period coverage. An empty account or
+explicit region scope that bypasses billing does not report coverage.
 
 Period handling reuses the flags, validation, and `core/cost.ResolvePeriod` logic
 used by `account get-cost` and AWS reports. With no period options, this command

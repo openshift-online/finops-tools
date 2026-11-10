@@ -101,7 +101,11 @@ type CostResult struct {
 	Estimated       bool        `json:"estimated"`
 	UsageTypes      []string    `json:"usage_types"`
 	Rows            []CostRow   `json:"rows"`
-	Notices         []string    `json:"notices"`
+	// ServiceTotals cover the full reporting period alongside daily/monthly
+	// rows, independently of GroupBy. AccountID is empty for these totals.
+	ServiceTotals []CostRow     `json:"service_totals,omitempty"`
+	Coverage      *CostCoverage `json:"coverage,omitempty"`
+	Notices       []string      `json:"notices"`
 	CostAmounts
 }
 

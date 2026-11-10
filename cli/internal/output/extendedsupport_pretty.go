@@ -63,7 +63,7 @@ func writeChargesWithoutFindings(w io.Writer, s styler, check *extendedsupport.C
 		if account.ScanIncomplete {
 			warnings = "See scan warnings"
 		}
-		table.Append([]string{account.AccountID, account.DisplayAlias, fmt.Sprintf("%s %.2f", account.Currency, account.Amount), warnings})
+		table.Append([]string{account.AccountID, account.DisplayAlias, supportCostMoney(account.Amount, account.Currency), warnings})
 	}
 	table.Render()
 	return nil
@@ -223,10 +223,7 @@ func supportChargesLabel(charges *extendedsupport.SupportCharges) string {
 	if charges == nil || charges.Amount == nil {
 		return "Unavailable"
 	}
-	if charges.Currency == "" {
-		return fmt.Sprintf("%.2f", *charges.Amount)
-	}
-	return fmt.Sprintf("%s %.2f", charges.Currency, *charges.Amount)
+	return supportCostMoney(*charges.Amount, charges.Currency)
 }
 
 func writeExtendedSupportRegionWarnings(w io.Writer, s styler, warnings []extendedsupport.RegionWarning) error {

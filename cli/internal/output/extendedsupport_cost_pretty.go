@@ -44,12 +44,29 @@ func writeExtendedSupportCostPretty(w io.Writer, r extendedsupport.CostResult) e
 			return err
 		}
 	}
+	if err := writeExtendedSupportCostCoverage(w, s, r.Coverage); err != nil {
+		return err
+	}
 	if len(r.Rows) == 0 {
-		_, err := fmt.Fprintln(w, "\nNo matching Extended Support charges were recorded for the selected services and period.")
+		_, err := fmt.Fprintln(w, "\nNo matching Extended Support charges were returned for the selected services and period.")
 		return err
 	}
 	if _, err := fmt.Fprintln(w); err != nil {
 		return err
+	}
+	if r.Granularity != "total" && len(r.ServiceTotals) > 0 {
+		if _, err := fmt.Fprintln(w, "Totals by service for full period"); err != nil {
+			return err
+		}
+		totals := newExtendedSupportTable(w)
+		totals.SetHeader([]string{cell(s, s.bold, "SERVICE"), cell(s, s.bold, "RECORDED CHARGES")})
+		for _, total := range r.ServiceTotals {
+			totals.Append([]string{string(total.Service), supportCostMoney(total.Amount, r.Currency)})
+		}
+		totals.Render()
+		if _, err := fmt.Fprintln(w, "\nTime breakdown"); err != nil {
+			return err
+		}
 	}
 	table := newExtendedSupportTable(w)
 	var headers []string
