@@ -294,6 +294,51 @@ func TestLazyServiceInvalidateIfCurrentPreservesNewerPool(t *testing.T) {
 	}
 }
 
+func TestLazyServiceCachesConnectTimeoutInitFailure(t *testing.T) {
+	t.Parallel()
+
+	opens := 0
+	l := NewLazyService(coresnowflake.ConnectParams{
+		Account:   "example",
+		User:      "user",
+		Warehouse: "wh",
+		Token:     "token",
+	}, 100, slog.Default())
+	l.openDB = func(coresnowflake.ConnectParams) (*sql.DB, error) {
+		opens++
+		db, err := coresnowflake.OpenDB(coresnowflake.ConnectParams{
+			Account:   "example",
+			User:      "user",
+			Warehouse: "wh",
+			Token:     "token",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
+	}
+	// Simulate the service-owned connect timeout firing while the caller is still active.
+	l.ping = func(context.Context, *sql.DB) error {
+		return context.DeadlineExceeded
+	}
+
+	_, err := l.connectService(context.Background())
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("first connect err = %v, want ErrUnavailable", err)
+	}
+	if l.initErr == nil {
+		t.Fatal("expected service-owned connect timeout to be cached as initErr")
+	}
+
+	_, err = l.connectService(context.Background())
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("second connect err = %v, want cached ErrUnavailable", err)
+	}
+	if opens != 1 {
+		t.Fatalf("opens = %d, want 1 (cooldown should skip reopen)", opens)
+	}
+}
+
 func TestLazyServiceDoesNotCacheCallerCanceledInitFailure(t *testing.T) {
 	t.Parallel()
 
@@ -317,19 +362,22 @@ func TestLazyServiceDoesNotCacheCallerCanceledInitFailure(t *testing.T) {
 		}
 		return db, nil
 	}
-	l.ping = func(ctx context.Context, _ *sql.DB) error {
+	l.ping = func(context.Context, *sql.DB) error {
 		if opens == 1 {
-			return context.DeadlineExceeded
+			return context.Canceled
 		}
 		return nil
 	}
 
-	_, err := l.connectService(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := l.connectService(ctx)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("first connect err = %v, want ErrUnavailable", err)
 	}
 	if l.initErr != nil {
-		t.Fatalf("caller cancel/deadline should not be cached as initErr: %v", l.initErr)
+		t.Fatalf("caller cancel should not be cached as initErr: %v", l.initErr)
 	}
 
 	_, err = l.connectService(context.Background())

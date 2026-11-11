@@ -26,7 +26,9 @@ func IsAuthExpired(err error) bool {
 	}
 
 	var sfErr *gosnowflake.SnowflakeError
-	if errors.As(err, &sfErr) && sfErr.Number != 0 {
+	// Number > 0 is authoritative. gosnowflake uses Number -1 when the server
+	// response has no code; fall through to message matching in that case.
+	if errors.As(err, &sfErr) && sfErr.Number > 0 {
 		switch sfErr.Number {
 		case errSessionGone, errSessionExpired, errAuthTokenExpired:
 			return true

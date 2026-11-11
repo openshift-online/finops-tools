@@ -105,7 +105,7 @@ func (l *LazyService) Check(ctx context.Context) error {
 				l.clearInitFailureLocked()
 			}
 			l.mu.Unlock()
-			_, err := l.serviceWithContext(ctxWithTimeout)
+			_, err := l.serviceWithContext(ctxWithTimeout, ctx)
 			return err
 		}
 		db := l.db
@@ -128,7 +128,7 @@ func (l *LazyService) Check(ctx context.Context) error {
 		l.invalidateLocked()
 		l.mu.Unlock()
 
-		_, err := l.serviceWithContext(ctxWithTimeout)
+		_, err := l.serviceWithContext(ctxWithTimeout, ctx)
 		return err
 	}
 }
@@ -177,7 +177,7 @@ func (l *LazyService) withService(ctx context.Context, op func(*Service) error) 
 func (l *LazyService) connectService(ctx context.Context) (*Service, error) {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
 	defer cancel()
-	return l.serviceWithContext(ctxWithTimeout)
+	return l.serviceWithContext(ctxWithTimeout, ctx)
 }
 
 // invalidateIfCurrent closes the pool only when failing still points at the
@@ -213,11 +213,11 @@ func (l *LazyService) recordInitFailureLocked(err error) {
 	l.lastInitFail = time.Now()
 }
 
-func isCallerCanceled(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) {
+// serviceWithContext opens Snowflake using ctx for the ping deadline.
+// callerCtx is the original request context: init failures are cached unless
+// the caller already canceled, so a service-owned connect timeout still enters
+// initFailCooldown during outages.
+func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Service, error) {
 	l.mu.Lock()
 	if l.svc != nil {
 		svc := l.svc
@@ -243,9 +243,11 @@ func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) 
 		ping = coresnowflake.Ping
 	}
 
+	cacheInitFailure := callerCtx.Err() == nil
+
 	db, err := openDB(l.connect)
 	if err != nil {
-		if !isCallerCanceled(err) {
+		if cacheInitFailure {
 			l.mu.Lock()
 			l.recordInitFailureLocked(err)
 			l.mu.Unlock()
@@ -256,7 +258,7 @@ func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) 
 
 	if err := ping(ctx, db); err != nil {
 		_ = db.Close()
-		if !isCallerCanceled(err) {
+		if cacheInitFailure {
 			l.mu.Lock()
 			l.recordInitFailureLocked(err)
 			l.mu.Unlock()

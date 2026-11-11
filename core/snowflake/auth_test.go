@@ -52,6 +52,14 @@ func TestIsAuthExpired(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "number -1 falls back to message",
+			err: &gosnowflake.SnowflakeError{
+				Number:  -1,
+				Message: "Authentication token has expired. The user must authenticate again.",
+			},
+			want: true,
+		},
+		{
 			name: "oauth access token expired is not reconnectable",
 			err:  &gosnowflake.SnowflakeError{Number: 390318, Message: "OAuth access token expired"},
 			want: false,
