@@ -158,9 +158,14 @@ func (l *LazyService) withService(ctx context.Context, op func(*Service) error) 
 	if err == nil || !coresnowflake.IsAuthExpired(err) {
 		return err
 	}
+	if ctx.Err() != nil {
+		// Caller already canceled/timed out; reconnecting would race a dead
+		// context into the shared init-failure cooldown.
+		return err
+	}
 
 	l.logger.Warn("snowflake session expired; reconnecting", "error", err)
-	l.invalidate()
+	l.invalidateIfCurrent(svc)
 
 	svc, err = l.connectService(ctx)
 	if err != nil {
@@ -175,9 +180,14 @@ func (l *LazyService) connectService(ctx context.Context) (*Service, error) {
 	return l.serviceWithContext(ctxWithTimeout)
 }
 
-func (l *LazyService) invalidate() {
+// invalidateIfCurrent closes the pool only when failing still points at the
+// active service, so a concurrent reconnect cannot tear down a newer pool.
+func (l *LazyService) invalidateIfCurrent(failing *Service) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if failing == nil || l.svc != failing {
+		return
+	}
 	l.invalidateLocked()
 }
 
@@ -201,6 +211,10 @@ func (l *LazyService) recordInitFailureLocked(err error) {
 	l.init = true
 	l.initErr = err
 	l.lastInitFail = time.Now()
+}
+
+func isCallerCanceled(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) {
@@ -231,18 +245,22 @@ func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) 
 
 	db, err := openDB(l.connect)
 	if err != nil {
-		l.mu.Lock()
-		l.recordInitFailureLocked(err)
-		l.mu.Unlock()
+		if !isCallerCanceled(err) {
+			l.mu.Lock()
+			l.recordInitFailureLocked(err)
+			l.mu.Unlock()
+		}
 		l.logger.Error("snowflake open failed", "error", err)
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
 	if err := ping(ctx, db); err != nil {
 		_ = db.Close()
-		l.mu.Lock()
-		l.recordInitFailureLocked(err)
-		l.mu.Unlock()
+		if !isCallerCanceled(err) {
+			l.mu.Lock()
+			l.recordInitFailureLocked(err)
+			l.mu.Unlock()
+		}
 		l.logger.Error("snowflake ping failed", "error", err)
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}

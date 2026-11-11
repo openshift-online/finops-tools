@@ -198,3 +198,145 @@ func TestLazyServiceWithDatabaseReconnectsOnAuthExpired(t *testing.T) {
 		t.Fatalf("opens = %d, want 2", opens)
 	}
 }
+
+func TestLazyServiceSkipsReconnectWhenCallerCanceled(t *testing.T) {
+	t.Parallel()
+
+	opens := 0
+	l := NewLazyService(coresnowflake.ConnectParams{
+		Account:   "example",
+		User:      "user",
+		Warehouse: "wh",
+		Token:     "token",
+	}, 100, slog.Default())
+	l.openDB = func(coresnowflake.ConnectParams) (*sql.DB, error) {
+		opens++
+		db, err := coresnowflake.OpenDB(coresnowflake.ConnectParams{
+			Account:   "example",
+			User:      "user",
+			Warehouse: "wh",
+			Token:     "token",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
+	}
+	l.ping = func(context.Context, *sql.DB) error { return nil }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	err := l.withService(ctx, func(*Service) error {
+		attempts++
+		cancel()
+		return &gosnowflake.SnowflakeError{
+			Number:  390114,
+			Message: "Authentication token has expired. The user must authenticate again.",
+		}
+	})
+	if err == nil {
+		t.Fatal("expected auth-expired error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if opens != 1 {
+		t.Fatalf("opens = %d, want 1 (no reconnect)", opens)
+	}
+	if l.svc == nil {
+		t.Fatal("expected existing pool to remain when reconnect is skipped")
+	}
+}
+
+func TestLazyServiceInvalidateIfCurrentPreservesNewerPool(t *testing.T) {
+	t.Parallel()
+
+	l := NewLazyService(coresnowflake.ConnectParams{
+		Account:   "example",
+		User:      "user",
+		Warehouse: "wh",
+		Token:     "token",
+	}, 100, slog.Default())
+
+	oldDB, err := coresnowflake.OpenDB(coresnowflake.ConnectParams{
+		Account: "example", User: "user", Warehouse: "wh", Token: "token",
+	})
+	if err != nil {
+		t.Fatalf("OpenDB old: %v", err)
+	}
+	newDB, err := coresnowflake.OpenDB(coresnowflake.ConnectParams{
+		Account: "example", User: "user", Warehouse: "wh", Token: "token",
+	})
+	if err != nil {
+		t.Fatalf("OpenDB new: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = oldDB.Close()
+		_ = newDB.Close()
+	})
+
+	oldSvc := &Service{DB: oldDB, MaxRows: 100}
+	newSvc := &Service{DB: newDB, MaxRows: 100}
+	l.mu.Lock()
+	l.db = newDB
+	l.svc = newSvc
+	l.init = true
+	l.mu.Unlock()
+
+	l.invalidateIfCurrent(oldSvc)
+	if l.svc != newSvc || l.db != newDB {
+		t.Fatal("invalidateIfCurrent closed a newer pool")
+	}
+
+	l.invalidateIfCurrent(newSvc)
+	if l.svc != nil || l.db != nil {
+		t.Fatal("invalidateIfCurrent should close the current pool")
+	}
+}
+
+func TestLazyServiceDoesNotCacheCallerCanceledInitFailure(t *testing.T) {
+	t.Parallel()
+
+	opens := 0
+	l := NewLazyService(coresnowflake.ConnectParams{
+		Account:   "example",
+		User:      "user",
+		Warehouse: "wh",
+		Token:     "token",
+	}, 100, slog.Default())
+	l.openDB = func(coresnowflake.ConnectParams) (*sql.DB, error) {
+		opens++
+		db, err := coresnowflake.OpenDB(coresnowflake.ConnectParams{
+			Account:   "example",
+			User:      "user",
+			Warehouse: "wh",
+			Token:     "token",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
+	}
+	l.ping = func(ctx context.Context, _ *sql.DB) error {
+		if opens == 1 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
+
+	_, err := l.connectService(context.Background())
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("first connect err = %v, want ErrUnavailable", err)
+	}
+	if l.initErr != nil {
+		t.Fatalf("caller cancel/deadline should not be cached as initErr: %v", l.initErr)
+	}
+
+	_, err = l.connectService(context.Background())
+	if err != nil {
+		t.Fatalf("second connect: %v", err)
+	}
+	if opens != 2 {
+		t.Fatalf("opens = %d, want 2", opens)
+	}
+}
