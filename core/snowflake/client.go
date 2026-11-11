@@ -17,13 +17,29 @@ type ConnectParams struct {
 	Token         string
 	PrivateKeyPEM string
 	Role          string
-	Warehouse             string
-	Database              string
-	Schema                string
+	Warehouse     string
+	Database      string
+	Schema        string
 }
 
 // OpenDB opens a database/sql handle using OAuth or JWT key-pair authentication.
 func OpenDB(params ConnectParams) (*sql.DB, error) {
+	cfg, err := configFromParams(params)
+	if err != nil {
+		return nil, err
+	}
+	dsn, err := gosnowflake.DSN(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build snowflake DSN: %w", err)
+	}
+	db, err := sql.Open("snowflake", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open snowflake: %w", err)
+	}
+	return db, nil
+}
+
+func configFromParams(params ConnectParams) (*gosnowflake.Config, error) {
 	account := strings.TrimSpace(params.Account)
 	user := strings.TrimSpace(params.User)
 	if account == "" {
@@ -33,6 +49,7 @@ func OpenDB(params ConnectParams) (*sql.DB, error) {
 		return nil, fmt.Errorf("snowflake user is required")
 	}
 
+	keepAlive := "true"
 	cfg := &gosnowflake.Config{
 		Account:   account,
 		User:      user,
@@ -40,6 +57,11 @@ func OpenDB(params ConnectParams) (*sql.DB, error) {
 		Warehouse: strings.TrimSpace(params.Warehouse),
 		Database:  strings.TrimSpace(params.Database),
 		Schema:    strings.TrimSpace(params.Schema),
+		// Heartbeat so long-lived sql.DB pools (e.g. finops-backend LazyService)
+		// do not idle past Snowflake's session token TTL.
+		Params: map[string]*string{
+			"client_session_keep_alive": &keepAlive,
+		},
 	}
 
 	privateKeyPEM := strings.TrimSpace(params.PrivateKeyPEM)
@@ -62,16 +84,7 @@ func OpenDB(params ConnectParams) (*sql.DB, error) {
 	default:
 		return nil, fmt.Errorf("snowflake oauth token or private key is required")
 	}
-
-	dsn, err := gosnowflake.DSN(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build snowflake DSN: %w", err)
-	}
-	db, err := sql.Open("snowflake", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open snowflake: %w", err)
-	}
-	return db, nil
+	return cfg, nil
 }
 
 // QueryRow runs a single-row query and scans into dest.

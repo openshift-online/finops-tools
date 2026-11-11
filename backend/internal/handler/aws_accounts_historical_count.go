@@ -16,7 +16,7 @@ import (
 
 // AWSAccountsHistoricalQuerier provides Snowflake database access for account history queries.
 type AWSAccountsHistoricalQuerier interface {
-	Database(ctx context.Context, connection string) (*sql.DB, error)
+	WithDatabase(ctx context.Context, connection string, fn func(*sql.DB) error) error
 }
 
 // AWSAccountsHistoricalCount serves GET /v1/aws/accounts/historical-count.
@@ -37,12 +37,12 @@ type awsAccountsHistoricalCountPoint struct {
 }
 
 type awsAccountsHistoricalCountResponse struct {
-	Aggregate string                              `json:"aggregate"`
-	From      string                              `json:"from,omitempty"`
-	To        string                              `json:"to,omitempty"`
-	Data      []awsAccountsHistoricalCountPoint   `json:"data"`
-	RowCount  int                                  `json:"row_count"`
-	Truncated bool                                 `json:"truncated"`
+	Aggregate string                            `json:"aggregate"`
+	From      string                            `json:"from,omitempty"`
+	To        string                            `json:"to,omitempty"`
+	Data      []awsAccountsHistoricalCountPoint `json:"data"`
+	RowCount  int                               `json:"row_count"`
+	Truncated bool                              `json:"truncated"`
 }
 
 func (h *AWSAccountsHistoricalCount) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +97,17 @@ func (h *AWSAccountsHistoricalCount) ServeHTTP(w http.ResponseWriter, r *http.Re
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	db, err := h.Querier.Database(ctx, connection)
+	queryFn := h.QueryFn
+	if queryFn == nil {
+		queryFn = awsaccounts.QueryHistoricalCount
+	}
+
+	var result awsaccounts.QueryResult
+	err = h.Querier.WithDatabase(ctx, connection, func(db *sql.DB) error {
+		var qErr error
+		result, qErr = queryFn(ctx, awsaccounts.DBQuerier{DB: db}, opts)
+		return qErr
+	})
 	if err != nil {
 		if errors.Is(err, backendsnowflake.ErrUnknownConnection) {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -108,21 +118,6 @@ func (h *AWSAccountsHistoricalCount) ServeHTTP(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusServiceUnavailable, "snowflake is not available")
 			return
 		}
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			writeError(w, http.StatusGatewayTimeout, "query timed out")
-			return
-		}
-		writeError(w, http.StatusBadGateway, "snowflake query failed")
-		return
-	}
-
-	queryFn := h.QueryFn
-	if queryFn == nil {
-		queryFn = awsaccounts.QueryHistoricalCount
-	}
-
-	result, err := queryFn(ctx, awsaccounts.DBQuerier{DB: db}, opts)
-	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			writeError(w, http.StatusGatewayTimeout, "query timed out")
 			return

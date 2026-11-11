@@ -26,6 +26,9 @@ type LazyService struct {
 	maxRows int
 	logger  *slog.Logger
 
+	openDB func(coresnowflake.ConnectParams) (*sql.DB, error)
+	ping   func(context.Context, *sql.DB) error
+
 	mu           sync.Mutex
 	db           *sql.DB
 	svc          *Service
@@ -43,40 +46,50 @@ func NewLazyService(connect coresnowflake.ConnectParams, maxRows int, logger *sl
 		connect: connect,
 		maxRows: maxRows,
 		logger:  logger,
+		openDB:  coresnowflake.OpenDB,
+		ping:    coresnowflake.Ping,
 	}
 }
 
 // Query executes SQL, connecting to Snowflake first if needed.
+// On auth/session expiry it reconnects once and retries the query.
 func (l *LazyService) Query(ctx context.Context, sqlText string) (QueryResponse, error) {
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
-	defer cancel()
-	svc, err := l.serviceWithContext(ctxWithTimeout)
-	if err != nil {
-		return QueryResponse{}, err
-	}
-	return svc.Query(ctx, sqlText)
+	var resp QueryResponse
+	err := l.withService(ctx, func(svc *Service) error {
+		var qErr error
+		resp, qErr = svc.Query(ctx, sqlText)
+		return qErr
+	})
+	return resp, err
 }
 
 // QueryUnlimited executes SQL without a row cap.
+// On auth/session expiry it reconnects once and retries the query.
 func (l *LazyService) QueryUnlimited(ctx context.Context, sqlText string) (QueryResponse, error) {
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
-	defer cancel()
-	svc, err := l.serviceWithContext(ctxWithTimeout)
-	if err != nil {
-		return QueryResponse{}, err
-	}
-	return svc.QueryUnlimited(ctx, sqlText)
+	var resp QueryResponse
+	err := l.withService(ctx, func(svc *Service) error {
+		var qErr error
+		resp, qErr = svc.QueryUnlimited(ctx, sqlText)
+		return qErr
+	})
+	return resp, err
 }
 
 // Database returns the underlying Snowflake database handle.
 func (l *LazyService) Database(ctx context.Context) (*sql.DB, error) {
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
-	defer cancel()
-	svc, err := l.serviceWithContext(ctxWithTimeout)
+	svc, err := l.connectService(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return svc.DB, nil
+}
+
+// WithDatabase runs fn with a live *sql.DB. On Snowflake auth/session expiry it
+// closes the pool, reconnects once, and retries fn.
+func (l *LazyService) WithDatabase(ctx context.Context, fn func(*sql.DB) error) error {
+	return l.withService(ctx, func(svc *Service) error {
+		return fn(svc.DB)
+	})
 }
 
 // Check verifies Snowflake connectivity for readiness probes. Unlike Query,
@@ -98,7 +111,7 @@ func (l *LazyService) Check(ctx context.Context) error {
 		db := l.db
 		l.mu.Unlock()
 
-		if err := coresnowflake.Ping(ctxWithTimeout, db); err == nil {
+		if err := l.ping(ctxWithTimeout, db); err == nil {
 			return nil
 		}
 
@@ -112,11 +125,7 @@ func (l *LazyService) Check(ctx context.Context) error {
 			l.mu.Unlock()
 			continue
 		}
-		_ = l.db.Close()
-		l.db = nil
-		l.svc = nil
-		l.init = false
-		l.initErr = nil
+		l.invalidateLocked()
 		l.mu.Unlock()
 
 		_, err := l.serviceWithContext(ctxWithTimeout)
@@ -138,6 +147,49 @@ func (l *LazyService) Close() error {
 	l.initErr = nil
 	l.lastInitFail = time.Time{}
 	return err
+}
+
+func (l *LazyService) withService(ctx context.Context, op func(*Service) error) error {
+	svc, err := l.connectService(ctx)
+	if err != nil {
+		return err
+	}
+	err = op(svc)
+	if err == nil || !coresnowflake.IsAuthExpired(err) {
+		return err
+	}
+
+	l.logger.Warn("snowflake session expired; reconnecting", "error", err)
+	l.invalidate()
+
+	svc, err = l.connectService(ctx)
+	if err != nil {
+		return err
+	}
+	return op(svc)
+}
+
+func (l *LazyService) connectService(ctx context.Context) (*Service, error) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, snowflakeConnectTimeout)
+	defer cancel()
+	return l.serviceWithContext(ctxWithTimeout)
+}
+
+func (l *LazyService) invalidate() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.invalidateLocked()
+}
+
+func (l *LazyService) invalidateLocked() {
+	if l.db != nil {
+		_ = l.db.Close()
+	}
+	l.db = nil
+	l.svc = nil
+	l.init = false
+	l.initErr = nil
+	l.lastInitFail = time.Time{}
 }
 
 func (l *LazyService) clearInitFailureLocked() {
@@ -168,7 +220,16 @@ func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) 
 	}
 	l.mu.Unlock()
 
-	db, err := coresnowflake.OpenDB(l.connect)
+	openDB := l.openDB
+	if openDB == nil {
+		openDB = coresnowflake.OpenDB
+	}
+	ping := l.ping
+	if ping == nil {
+		ping = coresnowflake.Ping
+	}
+
+	db, err := openDB(l.connect)
 	if err != nil {
 		l.mu.Lock()
 		l.recordInitFailureLocked(err)
@@ -177,7 +238,7 @@ func (l *LazyService) serviceWithContext(ctx context.Context) (*Service, error) 
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 
-	if err := coresnowflake.Ping(ctx, db); err != nil {
+	if err := ping(ctx, db); err != nil {
 		_ = db.Close()
 		l.mu.Lock()
 		l.recordInitFailureLocked(err)
