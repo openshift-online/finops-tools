@@ -276,7 +276,10 @@ make openshift-refresh                 # preprod
 make openshift-refresh OPENSHIFT_ENV=prod
 ```
 
-Or step by step:
+Or deploy step by step. Select the matching cluster before running `oc`
+commands. Create Secrets before the first deploy (pods stay Pending without
+them). For prod, use [`deploy/openshift-prod/secret.yaml.example`](deploy/openshift-prod/secret.yaml.example).
+The Secret commands below are for preprod only:
 
 1. Build and push the image:
 
@@ -288,7 +291,8 @@ make podman-push
 2. Deploy workloads (do **not** apply `secret.yaml.example` with dummy values):
 
 ```bash
-make openshift-apply
+make openshift-apply                     # preprod
+make openshift-apply OPENSHIFT_ENV=prod   # prod
 ```
 
 3. Create Snowflake Secrets when ready (config + key per connection listed in `SNOWFLAKE_CONNECTIONS`). On `mpp-w2-preprod` that is **preprod** and **sandbox** only (Snowflake prod is unreachable there; use `deploy/openshift-prod` on MP+ for prod):
@@ -321,7 +325,8 @@ oc create secret generic finops-backend-snowflake-sandbox-key \
 oc rollout restart deployment/finops-backend -n finops-team--finops-tools-backend
 ```
 
-Or `make openshift-restart` after `make openshift-apply`.
+Or run `make openshift-restart` after `make openshift-apply`. For prod,
+add `OPENSHIFT_ENV=prod` to both commands.
 
 4. Verify:
 
