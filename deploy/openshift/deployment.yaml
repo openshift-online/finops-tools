@@ -34,10 +34,10 @@ spec:
               value: "1000"
             - name: FINOPS_BACKEND_QUERY_TIMEOUT
               value: "60s"
+            # Exclude prod until mpp-w2-preprod can reach Snowflake prod
+            # (network policy blocks egress; use deploy/openshift-prod on MP+).
             - name: SNOWFLAKE_CONNECTIONS
-              value: "preprod,sandbox,prod"
-            # Default stays preprod until finops-backend runs on MP+ prod
-            # (Snowflake prod network policy blocks mpp-w2-preprod egress).
+              value: "preprod,sandbox"
             - name: SNOWFLAKE_DEFAULT_CONNECTION
               value: "preprod"
           envFrom:
@@ -45,17 +45,12 @@ spec:
                 name: finops-backend-snowflake-preprod-config
             - secretRef:
                 name: finops-backend-snowflake-sandbox-config
-            - secretRef:
-                name: finops-backend-snowflake-prod-config
           volumeMounts:
             - name: snowflake-preprod-key
               mountPath: /etc/finops/snowflake/preprod
               readOnly: true
             - name: snowflake-sandbox-key
               mountPath: /etc/finops/snowflake/sandbox
-              readOnly: true
-            - name: snowflake-prod-key
-              mountPath: /etc/finops/snowflake/prod
               readOnly: true
           livenessProbe:
             httpGet:
@@ -98,6 +93,3 @@ spec:
         - name: snowflake-sandbox-key
           secret:
             secretName: finops-backend-snowflake-sandbox-key
-        - name: snowflake-prod-key
-          secret:
-            secretName: finops-backend-snowflake-prod-key

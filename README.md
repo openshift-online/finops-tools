@@ -197,15 +197,13 @@ OpenShift uses split Secrets per connection (see [`deploy/openshift/deployment.y
 
 | Source | Contents |
 |--------|----------|
-| Deployment `env` | `SNOWFLAKE_CONNECTIONS=preprod,sandbox,prod`; default `preprod` on `mpp-w2-preprod` (use `prod` on MP+ prod — HCMFINOPS-389) |
+| Deployment `env` | `SNOWFLAKE_CONNECTIONS=preprod,sandbox`; default `preprod` on `mpp-w2-preprod` (`prod` only on MP+ via `deploy/openshift-prod` — HCMFINOPS-389) |
 | `finops-backend-snowflake-preprod-config` | `SNOWFLAKE_CONN_PREPROD_*` env keys (including `PRIVATE_KEY_FILE` path) |
 | `finops-backend-snowflake-preprod-key` | `private_key` file mounted at `/etc/finops/snowflake/preprod/` |
 | `finops-backend-snowflake-sandbox-config` | `SNOWFLAKE_CONN_SANDBOX_*` env keys (including `PRIVATE_KEY_FILE` path) |
 | `finops-backend-snowflake-sandbox-key` | `private_key` file mounted at `/etc/finops/snowflake/sandbox/` |
-| `finops-backend-snowflake-prod-config` | `SNOWFLAKE_CONN_PROD_*` env keys (including `PRIVATE_KEY_FILE` path) |
-| `finops-backend-snowflake-prod-key` | `private_key` file mounted at `/etc/finops/snowflake/prod/` |
 
-Every name listed in `SNOWFLAKE_CONNECTIONS` must have matching config and key Secrets before the backend starts. Do not apply the Deployment until those Secrets exist, or new pods will stay Pending (`FailedMount`). Snowflake prod rejects egress from `mpp-w2-preprod`; keep the default as `preprod` there and use an MP+ prod cluster for `connection=prod`.
+Every name listed in `SNOWFLAKE_CONNECTIONS` must have matching config and key Secrets before the backend starts. Do not apply the Deployment until those Secrets exist, or new pods will stay Pending (`FailedMount`). Snowflake prod rejects egress from `mpp-w2-preprod`; that overlay omits `prod` (and its Secrets) until the cluster can reach Snowflake prod — use `deploy/openshift-prod` on MP+ for `connection=prod`.
 
 See [`deploy/openshift/secret.yaml.example`](deploy/openshift/secret.yaml.example) for a full multi-Secret example.
 
@@ -242,7 +240,7 @@ Runtime namespace: **`finops-team--finops-tools-backend`** on:
 
 | Env | Cluster | Manifests | Snowflake connections |
 |-----|---------|-----------|------------------------|
-| preprod (default) | `mpp-w2-preprod` | [`deploy/openshift/`](deploy/openshift/) | `preprod,sandbox,prod` (default `preprod`) |
+| preprod (default) | `mpp-w2-preprod` | [`deploy/openshift/`](deploy/openshift/) | `preprod,sandbox` (default `preprod`) |
 | prod | `prod-mpp-spoke-aws-us-east-1` (`mpp-e1-prod`) | [`deploy/openshift-prod/`](deploy/openshift-prod/) | `prod` only |
 
 The TenantNamespace CR (`metadata.name: finops-tools-backend`) is applied in **`finops-team--config`**; the platform provisions **`finops-team--finops-tools-backend`**.
@@ -293,21 +291,9 @@ make podman-push
 make openshift-apply
 ```
 
-3. Create Snowflake Secrets when ready (config + key per connection listed in `SNOWFLAKE_CONNECTIONS`). On `mpp-w2-preprod` the Deployment default is **preprod** (Snowflake prod is unreachable from that cluster until MP+ prod exists):
+3. Create Snowflake Secrets when ready (config + key per connection listed in `SNOWFLAKE_CONNECTIONS`). On `mpp-w2-preprod` that is **preprod** and **sandbox** only (Snowflake prod is unreachable there; use `deploy/openshift-prod` on MP+ for prod):
 
 ```bash
-# Prod (available when running on MP+ prod; optional on preprod cluster)
-oc create secret generic finops-backend-snowflake-prod-config \
-  --from-literal=SNOWFLAKE_CONN_PROD_ACCOUNT=example-prod \
-  --from-literal=SNOWFLAKE_CONN_PROD_USER=example-user \
-  --from-literal=SNOWFLAKE_CONN_PROD_WAREHOUSE=PROD_WH \
-  --from-literal=SNOWFLAKE_CONN_PROD_PRIVATE_KEY_FILE=/etc/finops/snowflake/prod/private_key \
-  -n finops-team--finops-tools-backend
-
-oc create secret generic finops-backend-snowflake-prod-key \
-  --from-file=private_key=./prod_rsa_key.p8 \
-  -n finops-team--finops-tools-backend
-
 # Preprod
 oc create secret generic finops-backend-snowflake-preprod-config \
   --from-literal=SNOWFLAKE_CONN_PREPROD_ACCOUNT=example-preprod \
