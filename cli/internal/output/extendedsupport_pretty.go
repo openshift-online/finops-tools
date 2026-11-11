@@ -207,6 +207,7 @@ func writeBillingSelectionDetails(w io.Writer, s styler, selection *extendedsupp
 		} else if account.DisplayAlias != "" && account.DisplayAlias != name {
 			name += " (" + account.DisplayAlias + ")"
 		}
+		name = SanitizeTerminal(name)
 		if len(account.UsageTypes) == 0 {
 			table.Append([]string{account.AccountID, name, "Details unavailable"})
 		}

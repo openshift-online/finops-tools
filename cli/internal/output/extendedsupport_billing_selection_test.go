@@ -10,6 +10,39 @@ import (
 	"github.com/openshift-online/finops-tools/core/extendedsupport"
 )
 
+func TestBillingSelectionSanitizesAccountNameAndAlias(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		displayName string
+		want        string
+	}{
+		{name: "alias only", want: "member"},
+		{name: "name and alias", displayName: "\x1b]0;injected-title\x07Member One", want: "Member One (member)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, usageTypes := range [][]string{nil, {"RDS:ExtendedSupport"}} {
+				selection := &extendedsupport.BillingSelection{
+					SelectedAccounts: []extendedsupport.BillingSelectedAccount{{
+						AccountID: "111111111111", DisplayName: tc.displayName,
+						DisplayAlias: "member\x1b[2J\x1b[H", UsageTypes: usageTypes,
+					}},
+				}
+				var pretty bytes.Buffer
+				if err := writeBillingSelectionDetails(&pretty, styler{}, selection); err != nil {
+					t.Fatal(err)
+				}
+				got := pretty.String()
+				if strings.ContainsAny(got, "\x1b\x07") || strings.Contains(got, "injected-title") {
+					t.Fatalf("terminal escape leaked into output: %q", got)
+				}
+				if !strings.Contains(got, tc.want) {
+					t.Fatalf("missing sanitized name %q in %q", tc.want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestBillingSelectionListsExactUsageTypesEvenWithoutResourceFindings(t *testing.T) {
 	selection := &extendedsupport.BillingSelection{
 		PayerAccountID: "123456789012", PayerAccountIDs: []string{"123456789012"}, Start: "2026-10-11", EndExclusive: "2026-11-10",
