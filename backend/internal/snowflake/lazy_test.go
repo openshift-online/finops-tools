@@ -388,3 +388,53 @@ func TestLazyServiceDoesNotCacheCallerCanceledInitFailure(t *testing.T) {
 		t.Fatalf("opens = %d, want 2", opens)
 	}
 }
+
+func TestLazyServiceDoesNotCacheCallerCancelDuringPing(t *testing.T) {
+	t.Parallel()
+
+	opens := 0
+	l := NewLazyService(coresnowflake.ConnectParams{
+		Account:   "example",
+		User:      "user",
+		Warehouse: "wh",
+		Token:     "token",
+	}, 100, slog.Default())
+	l.openDB = func(coresnowflake.ConnectParams) (*sql.DB, error) {
+		opens++
+		db, err := coresnowflake.OpenDB(coresnowflake.ConnectParams{
+			Account:   "example",
+			User:      "user",
+			Warehouse: "wh",
+			Token:     "token",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	l.ping = func(context.Context, *sql.DB) error {
+		if opens == 1 {
+			cancel()
+			return context.Canceled
+		}
+		return nil
+	}
+
+	_, err := l.connectService(ctx)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("connect err = %v, want ErrUnavailable", err)
+	}
+	if l.initErr != nil {
+		t.Fatalf("mid-ping caller cancel should not be cached as initErr: %v", l.initErr)
+	}
+
+	_, err = l.connectService(context.Background())
+	if err != nil {
+		t.Fatalf("second connect: %v", err)
+	}
+	if opens != 2 {
+		t.Fatalf("opens = %d, want 2", opens)
+	}
+}

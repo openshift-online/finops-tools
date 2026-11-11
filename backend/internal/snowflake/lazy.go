@@ -243,11 +243,10 @@ func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Servi
 		ping = coresnowflake.Ping
 	}
 
-	cacheInitFailure := callerCtx.Err() == nil
-
 	db, err := openDB(l.connect)
 	if err != nil {
-		if cacheInitFailure {
+		// Re-check after open: caller may have canceled while we were connecting.
+		if callerCtx.Err() == nil {
 			l.mu.Lock()
 			l.recordInitFailureLocked(err)
 			l.mu.Unlock()
@@ -258,7 +257,9 @@ func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Servi
 
 	if err := ping(ctx, db); err != nil {
 		_ = db.Close()
-		if cacheInitFailure {
+		// Re-check after ping so mid-ping caller cancel is not cached, while a
+		// service-owned connect timeout (caller still active) still cools down.
+		if callerCtx.Err() == nil {
 			l.mu.Lock()
 			l.recordInitFailureLocked(err)
 			l.mu.Unlock()
