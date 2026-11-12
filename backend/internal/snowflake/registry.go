@@ -67,6 +67,16 @@ func (r *Registry) Database(ctx context.Context, connection string) (*sql.DB, er
 	return svc.Database(ctx)
 }
 
+// WithDatabase runs fn with a live *sql.DB for the named connection.
+// On auth/session expiry it reconnects once and retries fn.
+func (r *Registry) WithDatabase(ctx context.Context, connection string, fn func(*sql.DB) error) error {
+	svc, err := r.serviceFor(connection)
+	if err != nil {
+		return err
+	}
+	return svc.WithDatabase(ctx, fn)
+}
+
 // Check verifies connectivity for the default connection (readiness probes).
 func (r *Registry) Check(ctx context.Context) error {
 	svc, err := r.serviceFor("")
