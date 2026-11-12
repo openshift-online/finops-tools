@@ -7,8 +7,8 @@ import (
 
 var extendedSupportCmd = &cobra.Command{
 	Use:   "extended-support",
-	Short: "AWS resources running in extended support",
-	Long:  "Find AWS resources running engine or platform versions past their standard support end date.",
+	Short: "AWS extended-support resources and historical charges",
+	Long:  "Find AWS resources past standard support and query historical Extended Support charges.",
 }
 
 func init() {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/openshift-online/finops-tools/cli/internal/configstore"
@@ -41,6 +42,7 @@ func filterExtendedSupportBillingTargets(
 	// Payer-wide target resolution has already ensured each payer's credentials.
 	costStep(status, "Finding accounts with billed Extended Support usage…")
 	billed := make(map[string]bool)
+	accountUsageTypes := make(map[string]map[string]bool)
 	usageSeen := make(map[string]struct{})
 	usageTypes := make([]string, 0)
 	payerIDs := make([]string, 0, len(payers))
@@ -56,6 +58,12 @@ func filterExtendedSupportBillingTargets(
 		payerIDs = append(payerIDs, payer.AccountID)
 		for _, id := range candidates.AccountIDs {
 			billed[id] = true
+			if accountUsageTypes[id] == nil {
+				accountUsageTypes[id] = make(map[string]bool)
+			}
+			for _, usage := range candidates.AccountUsageTypes[id] {
+				accountUsageTypes[id][usage] = true
+			}
 		}
 		for _, usageType := range candidates.UsageTypes {
 			if _, ok := usageSeen[usageType]; ok {
@@ -66,17 +74,28 @@ func filterExtendedSupportBillingTargets(
 		}
 	}
 	selected := make([]cost.AccountTarget, 0, len(targets))
+	selectedAccounts := make([]extendedsupport.BillingSelectedAccount, 0)
 	for _, target := range targets {
 		if billed[target.AccountID] {
 			selected = append(selected, target)
+			account := extendedsupport.BillingSelectedAccount{
+				AccountID: target.AccountID, DisplayName: target.DisplayName, DisplayAlias: target.DisplayAlias, UsageTypes: []string{},
+			}
+			for usage := range accountUsageTypes[target.AccountID] {
+				account.UsageTypes = append(account.UsageTypes, usage)
+			}
+			sort.Strings(account.UsageTypes)
+			selectedAccounts = append(selectedAccounts, account)
 		}
 	}
+	sort.Slice(selectedAccounts, func(i, j int) bool { return selectedAccounts[i].AccountID < selectedAccounts[j].AccountID })
 	selection := &extendedsupport.BillingSelection{
 		PayerAccountIDs: payerIDs,
 		Start:           period.Start.Format("2006-01-02"), EndExclusive: period.End.Format("2006-01-02"),
 		UsageTypes: usageTypes, BilledAccountCount: len(billed),
+		SelectedAccounts:     selectedAccounts,
 		EligibleAccountCount: len(targets), SelectedAccountCount: len(selected),
-		Notice: "Billing data can be delayed; accounts without matching recorded usage in this window are not scanned.",
+		Notice: "Billing data can be delayed; accounts without matching recorded usage in this window are not scanned. Usage-type matches select accounts even when recorded charges are zero or negative. Initial account selection is payer-wide; service and region flags limit resource scans and 30-day cost summaries. The five-day check covers all services and honors region flags.",
 	}
 	if len(payerIDs) == 1 {
 		selection.PayerAccountID = payerIDs[0]

@@ -756,7 +756,7 @@ JSON keeps account-wide totals in `summary.billed_costs`, adds the regional tota
 
 ### Extended support (AWS)
 
-Find AWS resources running versions in **AWS Extended Support**. This covers **RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters, ElastiCache caches, and OpenSearch Service domains**. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer. RDS, EKS, ElastiCache, and OpenSearch are scanned by default.
+Find AWS resources running versions in **AWS Extended Support**, with recent charges included in the account and service summaries. This covers **RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters, ElastiCache caches, and OpenSearch Service domains**. Account selection matches `finops account get-cost` (exactly one of `--account-id`/`--account-alias`, `--ou`, `--tag`, or `--payer` alone). Linked member accounts are scanned via role assumption from the payer. RDS, EKS, ElastiCache, and OpenSearch are scanned by default.
 
 ```bash
 finops extended-support list --account-alias rh-control
@@ -771,11 +771,37 @@ finops extended-support list --payer rh-control --services rds,eks
 finops extended-support list --payer rh-control --regions us-east-1,us-west-2
 ```
 
-With `--payer` alone, the command first narrows the active member list using the payer's Cost Explorer data. It paginates `GetDimensionValues` for `USAGE_TYPE`, keeps values containing `extendedsupport` without regard to case, then uses those exact values in `GetCostAndUsage` filters grouped by `LINKED_ACCOUNT`. Values are combined in batches with OR semantics, reducing requests compared with querying each usage type separately. Accounts are retained regardless of whether their reported cost is positive, zero, or negative. Only matching active members proceed to role assumption and resource discovery. Explicit account, OU, and tag selections scan all their selected accounts without this billing filter.
+With `--payer` alone, the command first narrows the active member list using the payer's Cost Explorer data. It paginates `GetDimensionValues` for `USAGE_TYPE`, keeps values containing `extendedsupport` without regard to case, then uses those exact values in `GetCostAndUsage` filters grouped by `LINKED_ACCOUNT` and `USAGE_TYPE`. Values are combined in batches with OR semantics, reducing requests compared with querying each usage type separately. Accounts are retained regardless of whether their reported cost is positive, zero, or negative. Only matching active members proceed to role assumption and resource discovery. Explicit account, OU, and tag selections scan all their selected accounts without this billing filter.
 
 The default billing lookback covers 30 UTC calendar days including today; `--billing-lookback-days` changes it. The same window is used for both Cost Explorer APIs, with an inclusive start and exclusive end. This selects accounts with recorded usage in that window, rather than proving which accounts currently have Extended Support resources. Recently upgraded or deleted resources can leave historical billing matches, and newly affected accounts may not appear yet: [Cost Explorer data can arrive later than 24 hours](https://docs.aws.amazon.com/cost-management/latest/userguide/ce-what-is.html). Resource APIs confirm the current findings. Use `--full-scan` with `--payer` to bypass billing selection and scan every active member.
 
-Pretty-print output shows the billing window and selected/eligible account counts, even when no accounts match. JSON retains these details, matched usage types, the number of billed accounts, and a coverage notice under `summary.billing_selection`. Accounts excluded by billing selection are not reported as skipped accounts. A failed or incomplete Cost Explorer query stops discovery with an error; it never silently becomes an empty or partial candidate list. Payer credentials need `ce:GetDimensionValues` and `ce:GetCostAndUsage` for the default payer-wide selection. `--full-scan` does not need those permissions.
+Pretty-print output shows the billing window and selected/eligible account counts, even when no accounts match. JSON retains these details, matched usage types, the number of billed accounts, and a coverage notice under `summary.billing_selection`. Accounts excluded by billing selection are not reported as skipped accounts. A failed or incomplete Cost Explorer query stops discovery with an error; it never silently becomes an empty or partial candidate list. Payer credentials need `ce:GetDimensionValues` and `ce:GetCostAndUsage` for the default payer-wide selection. `--full-scan` bypasses this initial account-selection query; the automatic five-day check described below still needs billing permissions for scanned accounts with no current findings.
+
+Pretty-print output also lists **Matched Extended Support usage types** and
+**Accounts selected for scanning from Cost Explorer**. The account table shows
+account ID, available name/alias, and one row per exact matched usage type.
+These are the accounts selected before scanning, including accounts that later
+have no findings or fail to scan. The full discovered usage-type filter remains
+visible even when no eligible accounts are selected.
+
+JSON stores the same account list in
+`summary.billing_selection.selected_accounts`, with `account_id`, optional
+`display_name`/`display_alias`, and `usage_types`. The existing
+`summary.billing_selection.usage_types` contains the complete discovered filter.
+Per-account types are deduplicated and sorted across pages, batches, months, and
+queried payers. With multiple payers, each account's types are the union of its
+matches across those payers. This evidence comes from the selection query itself;
+no separate per-account billing lookup is required.
+
+For comparisons with Cost Explorer, use the exact displayed billing window and
+usage types. Selection is payer-wide and retains usage-type matches with zero or
+negative recorded charges. It does not apply `--services`, `--regions`, or
+`--skip-regions`; those flags limit the resource scan and 30-day cost summaries.
+The five-day check ignores the service selection while honoring region filters.
+Only eligible active member accounts proceed to scanning. `--full-scan` and
+explicit account/OU/tag selection bypass this usage-based filter, so they do not
+produce this audit list. Use pretty-print or JSON for the selection details;
+CSV remains resource inventory only.
 
 Each service uses its own APIs to discover the running version and retrieve support lifecycle dates:
 
@@ -849,6 +875,224 @@ Resources at or past a known extended support end date appear under "Past extend
 For ElastiCache and OpenSearch, a dated AWS Health `end_of_life` event also puts the resource under "Past extended support" as soon as that timestamp is reached in the applicable region. End of life establishes this terminal status independently of missing or unusable standard/extended support milestones. The event type is matched without regard to case; regional overrides still apply, and missing or conflicting end-of-life dates cannot establish this status. A future end-of-life event alone does not establish the current support status. The end-of-life date appears in a separate "END OF LIFE" column in pretty-print output and as `end_of_life_date` in JSON and CSV. The CSV column uses `YYYY-MM-DD` when available and is blank otherwise. Unavailable support dates are shown as "—" and omitted from JSON rather than inferred from the end-of-life date.
 
 Resources with missing engine/version information, failed lifecycle lookups, or missing standard support end dates appear under "Support status unknown" in pretty-print output and `summary.unclassified_resources` in JSON. They are excluded from the Extended Support count. Resources still in standard support or before an explicit Extended Support start appear in neither section. CSV contains only resources currently in Extended Support; use JSON to export past-support records and unknown resources. Check warnings before treating an empty result as "no resources in extended support".
+
+#### Recent charges without discovered Extended Support resources
+
+After scanning and the final skipped-account retry, the command automatically
+checks accounts with **no current Extended Support findings** for charges during
+**the last five complete UTC days through yesterday**. This runs independently
+of the 30-day cost summaries and the account-selection billing lookback. It reuses the shared
+period resolver with `Days: 5` and no recent-day exclusion. The latest two days may
+be incomplete.
+
+Accounts with a positive `NetUnblendedCost` total appear in a separate
+**Recent charges with unknown Extended Support resources** section, showing
+account ID, alias when available, the five-day charge amount, and whether scan
+warnings apply. This section remains visible even when no resources were found
+anywhere. It can identify gaps in resource discovery, but charges can also reflect
+recently upgraded or deleted resources and do not prove a resource is still in
+Extended Support.
+
+Accounts that remain entirely skipped after retries are excluded and stay under
+**Skipped accounts**. Accounts with partial regional/service scans or unknown
+support status can appear, marked **See scan warnings**. Accounts with only
+past-support records also qualify because those records do not establish a
+current finding. Accounts excluded by initial billing selection are not queried,
+since they were not scanned.
+
+The check covers **all services**, ignoring `--services` and the list of implemented
+discovery services. It discovers every usage type containing `extendedsupport` and
+queries those exact values without any `SERVICE` filter, so unimplemented services
+can appear. It still honors `--regions`/`--skip-regions` and uses payer or
+direct-account billing credentials with ordinary `GetDimensionValues`/
+`GetCostAndUsage` queries grouped by account. Credentials need
+`ce:GetDimensionValues` and `ce:GetCostAndUsage` whenever this check runs, including
+with explicit account selection or `--full-scan`. No resource IDs are used. Zero
+or negative net charges are omitted. Failed billing sources produce warnings;
+partial results from a failed source are never presented as complete charges.
+
+JSON stores the five-day period, scope, warnings, and charged accounts under
+`summary.charges_without_findings`, with `all_services: true` and an empty `services`
+list to indicate that no service restriction applies. These accounts are separate
+from resource counts and the 30-day summaries. CSV remains resource inventory only;
+use pretty-print or JSON to view this additional report.
+
+#### Account and service charges in the resource list
+
+`extended-support list` automatically includes Extended Support charges beside
+the resource counts in the **By account** and **By service** sections:
+
+```bash
+finops extended-support list --payer rh-control
+finops extended-support list --payer rh-control --services rds,eks
+finops extended-support list --payer rh-control --format json -o support-summary.json
+```
+
+The snapshot covers the **last 30 complete UTC days through yesterday**, using
+the shared period resolver with `Days: 30` and no recent-day exclusion. It includes
+the latest two complete days, which may be incomplete. The report shows the exact
+dates and cost basis (`NetUnblendedCost`). This fixed window is independent of
+`--billing-lookback-days`, which selects accounts for scanning.
+
+Costs are fetched for accounts with current findings, using the selected services
+and the `--regions`/`--skip-regions` billing scope. The counts describe current
+resources; the historical account charges can include resources upgraded or
+deleted during the window. A service with historical charges and no remaining
+current findings appears with a count of zero. These amounts are account/service
+charges and are not attributed or divided among individual resources.
+
+The implementation reuses `extended-support get-cost` billing queries. It discovers
+usage types containing `extendedsupport` without regard to case, filters by their
+exact values and the selected services/accounts/regions, and groups ordinary
+`GetCostAndUsage` results by linked account. It sums the time buckets for the
+account and service summaries. Payer credentials query linked-account charges;
+member discovery roles are not used for billing. Explicit account scoping also
+applies when the payer account itself is scanned. Billing credentials need only
+`ce:GetDimensionValues` and `ce:GetCostAndUsage`; no resource-level billing settings
+or resource IDs are required.
+
+Billing failures preserve resource inventory, show `Unavailable` for affected
+accounts, and produce warnings. Service totals are unavailable if any contributing
+account is unavailable, rather than displaying partial totals as complete. Service
+totals also remain unavailable when accounts use different currencies. A successful
+query with no matching charges returns zero. Missing metrics never silently change
+the cost basis. The feature does not display estimated or avoidable-cost columns.
+
+JSON stores charges in `summary.by_account[].support_cost` and
+`summary.by_service[].support_cost`. `summary.costs` records the reporting window,
+metric, account/service/region scope, and warnings. Resource detail rows and CSV
+contain inventory only; use JSON to export cost summaries.
+
+#### Extended support costs
+
+`finops extended-support get-cost` queries historical Extended Support charges directly
+from Cost Explorer. It does not scan resources or assume roles into member accounts.
+
+```bash
+finops extended-support get-cost --payer rh-control
+finops extended-support get-cost --payer rh-control --services rds,elasticache
+finops extended-support get-cost --payer rh-control --regions us-east-1,us-west-2 --skip-regions us-west-2
+finops extended-support get-cost --payer rh-control --group-by service,account
+finops extended-support get-cost --payer rh-control --from 2026-08-01 --to 2026-10-31
+finops extended-support get-cost --payer rh-control --days 180 --granularity daily
+finops extended-support get-cost --account-alias my-account --format json
+finops extended-support get-cost --payer rh-control --format csv -o support-costs.csv
+```
+
+| Option | Behavior |
+|--------|----------|
+| `--services` | Defaults to all supported services. Only `rds`, `eks`, `elasticache`, and `opensearch` are accepted (comma-separated). |
+| `--regions` | Optional comma-separated AWS region codes. Limits billing to those regions; defaults to all billing regions. |
+| `--skip-regions` | Optional comma-separated or repeatable exclusions; takes precedence over `--regions`. Excluding every explicitly selected region produces an empty report, never an unrestricted query. |
+| `--group-by` | Optional; defaults to `service`. Also accepts `account` and `service,account`. |
+| `--from`, `--to` | Optional inclusive UTC dates, using the shared cost-period resolver. `--from` alone ends at the buffered cutoff; `--to` requires `--from` and cannot exceed that cutoff. |
+| `--days` | Defaults to **90** days ending at the buffered cutoff; mutually exclusive with `--months` and explicit dates. |
+| `--months` | Optional calendar-month window, using the same semantics as `account get-cost`; mutually exclusive with `--days` and explicit dates. |
+| `--exclude-recent-days` | Defaults to **2**, including with explicit period options. Use `0` to include recent complete UTC days through yesterday. |
+| `--granularity` | Optional `daily` or `monthly`. Defaults to **one period total per service**, including with explicit `--days`, `--months`, or dates. Specifying granularity requests that time breakdown alongside full-period service totals. |
+| `--metric` | Defaults to `NetUnblendedCost` for after-discount charges. `UnblendedCost` explicitly requests gross charges. Missing metrics fail the report rather than silently switching cost basis. |
+| `--format`, `--output` | Pretty-print, JSON, or CSV; optional `--output`/`-o` file. |
+
+For example, on November 5 UTC, the default period is August 5–November 2 inclusive
+(90 days). November 3 and 4 are omitted from the previous 92 complete days, and
+today is not included. This buffer gives recent billing data time to update;
+Cost Explorer estimated-data flags and billing-delay notices remain visible.
+
+Without `--granularity`, the report combines the entire selected window into one
+total for each service. For example, `--from 2026-08-01 --to 2026-10-31` returns
+one total per service for August through October. When no period options are
+specified, a note explains that the report defaults to the last 90 reliable
+Cost Explorer days. An explicit `--group-by` still controls the grouping of these
+totals. JSON identifies this view with
+`granularity: "total"`; JSON/CSV row dates cover the full reporting window, and
+the pretty-print table omits repeated date columns. Region/service/account filters
+continue to apply. Use `--granularity daily` or `--granularity monthly` to request
+time buckets for any period.
+
+When granularity is requested, pretty-print output shows **Totals by service for
+full period** above the time breakdown, including with `--group-by account` or
+`--group-by service,account`. These totals combine all selected accounts and time
+buckets for each service using the same billing responses, with no extra AWS
+queries. JSON includes these full-period records under `service_totals`, with
+inclusive dates, cost amounts, and estimated-data flags; `rows` retains the
+requested breakdown. CSV contains only the breakdown rows so summing its amounts
+does not count the service totals again.
+
+Pretty-print output also shows **Period coverage**, including in totals-only
+reports. It counts days with matching records for daily requests, or months for
+monthly and totals-only requests. Periods with no matching records are listed
+as **No matching charges returned** when a period was returned with empty groups,
+or **No period returned** when every cost query omitted it. If only some cost
+queries returned a period, it is marked **some period responses missing**, even
+when other responses contain charges for that period. Pages of each query are
+combined before making this assessment. When no matching Extended Support usage
+types are discovered, coverage says **No matching usage types; costs not queried**.
+No extra billing requests are made for coverage.
+
+These statuses describe the filtered API responses; they cannot distinguish no
+usage from unavailable history. Totals include only returned billing records.
+Explicit zero-cost records remain zero-valued cost rows and count as matching
+records; zero and negative amounts do not imply a coverage gap. JSON retains
+every expected period with inclusive dates, status, and an `incomplete` flag
+where applicable under `coverage`, alongside `total_periods`,
+`periods_with_records`, and the coverage granularity. CSV contains cost rows
+only; use pretty-print or JSON to inspect period coverage. An empty account or
+explicit region scope that bypasses billing does not report coverage.
+
+Period handling reuses the flags, validation, and `core/cost.ResolvePeriod` logic
+used by `account get-cost` and AWS reports. With no period options, this command
+acts as `--days 90 --exclude-recent-days 2`; `--months` or explicit dates replace
+the default rolling-days mode. These command-specific defaults remain independent
+of `defaults.cost.*`. An explicit `--to` inside the excluded recent days is rejected
+rather than silently shortened.
+
+With `--payer` alone, billing scope is the entire payer bill, including the payer
+account and historical charges from members that have since closed. Multiple payer
+aliases are supported. Explicit `--account-id`/`--account-alias` selections restrict
+costs to those accounts, including when an explicit account is the payer itself.
+`--ou` and `--tag` use current Organizations membership/tags; they cannot reconstruct
+historical membership. No active-member or current-resource filter is applied to
+payer-wide billing. Credentials need `ce:GetDimensionValues` and `ce:GetCostAndUsage`;
+OU/tag selection additionally needs the corresponding Organizations permissions.
+
+Region flags filter Cost Explorer's `REGION` billing dimension directly; there is
+no enabled-region discovery. With only `--skip-regions`, all billing regions except
+the exclusions remain in scope, including costs without a regional assignment.
+Usage-type discovery is a global metadata lookup; every cost query applies the
+region filter, including all paginated requests and service/account batches.
+Requested and excluded regions are retained in pretty output, JSON (`regions`,
+`excluded_regions`), and CSV columns of the same names.
+
+The report discovers usage types containing `extendedsupport` without regard to
+case over the requested period, then filters by exact usage types and billing
+service names. Both current and historical billing names for EKS and OpenSearch
+are recognized. Requests are paginated and usage filters are batched. A failed
+or malformed billing response fails the report without returning partial totals;
+zero and negative charges are retained, and different currencies are never summed.
+Daily/monthly rows show inclusive dates and retain Cost Explorer's `estimated` flag.
+Only time buckets with matching account groups are returned; an empty report means
+no matching charges were recorded, not that no resources exist in Extended Support.
+
+Recorded charges are **not total resource running costs**. `amount` is billing
+associated with Extended Support usage types. `avoidable_amount` identifies
+historical support surcharges billed separately from base usage for RDS,
+ElastiCache, and OpenSearch. These charges stop after an eligible upgrade, but
+their historical amount is not a forecast of future net savings, which can also
+depend on changed usage, pricing, discounts, and upgrade costs. The classification
+follows AWS's [RDS charge documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/extended-support-charges.html),
+[ElastiCache charge documentation](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/extended-support-charges.html),
+and [OpenSearch charge documentation](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/what-is.html).
+
+EKS Extended Support billing can include the ordinary control-plane fee:
+[AWS currently describes its extended-support price as standard support plus an additional fee](https://aws.amazon.com/eks/pricing/).
+Without a verified applicable baseline, this command reports EKS avoidable amounts
+as **unavailable** instead of applying a fixed multiplier to billed charges. Any
+aggregate containing EKS billing also has an unavailable complete avoidable amount;
+`known_avoidable_amount` remains a clearly incomplete subtotal of identifiable
+surcharges. Unknown amounts are JSON `null`, blank in CSV, and `unavailable` in
+pretty output. JSON/CSV include notices describing this cost basis and limitations.
+No live pricing lookup, per-resource attribution, or full-resource cost estimate
+is performed by this command.
 
 ### Reports
 

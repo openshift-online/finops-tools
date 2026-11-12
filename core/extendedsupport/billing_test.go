@@ -60,16 +60,16 @@ func TestBillingCandidatesPaginateAndBatchExactUsageTypes(t *testing.T) {
 		usage: func(_ context.Context, input *costexplorer.GetCostAndUsageInput) (*costexplorer.GetCostAndUsageOutput, error) {
 			accountPages++
 			want := []string{usageTypes[1], "UPPER-EXTENDEDSUPPORT", usageTypes[0]}
-			if input.Filter == nil || input.Filter.Dimensions.Key != cetypes.DimensionUsageType || !reflect.DeepEqual(input.Filter.Dimensions.Values, want) || !reflect.DeepEqual(input.Filter.Dimensions.MatchOptions, []cetypes.MatchOption{cetypes.MatchOptionEquals}) || len(input.GroupBy) != 1 || input.GroupBy[0].Type != cetypes.GroupDefinitionTypeDimension || aws.ToString(input.GroupBy[0].Key) != "LINKED_ACCOUNT" || input.Granularity != cetypes.GranularityMonthly || aws.ToString(input.TimePeriod.Start) != "2026-09-20" {
+			if input.Filter == nil || input.Filter.Dimensions.Key != cetypes.DimensionUsageType || !reflect.DeepEqual(input.Filter.Dimensions.Values, want) || !reflect.DeepEqual(input.Filter.Dimensions.MatchOptions, []cetypes.MatchOption{cetypes.MatchOptionEquals}) || len(input.GroupBy) != 2 || input.GroupBy[0].Type != cetypes.GroupDefinitionTypeDimension || aws.ToString(input.GroupBy[0].Key) != "LINKED_ACCOUNT" || aws.ToString(input.GroupBy[1].Key) != "USAGE_TYPE" || input.GroupBy[1].Type != cetypes.GroupDefinitionTypeDimension || input.Granularity != cetypes.GranularityMonthly || aws.ToString(input.TimePeriod.Start) != "2026-09-20" {
 				t.Errorf("usage request = %+v", input)
 			}
 			if input.NextPageToken == nil {
 				return &costexplorer.GetCostAndUsageOutput{NextPageToken: aws.String("next"), ResultsByTime: []cetypes.ResultByTime{
-					{Groups: []cetypes.Group{{Keys: []string{"111111111111"}, Metrics: map[string]cetypes.MetricValue{"UnblendedCost": {Amount: aws.String("0")}}}}},
-					{Groups: []cetypes.Group{{Keys: []string{"222222222222"}, Metrics: map[string]cetypes.MetricValue{"UnblendedCost": {Amount: aws.String("-5")}}}}},
+					{Groups: []cetypes.Group{{Keys: []string{"111111111111", usageTypes[0]}, Metrics: map[string]cetypes.MetricValue{"UnblendedCost": {Amount: aws.String("0")}}}}},
+					{Groups: []cetypes.Group{{Keys: []string{"222222222222", usageTypes[1]}, Metrics: map[string]cetypes.MetricValue{"UnblendedCost": {Amount: aws.String("-5")}}}}},
 				}}, nil
 			}
-			return &costexplorer.GetCostAndUsageOutput{ResultsByTime: []cetypes.ResultByTime{{Groups: []cetypes.Group{{Keys: []string{"111111111111"}}, {Keys: []string{"333333333333"}}}}}}, nil
+			return &costexplorer.GetCostAndUsageOutput{ResultsByTime: []cetypes.ResultByTime{{Groups: []cetypes.Group{{Keys: []string{"111111111111", usageTypes[1]}}, {Keys: []string{"111111111111", usageTypes[0]}}, {Keys: []string{"333333333333", "UPPER-EXTENDEDSUPPORT"}}}}}}, nil
 		},
 	}
 	result, err := discoverBillingCandidatesWithClient(context.Background(), api, billingTestPeriod())
@@ -78,6 +78,14 @@ func TestBillingCandidatesPaginateAndBatchExactUsageTypes(t *testing.T) {
 	}
 	if dimensionPages != 3 || accountPages != 2 || !reflect.DeepEqual(result.AccountIDs, []string{"111111111111", "222222222222", "333333333333"}) || len(result.UsageTypes) != 3 {
 		t.Fatalf("result=%+v dimensionPages=%d accountPages=%d", result, dimensionPages, accountPages)
+	}
+	want := map[string][]string{
+		"111111111111": {usageTypes[1], usageTypes[0]},
+		"222222222222": {usageTypes[1]},
+		"333333333333": {"UPPER-EXTENDEDSUPPORT"},
+	}
+	if !reflect.DeepEqual(result.AccountUsageTypes, want) {
+		t.Fatalf("per-account matches=%v, want %v", result.AccountUsageTypes, want)
 	}
 }
 
@@ -93,10 +101,10 @@ func TestBillingCandidatesSplitLargeUsageTypeSets(t *testing.T) {
 		},
 		usage: func(_ context.Context, input *costexplorer.GetCostAndUsageInput) (*costexplorer.GetCostAndUsageOutput, error) {
 			batches = append(batches, len(input.Filter.Dimensions.Values))
-			return &costexplorer.GetCostAndUsageOutput{ResultsByTime: []cetypes.ResultByTime{{Groups: []cetypes.Group{{Keys: []string{"111111111111"}}}}}}, nil
+			return &costexplorer.GetCostAndUsageOutput{ResultsByTime: []cetypes.ResultByTime{{Groups: []cetypes.Group{{Keys: []string{"111111111111", input.Filter.Dimensions.Values[0]}}}}}}, nil
 		},
 	}, billingTestPeriod())
-	if err != nil || !reflect.DeepEqual(batches, []int{billingUsageTypeBatchSize, 1}) || len(result.AccountIDs) != 1 {
+	if err != nil || !reflect.DeepEqual(batches, []int{billingUsageTypeBatchSize, 1}) || len(result.AccountIDs) != 1 || !reflect.DeepEqual(result.AccountUsageTypes["111111111111"], []string{values[0], values[billingUsageTypeBatchSize]}) {
 		t.Fatalf("result=%+v batches=%v error=%v", result, batches, err)
 	}
 }
@@ -117,7 +125,7 @@ func TestBillingCandidatesEmptyUsageTypesDoNotQueryAccounts(t *testing.T) {
 }
 
 func TestBillingCandidatesFailWithoutPartialSelection(t *testing.T) {
-	for _, stage := range []string{"dimensions", "dimension page", "nil dimensions", "dimension cycle", "usage", "usage page", "nil usage", "usage cycle", "invalid group", "cancellation"} {
+	for _, stage := range []string{"dimensions", "dimension page", "nil dimensions", "dimension cycle", "usage", "usage page", "nil usage", "usage cycle", "invalid group", "missing usage type", "unexpected usage type", "cancellation"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -151,7 +159,14 @@ func TestBillingCandidatesFailWithoutPartialSelection(t *testing.T) {
 					if stage == "invalid group" {
 						key = "not-an-account"
 					}
-					out := &costexplorer.GetCostAndUsageOutput{ResultsByTime: []cetypes.ResultByTime{{Groups: []cetypes.Group{{Keys: []string{key}}}}}}
+					keys := []string{key, "RDS:ExtendedSupport"}
+					if stage == "missing usage type" {
+						keys = keys[:1]
+					}
+					if stage == "unexpected usage type" {
+						keys[1] = "BoxUsage"
+					}
+					out := &costexplorer.GetCostAndUsageOutput{ResultsByTime: []cetypes.ResultByTime{{Groups: []cetypes.Group{{Keys: keys}}}}}
 					if stage == "usage cycle" || (stage == "usage page" && input.NextPageToken == nil) {
 						out.NextPageToken = aws.String("next")
 					}
@@ -159,7 +174,7 @@ func TestBillingCandidatesFailWithoutPartialSelection(t *testing.T) {
 				},
 			}
 			result, err := discoverBillingCandidatesWithClient(ctx, api, billingTestPeriod())
-			if err == nil || len(result.AccountIDs) != 0 || len(result.UsageTypes) != 0 {
+			if err == nil || len(result.AccountIDs) != 0 || len(result.UsageTypes) != 0 || len(result.AccountUsageTypes) != 0 {
 				t.Fatalf("partial result=%+v error=%v", result, err)
 			}
 			if stage == "cancellation" && !errors.Is(err, context.Canceled) {

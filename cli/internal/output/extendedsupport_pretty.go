@@ -23,6 +23,9 @@ func writeExtendedSupportPretty(w io.Writer, r extendedsupport.Result) error {
 	if err := writeExtendedSupportResourceWarnings(w, s, r.Summary.UnclassifiedResources); err != nil {
 		return err
 	}
+	if err := writeChargesWithoutFindings(w, s, r.Summary.ChargesWithoutFindings); err != nil {
+		return err
+	}
 	if len(r.Summary.PastExtendedSupportResources) > 0 {
 		if err := writeExtendedSupportResourceTable(w, s, "Past extended support", r.Summary.PastExtendedSupportResources); err != nil {
 			return err
@@ -34,13 +37,59 @@ func writeExtendedSupportPretty(w io.Writer, r extendedsupport.Result) error {
 	return writeExtendedSupportResourceTable(w, s, "Resources in extended support", r.Records)
 }
 
+func writeChargesWithoutFindings(w io.Writer, s styler, check *extendedsupport.ChargesWithoutFindingsSummary) error {
+	if check == nil || (len(check.Accounts) == 0 && len(check.Warnings) == 0) {
+		return nil
+	}
+	title := "Recent charges with unknown Extended Support resources"
+	if s.enabled {
+		title = s.bold(s.yellow(title))
+	}
+	if _, err := fmt.Fprintf(w, "\n%s\n  Billing window: %s to %s (end exclusive), %s\n  %s\n", title, check.Start, check.EndExclusive, check.Metric, check.Notice); err != nil {
+		return err
+	}
+	for _, warning := range check.Warnings {
+		if _, err := fmt.Fprintf(w, "  Billing check warning: %s\n", warning); err != nil {
+			return err
+		}
+	}
+	if len(check.Accounts) == 0 {
+		return nil
+	}
+	table := newExtendedSupportTable(w)
+	table.SetHeader([]string{cell(s, s.bold, "ACCOUNT"), cell(s, s.bold, "ALIAS"), cell(s, s.bold, "LAST 5 DAYS CHARGES"), cell(s, s.bold, "SCAN WARNINGS")})
+	for _, account := range check.Accounts {
+		warnings := "None"
+		if account.ScanIncomplete {
+			warnings = "See scan warnings"
+		}
+		table.Append([]string{account.AccountID, account.DisplayAlias, supportCostMoney(account.Amount, account.Currency), warnings})
+	}
+	table.Render()
+	return nil
+}
+
 func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result) error {
 	if err := writeExcludedRegions(w, r.Summary.ExcludedRegions); err != nil {
 		return err
 	}
+	if costs := r.Summary.Costs; costs != nil {
+		if _, err := fmt.Fprintf(w, "  Extended Support charges: %s to %s (end exclusive), %s\n  %s\n\n",
+			costs.Start, costs.EndExclusive, costs.Metric, costs.Notice); err != nil {
+			return err
+		}
+		for _, warning := range costs.Warnings {
+			if _, err := fmt.Fprintf(w, "  Cost warning: %s\n\n", warning); err != nil {
+				return err
+			}
+		}
+	}
 	if selection := r.Summary.BillingSelection; selection != nil {
 		if _, err := fmt.Fprintf(w, "  Account selection: Cost Explorer, %d of %d eligible members selected\n  Billing window: %s to %s (end exclusive)\n  %s\n\n",
 			selection.SelectedAccountCount, selection.EligibleAccountCount, selection.Start, selection.EndExclusive, selection.Notice); err != nil {
+			return err
+		}
+		if err := writeBillingSelectionDetails(w, s, selection); err != nil {
 			return err
 		}
 	}
@@ -75,9 +124,18 @@ func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result
 		if _, err := fmt.Fprintln(w, title); err != nil {
 			return err
 		}
-		for _, summary := range r.Summary.ByService {
-			if _, err := fmt.Fprintf(w, "  %-24s  %4d\n", summary.Service, summary.Count); err != nil {
-				return err
+		if r.Summary.Costs != nil {
+			table := newExtendedSupportTable(w)
+			table.SetHeader([]string{cell(s, s.bold, "SERVICE"), cell(s, s.bold, "RESOURCES"), cell(s, s.bold, "EXT SUPPORT CHARGES")})
+			for _, summary := range r.Summary.ByService {
+				table.Append([]string{string(summary.Service), fmt.Sprint(summary.Count), supportChargesLabel(summary.SupportCost)})
+			}
+			table.Render()
+		} else {
+			for _, summary := range r.Summary.ByService {
+				if _, err := fmt.Fprintf(w, "  %-24s  %4d\n", summary.Service, summary.Count); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -93,13 +151,80 @@ func writeExtendedSupportSummary(w io.Writer, s styler, r extendedsupport.Result
 		if _, err := fmt.Fprintln(w, title); err != nil {
 			return err
 		}
-		for _, summary := range r.Summary.ByAccount {
-			if _, err := fmt.Fprintf(w, "  %-24s  %4d\n", summary.AccountID, summary.Count); err != nil {
-				return err
+		if r.Summary.Costs != nil {
+			table := newExtendedSupportTable(w)
+			table.SetHeader([]string{cell(s, s.bold, "ACCOUNT"), cell(s, s.bold, "RESOURCES"), cell(s, s.bold, "EXT SUPPORT CHARGES")})
+			for _, summary := range r.Summary.ByAccount {
+				table.Append([]string{summary.AccountID, fmt.Sprint(summary.Count), supportChargesLabel(summary.SupportCost)})
+			}
+			table.Render()
+		} else {
+			for _, summary := range r.Summary.ByAccount {
+				if _, err := fmt.Fprintf(w, "  %-24s  %4d\n", summary.AccountID, summary.Count); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func writeBillingSelectionDetails(w io.Writer, s styler, selection *extendedsupport.BillingSelection) error {
+	if _, err := fmt.Fprintln(w, "Matched Extended Support usage types"); err != nil {
+		return err
+	}
+	if len(selection.UsageTypes) == 0 {
+		if _, err := fmt.Fprintln(w, "  None"); err != nil {
+			return err
+		}
+	}
+	for _, usage := range selection.UsageTypes {
+		if _, err := fmt.Fprintf(w, "  %s\n", usage); err != nil {
+			return err
+		}
+	}
+	title := "Accounts selected for scanning from Cost Explorer"
+	if s.enabled {
+		title = s.bold(s.cyan(title))
+	}
+	if _, err := fmt.Fprintf(w, "\n%s\n", title); err != nil {
+		return err
+	}
+	if len(selection.SelectedAccounts) == 0 {
+		message := "  None\n\n"
+		if selection.SelectedAccountCount > 0 {
+			message = "  Account details unavailable\n\n"
+		}
+		_, err := fmt.Fprint(w, message)
+		return err
+	}
+	table := newExtendedSupportTable(w)
+	table.SetHeader([]string{cell(s, s.bold, "ACCOUNT"), cell(s, s.bold, "NAME / ALIAS"), cell(s, s.bold, "MATCHED USAGE TYPE")})
+	for _, account := range selection.SelectedAccounts {
+		name := account.DisplayName
+		if name == "" {
+			name = account.DisplayAlias
+		} else if account.DisplayAlias != "" && account.DisplayAlias != name {
+			name += " (" + account.DisplayAlias + ")"
+		}
+		name = SanitizeTerminal(name)
+		if len(account.UsageTypes) == 0 {
+			table.Append([]string{account.AccountID, name, "Details unavailable"})
+		}
+		for _, usage := range account.UsageTypes {
+			table.Append([]string{account.AccountID, name, usage})
+		}
+	}
+	table.Render()
+	_, err := fmt.Fprintln(w)
+	return err
+}
+
+func supportChargesLabel(charges *extendedsupport.SupportCharges) string {
+	if charges == nil || charges.Amount == nil {
+		return "Unavailable"
+	}
+	return supportCostMoney(*charges.Amount, charges.Currency)
 }
 
 func writeExtendedSupportRegionWarnings(w io.Writer, s styler, warnings []extendedsupport.RegionWarning) error {

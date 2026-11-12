@@ -54,10 +54,10 @@ func TestBillingDiscoveryUsesPayerSDKRequestsAndLogsBothAPIs(t *testing.T) {
 				}
 				body = `{"DimensionValues":[{"Value":"USE1-AmazonEKS-Hours:extendedSupport"},{"Value":"ordinary"}]}`
 			} else {
-				if !strings.HasSuffix(request.Header.Get("X-Amz-Target"), "GetCostAndUsage") || input.Filter.Dimensions.Key != "USAGE_TYPE" || len(input.Filter.Dimensions.Values) != 1 || input.Filter.Dimensions.Values[0] != "USE1-AmazonEKS-Hours:extendedSupport" || len(input.GroupBy) != 1 || input.GroupBy[0].Key != "LINKED_ACCOUNT" || input.GroupBy[0].Type != "DIMENSION" {
+				if !strings.HasSuffix(request.Header.Get("X-Amz-Target"), "GetCostAndUsage") || input.Filter.Dimensions.Key != "USAGE_TYPE" || len(input.Filter.Dimensions.Values) != 1 || input.Filter.Dimensions.Values[0] != "USE1-AmazonEKS-Hours:extendedSupport" || len(input.GroupBy) != 2 || input.GroupBy[0].Key != "LINKED_ACCOUNT" || input.GroupBy[0].Type != "DIMENSION" || input.GroupBy[1].Key != "USAGE_TYPE" || input.GroupBy[1].Type != "DIMENSION" {
 					t.Errorf("usage = %+v", input)
 				}
-				body = `{"ResultsByTime":[{"Groups":[{"Keys":["111111111111"],"Metrics":{"UnblendedCost":{"Amount":"0","Unit":"USD"}}}]}]}`
+				body = `{"ResultsByTime":[{"Groups":[{"Keys":["111111111111","USE1-AmazonEKS-Hours:extendedSupport"],"Metrics":{"UnblendedCost":{"Amount":"0","Unit":"USD"}}}]}]}`
 			}
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/x-amz-json-1.1"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 		}),
@@ -67,5 +67,8 @@ func TestBillingDiscoveryUsesPayerSDKRequestsAndLogsBothAPIs(t *testing.T) {
 	}
 	if requests != 2 || len(result.AccountIDs) != 1 || result.AccountIDs[0] != "111111111111" || len(logs) != 2 || !strings.Contains(logs[0], "CostExplorer.GetDimensionValues") || !strings.Contains(logs[1], "groupBy=LINKED_ACCOUNT") || !strings.Contains(logs[1], "USAGE_TYPE=USE1-AmazonEKS-Hours:extendedSupport") {
 		t.Fatalf("result=%+v requests=%d logs=%v", result, requests, logs)
+	}
+	if len(result.AccountUsageTypes["111111111111"]) != 1 || result.AccountUsageTypes["111111111111"][0] != "USE1-AmazonEKS-Hours:extendedSupport" || !strings.Contains(logs[1], "groupBy=USAGE_TYPE") {
+		t.Fatal("per-account usage evidence missing", result, logs)
 	}
 }

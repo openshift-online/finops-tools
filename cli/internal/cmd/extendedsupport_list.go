@@ -37,7 +37,7 @@ var (
 
 var extendedSupportListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List AWS resources running in extended support",
+	Short: "List AWS extended-support resources and recent charges",
 	Long: `Discover RDS DB instances, Aurora/RDS DB clusters, EKS Kubernetes clusters,
 ElastiCache caches, and OpenSearch Service domains
 running versions in AWS Extended Support.
@@ -48,11 +48,31 @@ members across those organizations. Linked member accounts are scanned using rol
 With --payer alone, Cost Explorer narrows the scan to active members with recorded
 Extended Support usage in the billing lookback window (default: 30 UTC days including today).
 Billing data can be delayed. Use --full-scan to check every active member account.
+Pretty-print and JSON retain every account selected by this filter and its exact
+matched usage types, including accounts whose scan later finds nothing or fails.
+The selection query groups by LINKED_ACCOUNT and USAGE_TYPE. Zero or negative
+recorded charges still count as a usage-type match. JSON stores these accounts
+under summary.billing_selection.selected_accounts, and the complete discovered
+usage-type filter under summary.billing_selection.usage_types.
+Initial usage-type account selection is payer-wide; --services, --regions, and
+--skip-regions limit the later scan and 30-day cost summaries, rather than this selection.
 Explicit account, OU, and tag selections scan all selected accounts.
 Accounts that cannot be assumed into, or regions that fail credentialed API calls during the scan,
 are skipped and listed under "Skipped accounts" or "Skipped regions" in the output.
 After the initial scan, skipped accounts are retried once using fresh payer-session state.
 The final skipped-account list contains only accounts that still could not be scanned.
+
+After retries, accounts with no current Extended Support resources are checked for
+positive Extended Support charges in the last five complete UTC days through
+yesterday. Accounts with charges appear in a separate section.
+Entirely skipped accounts are excluded; partial scans and unknown
+support status are marked. This billing check ignores --services and covers every
+service with an Extended Support usage type, including unimplemented discovery
+services. --regions and --skip-regions still limit this check.
+Recent charges can indicate a discovery gap, or reflect upgraded/deleted resources;
+they do not prove that an undiscovered resource is still running. The latest two
+days may be incomplete. JSON stores this check under summary.charges_without_findings.
+CSV contains inventory only; use pretty-print or JSON for this separate report.
 
 RDS support dates come from DescribeDBMajorEngineVersions. EKS version catalogs are
 preloaded by region and shared across accounts and the final retry pass. EKS clusters
@@ -80,6 +100,15 @@ AWS Health end_of_life events also qualify for Past extended support once their
 regional date is reached, even without standard or extended support dates.
 The end-of-life date is shown separately in the table and end_of_life_date in JSON.
 
+The list includes historical Extended Support charges in the By service and By account summaries
+for the last 30 complete UTC days, including the latest two days, which may be
+incomplete. It uses payer/direct-account Cost Explorer credentials and ordinary
+GetCostAndUsage queries. Costs cover selected services and billing regions for
+accounts with current findings; they may include upgraded or deleted resources.
+Billing failures show Unavailable; inventory is retained. JSON stores summary
+charges and period/scope details under summary.costs. CSV contains resource details;
+use JSON to export the cost summaries.
+
 Required IAM permissions in each scanned account:
   ec2:DescribeRegions
   rds:DescribeDBInstances, rds:DescribeDBClusters
@@ -91,7 +120,9 @@ Required IAM permissions in each scanned account:
   es:ListTags (missing tags produce warnings but retain resources)
 
 Payer credentials also need sts:AssumeRole into the configured linked-account role.
-Payer-wide billing selection needs ce:GetDimensionValues and ce:GetCostAndUsage.
+Billing credentials need ce:GetDimensionValues and ce:GetCostAndUsage for account
+selection, the cost summaries, and the five-day check. This includes explicit
+account selections and --full-scan.
 Allow eks:DescribeClusterVersions on the payer to preload EKS catalogs; member
 credentials provide a fallback if the payer cannot retrieve version information.
 The catalog credential source also needs health:DescribeServiceLifecycle and an
@@ -241,9 +272,14 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(costTargets) == 0 {
-		return output.WriteExtendedSupportListResult(out, format, extendedsupport.Result{
+		result := extendedsupport.Result{
 			Summary: extendedsupport.Summary{BillingSelection: billingSelection, ExcludedRegions: skipRegions},
-		})
+		}
+		result, err = extendedSupportListEnrichCosts(cmd, cfg, nil, extendedsupport.Query{Now: scanNow, Services: services, Regions: regions, SkipRegions: skipRegions}, result)
+		if err != nil {
+			return err
+		}
+		return output.WriteExtendedSupportListResult(out, format, result)
 	}
 
 	status.Step("Ensuring AWS credentials…")
@@ -334,6 +370,30 @@ func runExtendedSupportList(cmd *cobra.Command, _ []string) error {
 
 	result.Summary.BillingSelection = billingSelection
 	result.Summary.ExcludedRegions = skipRegions
+	status.Step("Fetching recent account Extended Support charges…")
+	result, err = extendedSupportListEnrichCosts(cmd, cfg, costTargets, query, result)
+	if err != nil {
+		return err
+	}
+	for _, warning := range result.Summary.Costs.Warnings {
+		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: Extended Support costs: %s\n", warning); err != nil {
+			return err
+		}
+	}
+	if len(extendedsupport.AccountsWithoutFindings(costTargets, result)) > 0 {
+		status.Step("Checking recent Extended Support charges for accounts without findings…")
+		result, err = extendedSupportListCheckCharges(cmd, cfg, costTargets, query, result)
+		if err != nil {
+			return err
+		}
+		if check := result.Summary.ChargesWithoutFindings; check != nil {
+			for _, warning := range check.Warnings {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: recent Extended Support charges: %s\n", warning); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	for _, warning := range result.Summary.LifecycleWarnings {
 		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning); err != nil {
 			return err

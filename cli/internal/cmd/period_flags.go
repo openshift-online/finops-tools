@@ -23,25 +23,35 @@ type periodFlagValues struct {
 var periodFlags periodFlagValues
 
 func addPeriodFlags(cmd *cobra.Command) {
-	cmd.Flags().IntVar(&periodFlags.days, "days", 0, "Last N calendar days (mutually exclusive with --months and --from/--to)")
-	cmd.Flags().IntVar(&periodFlags.months, "months", 0, "Last N calendar months from the 1st of the month (mutually exclusive with --days and --from/--to)")
-	cmd.Flags().StringVar(&periodFlags.from, "from", "", "Start date YYYY-MM-DD inclusive (optional --to)")
-	cmd.Flags().StringVar(&periodFlags.to, "to", "", "End date YYYY-MM-DD inclusive (requires --from)")
-	cmd.Flags().IntVar(&periodFlags.excludeRecentDays, "exclude-recent-days", 0,
-		"Omit the last N UTC days from the end anchor (AWS CE lag; default 0, or defaults.cost.exclude_recent_days)")
+	bindPeriodFlags(cmd, &periodFlags, periodFlagValues{})
+	cmd.Flags().Lookup("exclude-recent-days").Usage = "Omit the last N UTC days from the end anchor (AWS CE lag; default 0, or defaults.cost.exclude_recent_days)"
+}
+
+// bindPeriodFlags reuses the period options with command-local values and defaults.
+func bindPeriodFlags(cmd *cobra.Command, values *periodFlagValues, defaults periodFlagValues) {
+	cmd.Flags().IntVar(&values.days, "days", defaults.days, "Last N calendar days (mutually exclusive with --months and --from/--to)")
+	cmd.Flags().IntVar(&values.months, "months", defaults.months, "Last N calendar months from the 1st of the month (mutually exclusive with --days and --from/--to)")
+	cmd.Flags().StringVar(&values.from, "from", defaults.from, "Start date YYYY-MM-DD inclusive (optional --to)")
+	cmd.Flags().StringVar(&values.to, "to", defaults.to, "End date YYYY-MM-DD inclusive (requires --from)")
+	cmd.Flags().IntVar(&values.excludeRecentDays, "exclude-recent-days", defaults.excludeRecentDays,
+		"Omit the last N UTC days from the end anchor (AWS CE lag)")
 }
 
 func validatePeriodFlags(cmd *cobra.Command) error {
-	if cmd.Flags().Changed("days") && periodFlags.days <= 0 {
+	return validatePeriodFlagValues(cmd, periodFlags)
+}
+
+func validatePeriodFlagValues(cmd *cobra.Command, values periodFlagValues) error {
+	if cmd.Flags().Changed("days") && values.days <= 0 {
 		return fmt.Errorf("--days must be a positive integer")
 	}
-	if cmd.Flags().Changed("months") && periodFlags.months <= 0 {
+	if cmd.Flags().Changed("months") && values.months <= 0 {
 		return fmt.Errorf("--months must be a positive integer")
 	}
-	if cmd.Flags().Changed("exclude-recent-days") && periodFlags.excludeRecentDays < 0 {
+	if cmd.Flags().Changed("exclude-recent-days") && values.excludeRecentDays < 0 {
 		return fmt.Errorf("--exclude-recent-days must be >= 0")
 	}
-	spec := periodSpecFromFlags()
+	spec := values.spec()
 	if err := validatePeriodSpecModes(spec); err != nil {
 		return err
 	}
@@ -107,12 +117,16 @@ func applyCostPeriodDefaults(cmd *cobra.Command, cfg configstore.File) error {
 }
 
 func periodSpecFromFlags() cost.PeriodSpec {
+	return periodFlags.spec()
+}
+
+func (values periodFlagValues) spec() cost.PeriodSpec {
 	return cost.PeriodSpec{
-		Days:              periodFlags.days,
-		Months:            periodFlags.months,
-		From:              periodFlags.from,
-		To:                periodFlags.to,
-		ExcludeRecentDays: periodFlags.excludeRecentDays,
+		Days:              values.days,
+		Months:            values.months,
+		From:              values.from,
+		To:                values.to,
+		ExcludeRecentDays: values.excludeRecentDays,
 	}
 }
 

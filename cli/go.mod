@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.18
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17
+	github.com/aws/aws-sdk-go-v2/service/organizations v1.51.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1
 	github.com/aws/smithy-go v1.28.1
 	github.com/jcmturner/gokrb5/v8 v8.4.4
@@ -53,7 +54,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.104.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/opensearch v1.78.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/organizations v1.51.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/rds v1.119.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.67.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.109.1 // indirect
