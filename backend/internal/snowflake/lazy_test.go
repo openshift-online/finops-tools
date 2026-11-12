@@ -294,6 +294,69 @@ func TestLazyServiceInvalidateIfCurrentPreservesNewerPool(t *testing.T) {
 	}
 }
 
+func TestLazyServiceInvalidateDoesNotBlockOnSlowClose(t *testing.T) {
+	t.Parallel()
+
+	closeStarted := make(chan struct{})
+	releaseClose := make(chan struct{})
+	var closeOnce sync.Once
+
+	l := NewLazyService(coresnowflake.ConnectParams{
+		Account:   "example",
+		User:      "user",
+		Warehouse: "wh",
+		Token:     "token",
+	}, 100, slog.Default())
+	opens := 0
+	l.openDB = func(coresnowflake.ConnectParams) (*sql.DB, error) {
+		opens++
+		return coresnowflake.OpenDB(coresnowflake.ConnectParams{
+			Account: "example", User: "user", Warehouse: "wh", Token: "token",
+		})
+	}
+	l.ping = func(context.Context, *sql.DB) error { return nil }
+	l.closeDB = func(db *sql.DB) error {
+		closeOnce.Do(func() { close(closeStarted) })
+		<-releaseClose
+		return db.Close()
+	}
+
+	if _, err := l.connectService(context.Background()); err != nil {
+		t.Fatalf("initial connect: %v", err)
+	}
+	failing := l.svc
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		l.invalidateIfCurrent(failing)
+	}()
+
+	select {
+	case <-closeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected async close to start")
+	}
+
+	// While the old pool Close is still blocked, reconnect must proceed
+	// (mutex is not held across driver Close).
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := l.connectService(ctx); err != nil {
+		t.Fatalf("reconnect while old Close blocked: %v", err)
+	}
+	if opens != 2 {
+		t.Fatalf("opens = %d, want 2", opens)
+	}
+
+	close(releaseClose)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("invalidateIfCurrent did not return after Close unblocked")
+	}
+}
+
 func TestLazyServiceCachesConnectTimeoutInitFailure(t *testing.T) {
 	t.Parallel()
 

@@ -26,8 +26,9 @@ type LazyService struct {
 	maxRows int
 	logger  *slog.Logger
 
-	openDB func(coresnowflake.ConnectParams) (*sql.DB, error)
-	ping   func(context.Context, *sql.DB) error
+	openDB  func(coresnowflake.ConnectParams) (*sql.DB, error)
+	ping    func(context.Context, *sql.DB) error
+	closeDB func(*sql.DB) error
 
 	mu           sync.Mutex
 	db           *sql.DB
@@ -125,8 +126,9 @@ func (l *LazyService) Check(ctx context.Context) error {
 			l.mu.Unlock()
 			continue
 		}
-		l.invalidateLocked()
+		oldDB := l.detachLocked()
 		l.mu.Unlock()
+		l.closePoolAsync(oldDB)
 
 		_, err := l.serviceWithContext(ctxWithTimeout, ctx)
 		return err
@@ -134,19 +136,13 @@ func (l *LazyService) Check(ctx context.Context) error {
 }
 
 // Close releases the Snowflake handle when connected.
+// The pool is detached under the mutex, then closed outside it so a slow
+// driver Close cannot stall other requests waiting on l.mu.
 func (l *LazyService) Close() error {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.db == nil {
-		return nil
-	}
-	err := l.db.Close()
-	l.db = nil
-	l.svc = nil
-	l.init = false
-	l.initErr = nil
-	l.lastInitFail = time.Time{}
-	return err
+	db := l.detachLocked()
+	l.mu.Unlock()
+	return l.closePool(db)
 }
 
 func (l *LazyService) withService(ctx context.Context, op func(*Service) error) error {
@@ -180,26 +176,52 @@ func (l *LazyService) connectService(ctx context.Context) (*Service, error) {
 	return l.serviceWithContext(ctxWithTimeout, ctx)
 }
 
-// invalidateIfCurrent closes the pool only when failing still points at the
+// invalidateIfCurrent detaches the pool only when failing still points at the
 // active service, so a concurrent reconnect cannot tear down a newer pool.
+// The detached pool is closed asynchronously so gosnowflake's potentially
+// long heartbeat shutdown cannot hold l.mu (driver default timeout is 15m).
 func (l *LazyService) invalidateIfCurrent(failing *Service) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if failing == nil || l.svc != failing {
-		return
+	var oldDB *sql.DB
+	if failing != nil && l.svc == failing {
+		oldDB = l.detachLocked()
 	}
-	l.invalidateLocked()
+	l.mu.Unlock()
+	l.closePoolAsync(oldDB)
 }
 
-func (l *LazyService) invalidateLocked() {
-	if l.db != nil {
-		_ = l.db.Close()
-	}
+// detachLocked clears the active pool under l.mu and returns the prior *sql.DB
+// for the caller to close outside the lock. Caller must hold l.mu.
+func (l *LazyService) detachLocked() *sql.DB {
+	old := l.db
 	l.db = nil
 	l.svc = nil
 	l.init = false
 	l.initErr = nil
 	l.lastInitFail = time.Time{}
+	return old
+}
+
+func (l *LazyService) closePool(db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+	closeDB := l.closeDB
+	if closeDB == nil {
+		return db.Close()
+	}
+	return closeDB(db)
+}
+
+func (l *LazyService) closePoolAsync(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	go func() {
+		if err := l.closePool(db); err != nil {
+			l.logger.Warn("snowflake pool close failed", "error", err)
+		}
+	}()
 }
 
 func (l *LazyService) clearInitFailureLocked() {
@@ -256,7 +278,7 @@ func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Servi
 	}
 
 	if err := ping(ctx, db); err != nil {
-		_ = db.Close()
+		_ = l.closePool(db)
 		// Re-check after ping so mid-ping caller cancel is not cached, while a
 		// service-owned connect timeout (caller still active) still cools down.
 		if callerCtx.Err() == nil {
@@ -269,19 +291,23 @@ func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Servi
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.svc != nil {
-		_ = db.Close()
-		return l.svc, nil
+		svc := l.svc
+		l.mu.Unlock()
+		// Discard the raced-open pool outside the mutex.
+		_ = l.closePool(db)
+		return svc, nil
 	}
 
 	l.db = db
 	l.svc = &Service{DB: db, MaxRows: l.maxRows}
 	l.init = true
 	l.initErr = nil
+	svc := l.svc
+	l.mu.Unlock()
 	l.logger.Info("snowflake connected",
 		"account", l.connect.Account,
 		"warehouse", l.connect.Warehouse,
 	)
-	return l.svc, nil
+	return svc, nil
 }
