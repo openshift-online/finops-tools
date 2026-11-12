@@ -642,6 +642,79 @@ func TestResolveAccountOUBucketsMultiPayer(t *testing.T) {
 	}
 }
 
+func TestResolveAccountTagValues(t *testing.T) {
+	origLoadCfg := loadAWSConfigForCredentialsAccount
+	origLoadTags := loadOrganizationAccountTags
+	t.Cleanup(func() {
+		loadAWSConfigForCredentialsAccount = origLoadCfg
+		loadOrganizationAccountTags = origLoadTags
+	})
+
+	loadAWSConfigForCredentialsAccount = func(context.Context, configstore.File, string, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+	loadOrganizationAccountTags = func(
+		_ context.Context,
+		_ aws.Config,
+		payerID string,
+		_ coreaccount.TagFilterProgress,
+		_ string,
+		_, _ bool,
+	) ([]coreaccount.OrganizationAccountTags, error) {
+		switch payerID {
+		case "123456789012":
+			return []coreaccount.OrganizationAccountTags{
+				{
+					Account: coreaccount.OrganizationAccount{ID: "111111111111", Name: "A"},
+					Tags:    []coreaccount.Tag{{Key: "organization", Value: "Hybrid Platform"}},
+				},
+				{
+					Account: coreaccount.OrganizationAccount{ID: "222222222222", Name: "B"},
+					Tags:    []coreaccount.Tag{{Key: "organization", Value: ""}},
+				},
+				{
+					Account: coreaccount.OrganizationAccount{ID: "333333333333", Name: "C"},
+					Tags:    []coreaccount.Tag{{Key: "env", Value: "prod"}},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected payer %s", payerID)
+		}
+	}
+
+	targets := []cost.AccountTarget{
+		{AccountID: "111111111111", PayerAccountID: "123456789012"},
+		{AccountID: "222222222222", PayerAccountID: "123456789012"},
+		{AccountID: "333333333333", PayerAccountID: "123456789012"},
+		{AccountID: "999999999999", PayerAccountID: "123456789012"},
+	}
+	got, err := resolveAccountTagValues(
+		context.Background(),
+		configstore.File{},
+		costTargetSelector{},
+		targets,
+		"organization",
+		"",
+		"",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["111111111111"] != "Hybrid Platform" {
+		t.Fatalf("111 = %q", got["111111111111"])
+	}
+	if v, ok := got["222222222222"]; !ok || v != "" {
+		t.Fatalf("222 present=%v value=%q", ok, v)
+	}
+	if _, ok := got["333333333333"]; ok {
+		t.Fatalf("333 should be omitted (untagged for organization)")
+	}
+	if _, ok := got["999999999999"]; ok {
+		t.Fatalf("999 should be omitted (not in scan)")
+	}
+}
+
 func TestParseCostTargetSelectorPayers(t *testing.T) {
 	sel, err := parseCostTargetSelector("", "", "", "rh-control, osd-staging-1,rh-control", "", false, false, false)
 	if err != nil {

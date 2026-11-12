@@ -1292,6 +1292,36 @@ func TestFilterOrganizationAccountsFromScan(t *testing.T) {
 	}
 }
 
+func TestAccountTagValuesFromScan(t *testing.T) {
+	scan := []OrganizationAccountTags{
+		{
+			Account: OrganizationAccount{ID: "111111111111", Name: "A"},
+			Tags:    []Tag{{Key: "organization", Value: "Hybrid Platform"}},
+		},
+		{
+			Account: OrganizationAccount{ID: "222222222222", Name: "B"},
+			Tags:    []Tag{{Key: "organization", Value: ""}},
+		},
+		{
+			Account: OrganizationAccount{ID: "333333333333", Name: "C"},
+			Tags:    []Tag{{Key: "env", Value: "prod"}},
+		},
+	}
+	got := AccountTagValuesFromScan(scan, "organization", []string{"111111111111", "222222222222", "333333333333", "999999999999"})
+	if got["111111111111"] != "Hybrid Platform" {
+		t.Fatalf("111 = %q", got["111111111111"])
+	}
+	if v, ok := got["222222222222"]; !ok || v != "" {
+		t.Fatalf("222 present=%v value=%q", ok, v)
+	}
+	if _, ok := got["333333333333"]; ok {
+		t.Fatal("333 should be omitted")
+	}
+	if _, ok := got["999999999999"]; ok {
+		t.Fatal("999 should be omitted")
+	}
+}
+
 func TestFilterOrganizationAccountsByTagValidation(t *testing.T) {
 	client := fakeOrganizationsFilterByTag{}
 	if _, err := filterOrganizationAccountsByTagWithClient(context.Background(), client, " ", "", nil); err == nil {

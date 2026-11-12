@@ -227,6 +227,59 @@ func FilterOrganizationAccountsFromScan(scan []OrganizationAccountTags, tagKey, 
 	return out
 }
 
+// AccountTagValuesFromScan returns accountID → tag value for accounts that have tagKey.
+// Accounts where the key is absent are omitted (callers treat missing as untagged).
+// When accountIDs is non-empty, only those IDs are considered.
+func AccountTagValuesFromScan(scan []OrganizationAccountTags, tagKey string, accountIDs []string) map[string]string {
+	tagKey = strings.TrimSpace(tagKey)
+	if tagKey == "" {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		wanted[id] = struct{}{}
+	}
+	restrict := len(wanted) > 0
+
+	out := make(map[string]string)
+	for _, item := range scan {
+		id := strings.TrimSpace(item.Account.ID)
+		if id == "" {
+			continue
+		}
+		if restrict {
+			if _, ok := wanted[id]; !ok {
+				continue
+			}
+		}
+		value, ok := LookupAccountTagValue(item.Tags, tagKey)
+		if !ok {
+			continue
+		}
+		out[id] = value
+	}
+	return out
+}
+
+// LookupAccountTagValue returns the value for tagKey when present (ok=true).
+// An empty string value still returns ok=true. Key match is exact (same as tag filters).
+func LookupAccountTagValue(tags []Tag, tagKey string) (string, bool) {
+	tagKey = strings.TrimSpace(tagKey)
+	if tagKey == "" {
+		return "", false
+	}
+	for _, tag := range tags {
+		if strings.TrimSpace(tag.Key) == tagKey {
+			return tag.Value, true
+		}
+	}
+	return "", false
+}
+
 func filterOrganizationAccountsByTagWithClient(ctx context.Context, client OrganizationsAPI, tagKey, tagValue string, progress TagFilterProgress) ([]OrganizationAccount, error) {
 	tagKey = strings.TrimSpace(tagKey)
 	if tagKey == "" {

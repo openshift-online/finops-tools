@@ -105,6 +105,8 @@ func breakdownCSVColumn(groupBy cost.GroupBy) string {
 		return "linked_account_id"
 	case cost.GroupByOU:
 		return "ou"
+	case cost.GroupByAccountTag:
+		return "tag_value"
 	default:
 		return "service"
 	}

@@ -334,6 +334,42 @@ func TestFetchPartitionsBulkByPayer(t *testing.T) {
 	if got["ou-abcd-12345678"] != 20 || got["ou-efgh-87654321"] != 10 || len(got) != 2 {
 		t.Fatalf("breakdown = %+v", res.Breakdown)
 	}
+
+	calls = 0
+	res, err = Fetch(context.Background(), CostQuery{
+		Provider: ProviderAWS,
+		Accounts: targets,
+		Range:    LastNDaysRange(30, now),
+		GroupBy:  GroupByAccountTag,
+		TagKey:   "organization",
+		AWSFetch: &AWSFetchOptions{
+			AccountTagValues: map[string]string{
+				"111111111111": "Hybrid Platform",
+				"222222222222": "Hybrid Platform",
+				"333333333333": "Dataverse",
+				"444444444444": "Dataverse",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("Cost Explorer calls = %d, want 2 bulk queries", calls)
+	}
+	if res.GroupBy != GroupByAccountTag || res.GroupByTagKey != "organization" {
+		t.Fatalf("GroupBy = %q key = %q", res.GroupBy, res.GroupByTagKey)
+	}
+	tagGot := map[string]float64{}
+	for _, item := range res.Breakdown {
+		if item.Account != "" {
+			t.Fatalf("account-tag rollup kept an account row: %+v", item)
+		}
+		tagGot[item.TagValueString()] = item.Amount
+	}
+	if tagGot["Hybrid Platform"] != 20 || tagGot["Dataverse"] != 10 || len(tagGot) != 2 {
+		t.Fatalf("breakdown = %+v", res.Breakdown)
+	}
 }
 
 type failingCE struct {

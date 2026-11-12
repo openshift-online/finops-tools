@@ -78,7 +78,7 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 	switch q.GroupBy {
 	case GroupByService:
 		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "SERVICE", GroupByService, filter)
-	case GroupByAccount, GroupByOU:
+	case GroupByAccount, GroupByOU, GroupByAccountTag:
 		amount, currency, breakdown, fetchErr = sumNetAmortizedGrouped(ctx, ce, dr, "LINKED_ACCOUNT", GroupByAccount, filter)
 	case GroupByNone:
 		amount, currency, fetchErr = sumNetAmortizedCost(ctx, ce, dr, filter)
@@ -89,25 +89,29 @@ func fetchAWSNetAmortizedWith(ctx context.Context, q CostQuery, opts fetchAWSOpt
 		return CostResult{}, fetchErr
 	}
 
-	if q.GroupBy == GroupByAccount || q.GroupBy == GroupByOU {
+	if q.GroupBy == GroupByAccount || q.GroupBy == GroupByOU || q.GroupBy == GroupByAccountTag {
 		breakdown = applyAWSAccountNames(ctx, cfg, breakdown, opts)
 	}
 	if q.GroupBy == GroupByOU {
 		breakdown = rollupOUBreakdown(breakdown, q.AWSFetch)
 	}
+	if q.GroupBy == GroupByAccountTag {
+		breakdown = rollupAccountTagBreakdown(breakdown, q.AWSFetch)
+	}
 
 	return CostResult{
-		Provider:    ProviderAWS,
-		AccountName: acct.AccountDisplayName(),
-		AccountID:   accountID,
-		Metric:      MetricNetAmortized,
-		GroupBy:     q.GroupBy,
-		StartDate:   FormatDate(dr.Start),
-		EndDate:     FormatDate(dr.End.AddDate(0, 0, -1)),
-		Amount:      amount,
-		Currency:    currency,
-		Breakdown:   breakdown,
-		Linked:      acct.IsLinked(),
+		Provider:      ProviderAWS,
+		AccountName:   acct.AccountDisplayName(),
+		AccountID:     accountID,
+		Metric:        MetricNetAmortized,
+		GroupBy:       q.GroupBy,
+		GroupByTagKey: strings.TrimSpace(q.TagKey),
+		StartDate:     FormatDate(dr.Start),
+		EndDate:       FormatDate(dr.End.AddDate(0, 0, -1)),
+		Amount:        amount,
+		Currency:      currency,
+		Breakdown:     breakdown,
+		Linked:        acct.IsLinked(),
 	}, nil
 }
 

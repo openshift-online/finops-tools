@@ -52,7 +52,7 @@ make build-backend
 ./bin/finops-backend      # starts HTTP server on :8080 (see HTTP API below)
 ```
 
-`make lint` uses golangci-lint v2.12.2 and `.golangci.yml`, and reports only issues introduced since the merge-base with `origin/main` (local equivalent of GitHub Actions `only-new-issues` / `--new-from-patch`). Override the baseline with `make lint LINT_NEW_FROM=<sha>` to match a specific CI event. `make lint-all` scans the whole tree, including findings already on main. After `make install-hooks`, `git push` runs `make lint`. Bypass with `git push --no-verify` or `SKIP_LINT=1 git push`.
+`make lint` uses golangci-lint v2.12.2 and `.golangci.yml`, and reports only issues introduced since the merge-base with `origin/main` (local equivalent of GitHub Actions `only-new-issues` / `--new-from-patch`). It pins `GOTOOLCHAIN=go1.25.5` (override with `GOTOOLCHAIN_LINT`) so a newer host Go does not break typecheck. Override the baseline with `make lint LINT_NEW_FROM=<sha>` to match a specific CI event. `make lint-all` scans the whole tree, including findings already on main. After `make install-hooks`, `git push` runs `make lint`. Bypass with `git push --no-verify` or `SKIP_LINT=1 git push`.
 
 Or without Make:
 
@@ -606,6 +606,7 @@ finops account get-cost --payer rh-control,osd-staging-1
 finops account get-cost --payer rh-control,osd-staging-1 --tag env=prod
 finops account get-cost --ou ou-abcd-12345678,ou-efgh-87654321 --payer rh-control,osd-staging-1
 finops account get-cost --payer rh-control --group-by ou
+finops account get-cost --payer rh-control --group-by account-tag:organization
 finops account get-cost --payer rh-control --tag organization
 finops account get-cost --payer rh-control --tag organization="Hybrid Platform" --group-by service
 finops report create costs --payer rh-control --tag env=prod -o prod.html
@@ -619,7 +620,7 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--payer` | Registered payer alias(es), comma-separated. Alone selects org members and unions them across the listed organizations (ACTIVE only unless `--include-closed-accounts`); also required with `--ou` / `--tag`. A single alias supplies credentials for unregistered `--account-id` values; several aliases cannot be combined with `--account-id` or `--account-alias` |
 | `--tag` | Select org accounts by Organizations tag: `KEY` or `KEY=VALUE` (requires `--payer`) |
 | `--include-closed-accounts` | `finops account get-cost` only. With `--ou` or `--payer` alone, also select `SUSPENDED`, `PENDING_CLOSURE`, and `CLOSED` members (default: ACTIVE only). Ignored with a warning for `--tag` (already all states) and `--account-id`/`--account-alias` |
-| `--skip-org-cache` | Bypass cached organization account/tag data for `--tag` selection (always fetch live from AWS) |
+| `--skip-org-cache` | Bypass cached organization account/tag data for `--tag` selection and `--group-by account-tag:<key>` (always fetch live from AWS) |
 | `--refresh-org-cache` | Ignore cached organization data and refresh the cache from AWS (mutually exclusive with `--skip-org-cache`) |
 | `--days` | Last N calendar days (mutually exclusive with `--months` and `--from`/`--to`) |
 | `--months` | Last N calendar months from the 1st of the month (mutually exclusive with `--days` and `--from`/`--to`) |
@@ -630,7 +631,7 @@ finops report create costs --payer rh-control --tag env=prod -o prod.html
 | `--format` | `pretty-print` (default), `json`, or `csv` |
 | `--quiet` | Suppress progress messages on stderr (cost/CSV/JSON still go to stdout) |
 | `--workers` | Maximum concurrent workers for multi-account AWS queries (default: `25`, max: `1000`; use `1` for sequential) |
-| `--group-by` | Group costs by dimension: `service`, `account` (linked AWS account ID), or `ou` (OU tree under the selection root; each row is subtree total, indented in pretty-print); includes share % and relative cost bars in `pretty-print` |
+| `--group-by` | Group costs by dimension: `service`, `account` (linked AWS account ID), `ou` (OU tree under the selection root; each row is subtree total, indented in pretty-print), or `account-tag:<key>` (Organizations account tag values; missing key → `(untagged)`); includes share % and relative cost bars in `pretty-print` |
 | `--provider` | `aws` (default). `gcp` is reserved for a future release |
 
 `pretty-print` uses colors and Unicode bars when stdout is a TTY. Set `NO_COLOR=1` to disable; `FORCE_COLOR=1` forces colors when piping to a capable viewer.

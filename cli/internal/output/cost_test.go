@@ -140,6 +140,78 @@ func TestWriteCostResultCSVWithAccountBreakdownUsesRawID(t *testing.T) {
 	}
 }
 
+func TestWriteCostResultPrettyPrintWithAccountTagBreakdown(t *testing.T) {
+	r := fixtureResult()
+	r.GroupBy = cost.GroupByAccountTag
+	r.GroupByTagKey = "organization"
+	hybrid := "Hybrid Platform"
+	empty := ""
+	untagged := "(untagged)"
+	r.Breakdown = []cost.CostBreakdownItem{
+		{TagValue: &hybrid, Amount: 100},
+		{TagValue: &empty, Amount: 10},
+		{TagValue: &untagged, Amount: 1},
+	}
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatPrettyPrint, r); err != nil {
+		t.Fatal(err)
+	}
+	out := stripANSI(buf.String())
+	if !strings.Contains(out, "Group by:  account-tag:organization") && !strings.Contains(out, "account-tag:organization") {
+		t.Errorf("missing group-by label:\n%s", out)
+	}
+	if !strings.Contains(out, "Cost by account tag") {
+		t.Errorf("missing breakdown header:\n%s", out)
+	}
+	if !strings.Contains(out, "Hybrid Platform") || !strings.Contains(out, "(empty)") || !strings.Contains(out, "(untagged)") {
+		t.Errorf("missing tag rows:\n%s", out)
+	}
+}
+
+func TestWriteCostResultCSVWithAccountTagBreakdown(t *testing.T) {
+	r := fixtureResult()
+	r.GroupBy = cost.GroupByAccountTag
+	r.GroupByTagKey = "organization"
+	hybrid := "Hybrid Platform"
+	r.Breakdown = []cost.CostBreakdownItem{{TagValue: &hybrid, Amount: 10}}
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatCSV, r); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines:\n%s", buf.String())
+	}
+	if !strings.Contains(lines[0], "tag_value") {
+		t.Errorf("header = %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "Hybrid Platform") {
+		t.Errorf("row = %q", lines[1])
+	}
+}
+
+func TestWriteCostResultJSONKeepsEmptyAccountTagValue(t *testing.T) {
+	r := fixtureResult()
+	r.GroupBy = cost.GroupByAccountTag
+	r.GroupByTagKey = "organization"
+	empty := ""
+	r.Breakdown = []cost.CostBreakdownItem{{TagValue: &empty, Amount: 10}}
+	var buf bytes.Buffer
+	if err := WriteCostResult(&buf, FormatJSON, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"tag_value": ""`) && !strings.Contains(buf.String(), `"tag_value":""`) {
+		t.Fatalf("empty tag_value omitted from JSON:\n%s", buf.String())
+	}
+	var decoded cost.CostResult
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Breakdown) != 1 || decoded.Breakdown[0].TagValue == nil || *decoded.Breakdown[0].TagValue != "" {
+		t.Fatalf("decoded breakdown = %+v", decoded.Breakdown)
+	}
+}
+
 func TestWriteCostResultPrettyPrintLinkedAccount(t *testing.T) {
 	r := fixtureResult()
 	r.Linked = true

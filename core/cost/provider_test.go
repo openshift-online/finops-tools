@@ -19,23 +19,23 @@ func TestMergeResultsSinglePassthrough(t *testing.T) {
 }
 
 func TestParseGroupBy(t *testing.T) {
-	s, err := ParseGroupBy("service")
-	if err != nil || s != GroupByService {
-		t.Fatalf("got %v %v", s, err)
+	s, key, err := ParseGroupBy("service")
+	if err != nil || s != GroupByService || key != "" {
+		t.Fatalf("got %v %q %v", s, key, err)
 	}
-	s, err = ParseGroupBy("")
-	if err != nil || s != GroupByNone {
-		t.Fatalf("got %v %v", s, err)
+	s, key, err = ParseGroupBy("")
+	if err != nil || s != GroupByNone || key != "" {
+		t.Fatalf("got %v %q %v", s, key, err)
 	}
-	s, err = ParseGroupBy("account")
-	if err != nil || s != GroupByAccount {
-		t.Fatalf("got %v %v", s, err)
+	s, key, err = ParseGroupBy("account")
+	if err != nil || s != GroupByAccount || key != "" {
+		t.Fatalf("got %v %q %v", s, key, err)
 	}
-	s, err = ParseGroupBy("ou")
-	if err != nil || s != GroupByOU {
-		t.Fatalf("got %v %v", s, err)
+	s, key, err = ParseGroupBy("ou")
+	if err != nil || s != GroupByOU || key != "" {
+		t.Fatalf("got %v %q %v", s, key, err)
 	}
-	_, err = ParseGroupBy("region")
+	_, _, err = ParseGroupBy("region")
 	if err == nil {
 		t.Fatal("expected error")
 	}

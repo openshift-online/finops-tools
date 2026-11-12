@@ -31,28 +31,46 @@ const MetricNetAmortized = "NetAmortizedCost"
 type GroupBy string
 
 const (
-	GroupByNone    GroupBy = ""
-	GroupByService GroupBy = "service"
-	GroupByAccount GroupBy = "account"
-	GroupByOU      GroupBy = "ou"
+	GroupByNone       GroupBy = ""
+	GroupByService    GroupBy = "service"
+	GroupByAccount    GroupBy = "account"
+	GroupByOU         GroupBy = "ou"
+	GroupByAccountTag GroupBy = "account-tag"
+)
+
+const (
+	groupByAccountTagPrefix = "account-tag:"
+	supportedGroupByHelp    = "service, account, ou, account-tag:<key>"
 )
 
 var errProviderNotImplemented = errors.New("cost provider not implemented")
 
 // ParseGroupBy parses a --group-by flag value (case-insensitive). Empty means no grouping.
-func ParseGroupBy(s string) (GroupBy, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+// For account-tag:<key>, tagKey is the Organizations account tag key to roll up by.
+func ParseGroupBy(s string) (GroupBy, string, error) {
+	raw := strings.TrimSpace(s)
+	lower := strings.ToLower(raw)
+	switch lower {
 	case "":
-		return GroupByNone, nil
+		return GroupByNone, "", nil
 	case string(GroupByService):
-		return GroupByService, nil
+		return GroupByService, "", nil
 	case string(GroupByAccount):
-		return GroupByAccount, nil
+		return GroupByAccount, "", nil
 	case string(GroupByOU):
-		return GroupByOU, nil
-	default:
-		return "", fmt.Errorf("unknown group-by %q (supported: service, account, ou)", s)
+		return GroupByOU, "", nil
+	case string(GroupByAccountTag), groupByAccountTagPrefix:
+		return "", "", fmt.Errorf("group-by %q requires a tag key (supported: %s)", s, supportedGroupByHelp)
 	}
+	if strings.HasPrefix(lower, groupByAccountTagPrefix) {
+		// Preserve original key casing after the prefix.
+		key := strings.TrimSpace(raw[len(groupByAccountTagPrefix):])
+		if key == "" {
+			return "", "", fmt.Errorf("group-by %q requires a tag key (supported: %s)", s, supportedGroupByHelp)
+		}
+		return GroupByAccountTag, key, nil
+	}
+	return "", "", fmt.Errorf("unknown group-by %q (supported: %s)", s, supportedGroupByHelp)
 }
 
 // ParseProvider parses a provider flag value (case-insensitive).
@@ -82,6 +100,8 @@ type AWSFetchOptions struct {
 	AccountOUBuckets map[string]OUBucket
 	// OUHierarchy is the DFS pre-order OU tree under the selection root for GroupByOU.
 	OUHierarchy []OUHierarchyNode
+	// AccountTagValues maps linked account IDs to Organizations tag values for GroupByAccountTag.
+	AccountTagValues map[string]string
 }
 
 // OUBucket identifies an Organizational Unit for cost rollup.
@@ -99,6 +119,8 @@ type CostQuery struct {
 	Accounts []AccountTarget
 	Range    DateRange
 	GroupBy  GroupBy
+	// TagKey is the Organizations account tag key when GroupBy is GroupByAccountTag.
+	TagKey   string
 	AWSFetch *AWSFetchOptions
 	Progress FetchProgress
 	// Workers bounds concurrent Cost Explorer queries for multi-account fetches (0 = default).
@@ -158,7 +180,7 @@ type DailyCostItem struct {
 	Amount float64 `json:"amount"`
 }
 
-// CostBreakdownItem is one row when costs are split by service, linked account, or OU.
+// CostBreakdownItem is one row when costs are split by service, linked account, OU, or account tag.
 type CostBreakdownItem struct {
 	Service     string  `json:"service,omitempty"`
 	Account     string  `json:"account,omitempty"`
@@ -166,7 +188,23 @@ type CostBreakdownItem struct {
 	OUID        string  `json:"ou_id,omitempty"`
 	OUName      string  `json:"ou_name,omitempty"`
 	OUDepth     int     `json:"ou_depth"`
-	Amount      float64 `json:"amount"`
+	// TagValue is set for GroupByAccountTag rows. Pointer so an empty Organizations
+	// tag value still appears in JSON (omitempty would drop "").
+	TagValue *string `json:"tag_value,omitempty"`
+	Amount   float64 `json:"amount"`
+}
+
+// TagValueString returns the account-tag value, or "" when TagValue is unset.
+func (b CostBreakdownItem) TagValueString() string {
+	if b.TagValue == nil {
+		return ""
+	}
+	return *b.TagValue
+}
+
+// SetTagValue sets TagValue to a non-nil pointer (including empty string).
+func (b *CostBreakdownItem) SetTagValue(value string) {
+	b.TagValue = &value
 }
 
 // Label returns the merge/group key for this breakdown row (always the raw dimension value).
@@ -179,6 +217,8 @@ func (b CostBreakdownItem) Label(groupBy GroupBy) string {
 			return id
 		}
 		return b.OUName
+	case GroupByAccountTag:
+		return b.TagValueString()
 	default:
 		return b.Service
 	}
@@ -202,6 +242,14 @@ func (b CostBreakdownItem) DisplayLabel(groupBy GroupBy) string {
 			return name
 		}
 		return id
+	case GroupByAccountTag:
+		if b.TagValue == nil {
+			return untaggedAccountTagValue
+		}
+		if *b.TagValue == "" {
+			return "(empty)"
+		}
+		return *b.TagValue
 	default:
 		return b.Label(groupBy)
 	}
@@ -214,11 +262,13 @@ type CostResult struct {
 	AccountID   string              `json:"account_id"`
 	Metric      string              `json:"metric"`
 	GroupBy     GroupBy             `json:"group_by,omitempty"`
-	StartDate   string              `json:"start_date"`
-	EndDate     string              `json:"end_date"`
-	Amount      float64             `json:"amount"`
-	Currency    string              `json:"currency"`
-	Breakdown   []CostBreakdownItem `json:"breakdown,omitempty"`
+	// GroupByTagKey is the Organizations account tag key when GroupBy is GroupByAccountTag.
+	GroupByTagKey string              `json:"group_by_tag_key,omitempty"`
+	StartDate     string              `json:"start_date"`
+	EndDate       string              `json:"end_date"`
+	Amount        float64             `json:"amount"`
+	Currency      string              `json:"currency"`
+	Breakdown     []CostBreakdownItem `json:"breakdown,omitempty"`
 	// Linked is true when costs are scoped to linked (member) accounts rather than payers.
 	Linked bool `json:"linked,omitempty"`
 }
@@ -246,9 +296,10 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		return fetchCredentialGroup(ctx, q)
 	}
 
-	// GroupByOU across payers fetches linked-account rows per payer, merges them,
-	// then rolls up once. Rolling up inside each payer first flattens the tree.
+	// GroupByOU / GroupByAccountTag across payers fetches linked-account rows per
+	// payer, merges them, then rolls up once.
 	deferOURollup := q.GroupBy == GroupByOU
+	deferAccountTagRollup := q.GroupBy == GroupByAccountTag
 	ids := SortedCredentialAccountIDs(groups)
 	results := make([]CostResult, 0, len(ids))
 	for _, id := range ids {
@@ -257,6 +308,10 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 		if deferOURollup {
 			sub.GroupBy = GroupByAccount
 			sub.AWSFetch = awsFetchWithoutOURollup(sub.AWSFetch)
+		}
+		if deferAccountTagRollup {
+			sub.GroupBy = GroupByAccount
+			sub.AWSFetch = awsFetchWithoutAccountTagRollup(sub.AWSFetch)
 		}
 		result, err := fetchCredentialGroup(ctx, sub)
 		if err != nil {
@@ -271,6 +326,11 @@ func Fetch(ctx context.Context, q CostQuery) (CostResult, error) {
 	if deferOURollup {
 		merged.GroupBy = GroupByOU
 		merged.Breakdown = rollupOUBreakdown(merged.Breakdown, q.AWSFetch)
+	}
+	if deferAccountTagRollup {
+		merged.GroupBy = GroupByAccountTag
+		merged.GroupByTagKey = strings.TrimSpace(q.TagKey)
+		merged.Breakdown = rollupAccountTagBreakdown(merged.Breakdown, q.AWSFetch)
 	}
 	return merged, nil
 }
@@ -295,12 +355,12 @@ func fetchCredentialGroup(ctx context.Context, q CostQuery) (CostResult, error) 
 		}
 	}
 
-	// For GroupByOU, fetch per-account LINKED_ACCOUNT rows and roll up once after
-	// merge. Rolling up before merge flattens the tree (loses depth/DFS order) and
-	// can disorder siblings when multiple payers/orgs are combined.
+	// For GroupByOU / GroupByAccountTag, fetch per-account LINKED_ACCOUNT rows and
+	// roll up once after merge.
 	fetchGroupBy := q.GroupBy
 	deferOURollup := q.GroupBy == GroupByOU
-	if deferOURollup {
+	deferAccountTagRollup := q.GroupBy == GroupByAccountTag
+	if deferOURollup || deferAccountTagRollup {
 		fetchGroupBy = GroupByAccount
 	}
 
@@ -313,6 +373,9 @@ func fetchCredentialGroup(ctx context.Context, q CostQuery) (CostResult, error) 
 		single.GroupBy = fetchGroupBy
 		if deferOURollup {
 			single.AWSFetch = awsFetchWithoutOURollup(single.AWSFetch)
+		}
+		if deferAccountTagRollup {
+			single.AWSFetch = awsFetchWithoutAccountTagRollup(single.AWSFetch)
 		}
 
 		var r CostResult
@@ -342,6 +405,11 @@ func fetchCredentialGroup(ctx context.Context, q CostQuery) (CostResult, error) 
 		merged.GroupBy = GroupByOU
 		merged.Breakdown = rollupOUBreakdown(merged.Breakdown, q.AWSFetch)
 	}
+	if deferAccountTagRollup {
+		merged.GroupBy = GroupByAccountTag
+		merged.GroupByTagKey = strings.TrimSpace(q.TagKey)
+		merged.Breakdown = rollupAccountTagBreakdown(merged.Breakdown, q.AWSFetch)
+	}
 	return merged, nil
 }
 
@@ -352,6 +420,15 @@ func awsFetchWithoutOURollup(opts *AWSFetchOptions) *AWSFetchOptions {
 	cp := *opts
 	cp.AccountOUBuckets = nil
 	cp.OUHierarchy = nil
+	return &cp
+}
+
+func awsFetchWithoutAccountTagRollup(opts *AWSFetchOptions) *AWSFetchOptions {
+	if opts == nil {
+		return nil
+	}
+	cp := *opts
+	cp.AccountTagValues = nil
 	return &cp
 }
 
@@ -437,6 +514,8 @@ func reportBulkFetchProgress(progress FetchProgress, accountCount int, groupBy G
 		progress.Step(fmt.Sprintf("Fetching costs by service for %d account(s) in batched Cost Explorer queries…", accountCount))
 	case GroupByOU:
 		progress.Step(fmt.Sprintf("Fetching costs by OU for %d account(s) in batched Cost Explorer queries…", accountCount))
+	case GroupByAccountTag:
+		progress.Step(fmt.Sprintf("Fetching costs by account tag for %d account(s) in batched Cost Explorer queries…", accountCount))
 	default:
 		progress.Step(fmt.Sprintf("Fetching costs for %d account(s) in one bulk Cost Explorer query…", accountCount))
 	}

@@ -32,12 +32,14 @@ Reuse **`terminal.go`**: `newStyler(w)`, `cell(s, s.bold, header)`, `stripANSI` 
 table := tablewriter.NewWriter(w)
 table.SetAutoWrapText(false)
 table.SetBorder(false)
+// Required when headers use ANSI: Title()/ToUpper turns "\033[1m" into "\033[1M" (CSI Delete Line).
+table.SetAutoFormatHeaders(false)
 table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 table.SetAlignment(tablewriter.ALIGN_LEFT)
 table.SetTablePadding("\t")
 ```
 
-Headers: `cell(s, s.bold, "COLUMN")`. Emphasize key values with `s.bold`; use `s.dim` for placeholders (`-`) and empty states.
+Headers: `cell(s, s.bold, "COLUMN")`. Emphasize key values with `s.bold`; use `s.dim` for placeholders (`-`) and empty states. Always set `SetAutoFormatHeaders(false)` when headers include ANSI.
 
 ## Colors
 

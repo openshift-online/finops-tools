@@ -26,19 +26,14 @@ type Options struct {
 	TTL        time.Duration
 }
 
-// FilterOrganizationAccountsByTag resolves accounts by tag, using the org cache namespace when allowed.
-func FilterOrganizationAccountsByTag(
+// LoadOrganizationAccountTags returns the full organization account+tags scan,
+// using the org cache namespace when allowed.
+func LoadOrganizationAccountTags(
 	ctx context.Context,
 	awsCfg aws.Config,
-	tagKey, tagValue string,
 	progress coreaccount.TagFilterProgress,
 	opts Options,
-) ([]coreaccount.OrganizationAccount, error) {
-	tagKey = strings.TrimSpace(tagKey)
-	if tagKey == "" {
-		return nil, fmt.Errorf("tag key is required")
-	}
-	tagValue = strings.TrimSpace(tagValue)
+) ([]coreaccount.OrganizationAccountTags, error) {
 	payerID := strings.TrimSpace(opts.PayerID)
 	if payerID == "" {
 		return nil, errors.New("payer account ID is required")
@@ -82,8 +77,27 @@ func FilterOrganizationAccountsByTag(
 	if err != nil {
 		return nil, err
 	}
+	return result.Value, nil
+}
 
-	return coreaccount.FilterOrganizationAccountsFromScan(result.Value, tagKey, tagValue, progress), nil
+// FilterOrganizationAccountsByTag resolves accounts by tag, using the org cache namespace when allowed.
+func FilterOrganizationAccountsByTag(
+	ctx context.Context,
+	awsCfg aws.Config,
+	tagKey, tagValue string,
+	progress coreaccount.TagFilterProgress,
+	opts Options,
+) ([]coreaccount.OrganizationAccount, error) {
+	tagKey = strings.TrimSpace(tagKey)
+	if tagKey == "" {
+		return nil, fmt.Errorf("tag key is required")
+	}
+
+	scan, err := LoadOrganizationAccountTags(ctx, awsCfg, progress, opts)
+	if err != nil {
+		return nil, err
+	}
+	return coreaccount.FilterOrganizationAccountsFromScan(scan, tagKey, tagValue, progress), nil
 }
 
 func scanValid(scan []coreaccount.OrganizationAccountTags) bool {

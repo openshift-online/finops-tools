@@ -19,12 +19,13 @@ func MergeResults(results []CostResult) (CostResult, error) {
 
 	first := results[0]
 	out := CostResult{
-		Provider:  first.Provider,
-		Metric:    first.Metric,
-		GroupBy:   first.GroupBy,
-		StartDate: first.StartDate,
-		EndDate:   first.EndDate,
-		Currency:  first.Currency,
+		Provider:      first.Provider,
+		Metric:        first.Metric,
+		GroupBy:       first.GroupBy,
+		GroupByTagKey: first.GroupByTagKey,
+		StartDate:     first.StartDate,
+		EndDate:       first.EndDate,
+		Currency:      first.Currency,
 	}
 
 	var (
@@ -51,6 +52,9 @@ func MergeResults(results []CostResult) (CostResult, error) {
 		}
 		if r.GroupBy != out.GroupBy {
 			return CostResult{}, fmt.Errorf("cannot merge accounts with different group-by settings")
+		}
+		if r.GroupByTagKey != out.GroupByTagKey {
+			return CostResult{}, fmt.Errorf("cannot merge accounts with different group-by tag keys")
 		}
 
 		names = append(names, r.AccountName)
@@ -104,6 +108,8 @@ func MergeResults(results []CostResult) (CostResult, error) {
 					item.OUName = key
 				}
 				item.OUDepth = ouDepths[key]
+			case GroupByAccountTag:
+				item.SetTagValue(key)
 			default:
 				item.Service = key
 			}

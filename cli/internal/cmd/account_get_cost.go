@@ -62,6 +62,7 @@ Examples:
   finops account get-cost --ou ou-abcd-12345678/ --payer rh-control --days 7
   finops account get-cost --ou 'ou-abcd-12345678/*' --payer rh-control
   finops account get-cost --payer rh-control --group-by ou
+  finops account get-cost --payer rh-control --group-by account-tag:organization
 
 Authentication uses --auth-method when set, otherwise defaults.aws.auth_method in config (saml by default).
 
@@ -88,7 +89,7 @@ Only AWS is supported today; GCP will be added later.`,
 		if _, err := cost.ParseProvider(costGetProvider); err != nil {
 			return err
 		}
-		if _, err := cost.ParseGroupBy(costGetGroupBy); err != nil {
+		if _, _, err := cost.ParseGroupBy(costGetGroupBy); err != nil {
 			return err
 		}
 		if err := validateWorkers(costGetWorkers); err != nil {
@@ -118,7 +119,7 @@ func init() {
 	accountGetCostCmd.Flags().StringVar(&costGetProvider, "provider", string(cost.ProviderAWS),
 		"Cloud provider: aws or gcp")
 	accountGetCostCmd.Flags().StringVar(&costGetGroupBy, "group-by", "",
-		"Group results by dimension (supported: service, account, ou)")
+		"Group results by dimension (supported: service, account, ou, account-tag:<key>)")
 	accountGetCostCmd.Flags().BoolVar(&costGetQuiet, "quiet", false, "Suppress progress messages on stderr")
 	bindWorkersFlag(accountGetCostCmd, &costGetWorkers, "")
 	addPeriodFlags(accountGetCostCmd)
@@ -133,7 +134,7 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	groupBy, err := cost.ParseGroupBy(costGetGroupBy)
+	groupBy, groupByTagKey, err := cost.ParseGroupBy(costGetGroupBy)
 	if err != nil {
 		return err
 	}
@@ -187,7 +188,9 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		return output.WriteCostResult(out, format, cost.EmptyResult(provider, dateRange, groupBy))
+		empty := cost.EmptyResult(provider, dateRange, groupBy)
+		empty.GroupByTagKey = groupByTagKey
+		return output.WriteCostResult(out, format, empty)
 	}
 
 	if provider == cost.ProviderAWS {
@@ -219,10 +222,11 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 		Accounts: targets,
 		Range:    dateRange,
 		GroupBy:  groupBy,
+		TagKey:   groupByTagKey,
 		Progress: status,
 		Workers:  costGetWorkers,
 	}
-	if provider == cost.ProviderAWS && (groupBy == cost.GroupByAccount || groupBy == cost.GroupByOU) {
+	if provider == cost.ProviderAWS && (groupBy == cost.GroupByAccount || groupBy == cost.GroupByOU || groupBy == cost.GroupByAccountTag) {
 		awsFetch := &cost.AWSFetchOptions{}
 		if groupBy == cost.GroupByAccount {
 			awsFetch.ResolveAccountNames = coreaccount.ResolveAccountNames
@@ -236,12 +240,25 @@ func runAccountGetCost(cmd *cobra.Command, _ []string) error {
 			awsFetch.AccountOUBuckets = buckets
 			awsFetch.OUHierarchy = hierarchy
 		}
+		if groupBy == cost.GroupByAccountTag {
+			values, err := resolveAccountTagValues(
+				awsCtx, cfg, sel, targets, groupByTagKey,
+				awsFlags.ConfigPath, awsFlags.CredentialsFile, status,
+			)
+			if err != nil {
+				return err
+			}
+			awsFetch.AccountTagValues = values
+		}
 		costQuery.AWSFetch = awsFetch
 	}
 
 	result, err := cost.Fetch(awsCtx, costQuery)
 	if err != nil {
 		return err
+	}
+	if groupBy == cost.GroupByAccountTag && result.GroupByTagKey == "" {
+		result.GroupByTagKey = groupByTagKey
 	}
 
 	return output.WriteCostResult(out, format, result)

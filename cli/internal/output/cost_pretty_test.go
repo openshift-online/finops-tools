@@ -2,6 +2,7 @@
 package output
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -55,5 +56,40 @@ func TestWritePrettyPrintNoANSIInBuffer(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestWritePrettyBreakdownColoredHeadersKeepSGR(t *testing.T) {
+	tag := "prod"
+	r := fixtureResult()
+	r.GroupBy = cost.GroupByAccountTag
+	r.GroupByTagKey = "environment"
+	r.Amount = 100
+	r.Breakdown = []cost.CostBreakdownItem{
+		{TagValue: &tag, Amount: 100},
+	}
+
+	var buf bytes.Buffer
+	s := styler{enabled: true}
+	if err := writePrettyBreakdown(&buf, s, r); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.String()
+	if strings.Contains(raw, "\033[1M") || strings.Contains(raw, "\033[0M") {
+		t.Fatalf("AutoFormatHeaders mangled SGR into Delete Line CSI:\n%q", raw)
+	}
+	for _, want := range []string{
+		"\033[1mTAG VALUE\033[0m",
+		"\033[1mAMOUNT\033[0m",
+		"\033[1mSHARE\033[0m",
+		"\033[1mRELATIVE COST\033[0m",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("expected bold header %q, got:\n%q", want, raw)
+		}
+	}
+	out := stripANSI(raw)
+	if !strings.Contains(out, "prod") {
+		t.Fatalf("rows missing:\n%s", out)
 	}
 }

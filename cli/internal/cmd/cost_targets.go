@@ -62,6 +62,22 @@ var filterOrganizationAccountsByTag = func(
 	})
 }
 
+var loadOrganizationAccountTags = func(
+	ctx context.Context,
+	awsCfg aws.Config,
+	payerID string,
+	progress coreaccount.TagFilterProgress,
+	configPath string,
+	orgCacheSkip, orgCacheRefresh bool,
+) ([]coreaccount.OrganizationAccountTags, error) {
+	return orgcache.LoadOrganizationAccountTags(ctx, awsCfg, progress, orgcache.Options{
+		ConfigPath: configPath,
+		PayerID:    payerID,
+		Skip:       orgCacheSkip,
+		Refresh:    orgCacheRefresh,
+	})
+}
+
 var listOrganizationMemberAccounts = coreaccount.ListOrganizationMemberAccounts
 var listAccountsUnderParent = coreaccount.ListAccountsUnderParent
 var organizationRootID = coreaccount.OrganizationRootID
@@ -617,6 +633,46 @@ func resolveCostTargetsByTag(
 		sel.SelectionRootID = singleRoot
 	}
 	return targets, nil
+}
+
+func resolveAccountTagValues(
+	ctx context.Context,
+	cfg configstore.File,
+	sel costTargetSelector,
+	targets []cost.AccountTarget,
+	tagKey, configPath, credentialsFile string,
+	status costStepper,
+) (map[string]string, error) {
+	tagKey = strings.TrimSpace(tagKey)
+	if tagKey == "" || len(targets) == 0 {
+		return nil, nil
+	}
+
+	costStep(status, fmt.Sprintf("Resolving Organizations account tag %q for group-by…", tagKey))
+
+	groups := cost.GroupByCredentialsAccount(targets)
+	out := make(map[string]string)
+	for _, payerID := range cost.SortedCredentialAccountIDs(groups) {
+		group := groups[payerID]
+		awsCfg, err := loadAWSConfigForCredentialsAccount(ctx, cfg, payerID, credentialsFile)
+		if err != nil {
+			return nil, fmt.Errorf("load credentials for payer %s: %w", payerID, err)
+		}
+		scan, err := loadOrganizationAccountTags(
+			ctx, awsCfg, payerID, status, configPath, sel.OrgCacheSkip, sel.OrgCacheRefresh,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("load organization tags for payer %s: %w", payerID, err)
+		}
+		ids := make([]string, 0, len(group))
+		for _, t := range group {
+			ids = append(ids, t.AccountID)
+		}
+		for accountID, value := range coreaccount.AccountTagValuesFromScan(scan, tagKey, ids) {
+			out[accountID] = value
+		}
+	}
+	return out, nil
 }
 
 func resolveAccountOUBuckets(
