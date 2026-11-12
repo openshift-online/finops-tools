@@ -1,0 +1,20 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: finops-backend
+  namespace: finops-team--finops-tools-backend
+  labels:
+    app: finops-backend
+  annotations:
+    haproxy.router.openshift.io/timeout: 120s
+spec:
+  to:
+    kind: Service
+    name: finops-backend
+    weight: 100
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  # Restrict network access at the cluster/firewall layer until HTTP auth is added.

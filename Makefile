@@ -1,5 +1,5 @@
 .PHONY: test lint lint-all lint-install install-hooks build run clean build-backend test-backend \
-	podman-build podman-push openshift-apply openshift-restart openshift-refresh
+	podman-build podman-push openshift-check-login openshift-apply openshift-restart openshift-refresh
 
 GOPATH_BIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOPATH_BIN)/golangci-lint
@@ -105,11 +105,28 @@ test-backend:
 
 IMAGE ?= images.paas.redhat.com/finops/finops-tools
 NAMESPACE ?= finops-team--finops-tools-backend
+# OPENSHIFT_ENV=preprod (default) targets mpp-w2-preprod; OPENSHIFT_ENV=prod targets mpp-e1-prod.
+OPENSHIFT_ENV ?= preprod
+
+ifeq ($(OPENSHIFT_ENV),prod)
+OPENSHIFT_CLUSTER ?= prod-mpp-spoke-aws-us-east-1
+OPENSHIFT_API ?= https://api.mpp-e1-prod.9e4s.p1.openshiftapps.com:6443
+OPENSHIFT_CONSOLE ?= https://console-openshift-console.apps.mpp-e1-prod.9e4s.p1.openshiftapps.com
+OPENSHIFT_MANIFEST_DIR ?= deploy/openshift-prod
+else ifeq ($(OPENSHIFT_ENV),preprod)
+OPENSHIFT_CLUSTER ?= mpp-w2-preprod
+OPENSHIFT_API ?= https://api.mpp-w2-preprod.cfln.p1.openshiftapps.com:6443
+OPENSHIFT_CONSOLE ?= https://console-openshift-console.apps.mpp-w2-preprod.cfln.p1.openshiftapps.com
+OPENSHIFT_MANIFEST_DIR ?= deploy/openshift
+else
+$(error OPENSHIFT_ENV must be preprod or prod (got $(OPENSHIFT_ENV)))
+endif
+
 OPENSHIFT_MANIFESTS ?= \
-	deploy/openshift/deployment.yaml \
-	deploy/openshift/service.yaml \
-	deploy/openshift/route.yaml \
-	deploy/openshift/networkpolicy.yaml
+	$(OPENSHIFT_MANIFEST_DIR)/deployment.yaml \
+	$(OPENSHIFT_MANIFEST_DIR)/service.yaml \
+	$(OPENSHIFT_MANIFEST_DIR)/route.yaml \
+	$(OPENSHIFT_MANIFEST_DIR)/networkpolicy.yaml
 
 podman-build:
 	podman build --platform linux/amd64 -t finops-backend:local .
@@ -118,15 +135,54 @@ podman-build:
 podman-push: podman-build
 	podman push $(IMAGE):latest
 
-openshift-apply:
-	oc apply $(addprefix -f ,$(OPENSHIFT_MANIFESTS)) -n $(NAMESPACE)
+# Fail fast (or start an interactive web login) when oc credentials are missing/expired.
+openshift-check-login:
+	@if ! command -v oc >/dev/null 2>&1; then \
+		echo "error: oc CLI not found; install the OpenShift CLI before deploying" >&2; \
+		exit 1; \
+	fi; \
+	if oc whoami --server="$(OPENSHIFT_API)" >/dev/null 2>&1; then \
+		echo "openshift ($(OPENSHIFT_ENV)): logged in as $$(oc whoami --server="$(OPENSHIFT_API)") ($$(oc whoami --show-server 2>/dev/null || echo $(OPENSHIFT_API)))"; \
+		exit 0; \
+	fi; \
+	echo "openshift: not logged in to $(OPENSHIFT_CLUSTER) (credentials missing or expired)." >&2; \
+	echo "" >&2; \
+	echo "Log in, then re-run this make target:" >&2; \
+	echo "  1. Open $(OPENSHIFT_CONSOLE)" >&2; \
+	echo "  2. User menu → Copy login command → paste the oc login --token=... line" >&2; \
+	echo "  Or: oc login --web --server=$(OPENSHIFT_API)" >&2; \
+	echo "" >&2; \
+	if [ -t 0 ] && [ -t 1 ]; then \
+		echo "Attempting interactive web login..." >&2; \
+		oc login --web --server="$(OPENSHIFT_API)" || { \
+			echo "error: web login failed; use Copy login command from the console" >&2; \
+			exit 1; \
+		}; \
+		if ! oc whoami --server="$(OPENSHIFT_API)" >/dev/null 2>&1; then \
+			echo "error: still not logged in after oc login --web" >&2; \
+			exit 1; \
+		fi; \
+		echo "openshift ($(OPENSHIFT_ENV)): logged in as $$(oc whoami --server="$(OPENSHIFT_API)")"; \
+	else \
+		echo "error: non-interactive session; log in manually before make openshift-*" >&2; \
+		exit 1; \
+	fi
 
-openshift-restart:
-	oc rollout restart deployment/finops-backend -n $(NAMESPACE)
-	oc rollout status deployment/finops-backend -n $(NAMESPACE)
+openshift-apply: openshift-check-login
+	oc apply $(addprefix -f ,$(OPENSHIFT_MANIFESTS)) -n $(NAMESPACE) --server="$(OPENSHIFT_API)"
+
+openshift-restart: openshift-check-login
+	oc rollout restart deployment/finops-backend -n $(NAMESPACE) --server="$(OPENSHIFT_API)"
+	oc rollout status deployment/finops-backend -n $(NAMESPACE) --server="$(OPENSHIFT_API)"
 
 # Rebuild the backend image, push to the cluster registry, apply manifests, and roll out.
-openshift-refresh: podman-push openshift-apply openshift-restart
+# Checks oc login before building so expired credentials fail before a long image build.
+# Recipe steps (not sibling prerequisites) keep order under make -j.
+# Example prod: make openshift-refresh OPENSHIFT_ENV=prod
+openshift-refresh: openshift-check-login
+	$(MAKE) podman-push
+	$(MAKE) openshift-apply OPENSHIFT_ENV=$(OPENSHIFT_ENV)
+	$(MAKE) openshift-restart OPENSHIFT_ENV=$(OPENSHIFT_ENV)
 
 run: build
 	./bin/finops --help

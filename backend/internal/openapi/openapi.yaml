@@ -19,7 +19,9 @@ servers:
   - url: http://localhost:8080
     description: Local development
   - url: https://finops-backend-finops-team--finops-tools-backend.apps.mpp-w2-preprod.cfln.p1.openshiftapps.com
-    description: OpenShift (replace host with `oc get route finops-backend -n finops-team--finops-tools-backend -o jsonpath='{.spec.host}'`)
+    description: OpenShift preprod (mpp-w2-preprod)
+  - url: https://finops-backend-finops-team--finops-tools-backend.apps.mpp-e1-prod.9e4s.p1.openshiftapps.com
+    description: OpenShift prod (mpp-e1-prod / prod-mpp-spoke-aws-us-east-1)
 
 tags:
   - name: health

@@ -34,6 +34,8 @@ spec:
               value: "1000"
             - name: FINOPS_BACKEND_QUERY_TIMEOUT
               value: "60s"
+            # Exclude prod until mpp-w2-preprod can reach Snowflake prod
+            # (network policy blocks egress; use deploy/openshift-prod on MP+).
             - name: SNOWFLAKE_CONNECTIONS
               value: "preprod,sandbox"
             - name: SNOWFLAKE_DEFAULT_CONNECTION
