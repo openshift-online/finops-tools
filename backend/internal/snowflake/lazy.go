@@ -278,7 +278,7 @@ func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Servi
 	}
 
 	if err := ping(ctx, db); err != nil {
-		_ = l.closePool(db)
+		l.closePoolAsync(db)
 		// Re-check after ping so mid-ping caller cancel is not cached, while a
 		// service-owned connect timeout (caller still active) still cools down.
 		if callerCtx.Err() == nil {
@@ -295,7 +295,7 @@ func (l *LazyService) serviceWithContext(ctx, callerCtx context.Context) (*Servi
 		svc := l.svc
 		l.mu.Unlock()
 		// Discard the raced-open pool outside the mutex.
-		_ = l.closePool(db)
+		l.closePoolAsync(db)
 		return svc, nil
 	}
 

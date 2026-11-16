@@ -338,6 +338,12 @@ func TestLazyServiceInvalidateDoesNotBlockOnSlowClose(t *testing.T) {
 		t.Fatal("expected async close to start")
 	}
 
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("invalidateIfCurrent blocked on pool Close")
+	}
+
 	// While the old pool Close is still blocked, reconnect must proceed
 	// (mutex is not held across driver Close).
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -350,11 +356,6 @@ func TestLazyServiceInvalidateDoesNotBlockOnSlowClose(t *testing.T) {
 	}
 
 	close(releaseClose)
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("invalidateIfCurrent did not return after Close unblocked")
-	}
 }
 
 func TestLazyServiceCachesConnectTimeoutInitFailure(t *testing.T) {
