@@ -328,6 +328,19 @@ oc rollout restart deployment/finops-backend -n finops-team--finops-tools-backen
 Or run `make openshift-restart` after `make openshift-apply`. For prod,
 add `OPENSHIFT_ENV=prod` to both commands.
 
+When Dataverse provides a **new** private key (`.p8`), update the mounted
+`*-key` Secret (config Secret unchanged) and restart. `KEY_FILE=` is required:
+
+```bash
+make openshift-snowflake-key CONN=preprod KEY_FILE=/path/to/key.p8
+make openshift-snowflake-key CONN=sandbox KEY_FILE=/path/to/key.p8
+make openshift-snowflake-key CONN=prod OPENSHIFT_ENV=prod KEY_FILE=/path/to/key.p8
+# Optional: RESTART=0
+```
+
+`CONN=preprod|sandbox` requires `OPENSHIFT_ENV=preprod`; `CONN=prod`
+requires `OPENSHIFT_ENV=prod`.
+
 4. Verify:
 
 ```bash
