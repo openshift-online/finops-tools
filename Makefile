@@ -224,19 +224,22 @@ openshift-snowflake-key:
 		echo "error: key file not found: $$key" >&2; \
 		exit 1; \
 	fi; \
-	if ! head -n 1 "$$key" | grep -q 'PRIVATE KEY'; then \
-		echo "error: $$key does not look like an unencrypted PEM private key (expected PRIVATE KEY header)" >&2; \
+	if [ "$$(head -n 1 "$$key")" != "-----BEGIN PRIVATE KEY-----" ]; then \
+		echo "error: $$key must start with -----BEGIN PRIVATE KEY----- (unencrypted PKCS#8)" >&2; \
 		exit 1; \
-	fi; \
-	$(MAKE) openshift-check-login OPENSHIFT_ENV=$(OPENSHIFT_ENV); \
+	fi
+	@$(MAKE) openshift-check-login OPENSHIFT_ENV=$(OPENSHIFT_ENV)
+	@set -e; \
+	conn="$(CONN)"; \
+	key="$(KEY_FILE)"; \
 	secret="finops-backend-snowflake-$${conn}-key"; \
 	echo "openshift-snowflake-key: applying $$secret from $$key ($(OPENSHIFT_ENV))"; \
 	oc create secret generic "$$secret" \
 		--from-file=private_key="$$key" \
 		-n "$(NAMESPACE)" \
 		--server="$(OPENSHIFT_API)" \
-		--dry-run=client -o yaml | oc apply -f - --server="$(OPENSHIFT_API)"; \
-	if [ "$(RESTART)" = "1" ] || [ "$(RESTART)" = "true" ]; then \
+		--dry-run=client -o yaml | oc apply -f - --server="$(OPENSHIFT_API)"
+	@if [ "$(RESTART)" = "1" ] || [ "$(RESTART)" = "true" ]; then \
 		$(MAKE) openshift-restart OPENSHIFT_ENV=$(OPENSHIFT_ENV); \
 	else \
 		echo "openshift-snowflake-key: Secret updated; skip restart (RESTART=$(RESTART))"; \
