@@ -49,7 +49,6 @@ func configFromParams(params ConnectParams) (*gosnowflake.Config, error) {
 		return nil, fmt.Errorf("snowflake user is required")
 	}
 
-	keepAlive := "true"
 	cfg := &gosnowflake.Config{
 		Account:   account,
 		User:      user,
@@ -57,11 +56,10 @@ func configFromParams(params ConnectParams) (*gosnowflake.Config, error) {
 		Warehouse: strings.TrimSpace(params.Warehouse),
 		Database:  strings.TrimSpace(params.Database),
 		Schema:    strings.TrimSpace(params.Schema),
-		// Heartbeat so long-lived sql.DB pools (e.g. finops-backend LazyService)
-		// do not idle past Snowflake's session token TTL.
-		Params: map[string]*string{
-			"client_session_keep_alive": &keepAlive,
-		},
+		// Do not enable client_session_keep_alive: gosnowflake starts the
+		// heartbeat before checking caller cancellation, and a canceled
+		// connect can leak that connection outside sql.DB. Session expiry is
+		// handled by LazyService reconnect instead.
 	}
 
 	privateKeyPEM := strings.TrimSpace(params.PrivateKeyPEM)

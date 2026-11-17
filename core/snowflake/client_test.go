@@ -20,7 +20,7 @@ func TestOpenDBRejectsMixedCredentials(t *testing.T) {
 	}
 }
 
-func TestOpenDBEnablesClientSessionKeepAlive(t *testing.T) {
+func TestOpenDBOmitsClientSessionKeepAlive(t *testing.T) {
 	cfg, err := configFromParams(ConnectParams{
 		Account:   "example",
 		User:      "user",
@@ -34,7 +34,7 @@ func TestOpenDBEnablesClientSessionKeepAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DSN: %v", err)
 	}
-	if !strings.Contains(dsn, "client_session_keep_alive=true") {
-		t.Fatalf("DSN missing keep-alive param: %s", dsn)
+	if strings.Contains(dsn, "client_session_keep_alive") {
+		t.Fatalf("DSN unexpectedly enables keep-alive: %s", dsn)
 	}
 }
