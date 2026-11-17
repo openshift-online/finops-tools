@@ -329,7 +329,9 @@ Or run `make openshift-restart` after `make openshift-apply`. For prod,
 add `OPENSHIFT_ENV=prod` to both commands.
 
 When Dataverse provides a **new** private key (`.p8`), update the mounted
-`*-key` Secret (config Secret unchanged) and restart. `KEY_FILE=` is required:
+`*-key` Secret (config Secret unchanged) and restart. `KEY_FILE=` is required.
+The target parses the file with the same `ParsePrivateKey` rules as the backend
+before replacing the Secret (rejects encrypted, truncated, or non-RSA PEM):
 
 ```bash
 make openshift-snowflake-key CONN=preprod KEY_FILE=/path/to/key.p8

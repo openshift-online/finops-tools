@@ -224,10 +224,7 @@ openshift-snowflake-key:
 		echo "error: key file not found: $$key" >&2; \
 		exit 1; \
 	fi; \
-	if [ "$$(head -n 1 "$$key")" != "-----BEGIN PRIVATE KEY-----" ]; then \
-		echo "error: $$key must start with -----BEGIN PRIVATE KEY----- (unencrypted PKCS#8)" >&2; \
-		exit 1; \
-	fi
+	go run ./backend/cmd/validate-snowflake-key "$$key"
 	@$(MAKE) openshift-check-login OPENSHIFT_ENV=$(OPENSHIFT_ENV)
 	@set -e; \
 	conn="$(CONN)"; \
