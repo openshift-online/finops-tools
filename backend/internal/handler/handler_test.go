@@ -253,12 +253,12 @@ type fakeAWSAccountsDB struct {
 	connection string
 }
 
-func (f *fakeAWSAccountsDB) Database(_ context.Context, connection string) (*sql.DB, error) {
+func (f *fakeAWSAccountsDB) WithDatabase(_ context.Context, connection string, fn func(*sql.DB) error) error {
 	f.connection = connection
 	if f.err != nil {
-		return nil, f.err
+		return f.err
 	}
-	return f.db, nil
+	return fn(f.db)
 }
 
 func TestAWSAccountsHistoricalCountHandler(t *testing.T) {
@@ -340,4 +340,3 @@ func TestAWSAccountsHistoricalCountUnknownConnection(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
-
