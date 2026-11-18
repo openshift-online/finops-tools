@@ -1,5 +1,6 @@
 .PHONY: test lint lint-all lint-install install-hooks build run clean build-backend test-backend \
-	podman-build podman-push openshift-check-login openshift-apply openshift-restart openshift-refresh
+	podman-build podman-push openshift-check-login openshift-apply openshift-restart \
+	openshift-snowflake-key openshift-refresh
 
 GOPATH_BIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOPATH_BIN)/golangci-lint
@@ -177,6 +178,69 @@ openshift-apply: openshift-check-login
 openshift-restart: openshift-check-login
 	oc rollout restart deployment/finops-backend -n $(NAMESPACE) --server="$(OPENSHIFT_API)"
 	oc rollout status deployment/finops-backend -n $(NAMESPACE) --server="$(OPENSHIFT_API)"
+
+# Apply a Dataverse-provided Snowflake private key (.p8) into the OpenShift *-key Secret.
+# We do not generate or rotate keys here — only update the Secret when a new file is given.
+#
+#   make openshift-snowflake-key CONN=preprod KEY_FILE=/path/to/key.p8
+#   make openshift-snowflake-key CONN=sandbox KEY_FILE=/path/to/key.p8
+#   make openshift-snowflake-key CONN=prod OPENSHIFT_ENV=prod KEY_FILE=/path/to/key.p8
+#   make openshift-snowflake-key CONN=preprod KEY_FILE=/path/to/key.p8 RESTART=0
+#
+# KEY_FILE is required (path to the .p8). RESTART defaults to 1.
+RESTART ?= 1
+
+openshift-snowflake-key:
+	@set -e; \
+	conn="$(CONN)"; \
+	if [ -z "$$conn" ]; then \
+		echo "error: set CONN=preprod, CONN=prod, or CONN=sandbox" >&2; \
+		exit 1; \
+	fi; \
+	case "$$conn" in \
+		preprod|sandbox) \
+			if [ "$(OPENSHIFT_ENV)" != "preprod" ]; then \
+				echo "error: CONN=$$conn requires OPENSHIFT_ENV=preprod (got $(OPENSHIFT_ENV))" >&2; \
+				exit 1; \
+			fi; \
+			;; \
+		prod) \
+			if [ "$(OPENSHIFT_ENV)" != "prod" ]; then \
+				echo "error: CONN=prod requires OPENSHIFT_ENV=prod (got $(OPENSHIFT_ENV))" >&2; \
+				exit 1; \
+			fi; \
+			;; \
+		*) \
+			echo "error: CONN must be preprod, prod, or sandbox (got $$conn)" >&2; \
+			exit 1; \
+			;; \
+	esac; \
+	key="$(KEY_FILE)"; \
+	if [ -z "$$key" ]; then \
+		echo "error: set KEY_FILE=/path/to/dataverse-provided.p8" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$key" ]; then \
+		echo "error: key file not found: $$key" >&2; \
+		exit 1; \
+	fi; \
+	go run ./backend/cmd/validate-snowflake-key "$$key"
+	@$(MAKE) openshift-check-login OPENSHIFT_ENV=$(OPENSHIFT_ENV)
+	@set -e; \
+	conn="$(CONN)"; \
+	key="$(KEY_FILE)"; \
+	secret="finops-backend-snowflake-$${conn}-key"; \
+	echo "openshift-snowflake-key: applying $$secret from $$key ($(OPENSHIFT_ENV))"; \
+	oc create secret generic "$$secret" \
+		--from-file=private_key="$$key" \
+		-n "$(NAMESPACE)" \
+		--server="$(OPENSHIFT_API)" \
+		--dry-run=client -o yaml | oc apply -f - --server="$(OPENSHIFT_API)"
+	@if [ "$(RESTART)" = "1" ] || [ "$(RESTART)" = "true" ]; then \
+		$(MAKE) openshift-restart OPENSHIFT_ENV=$(OPENSHIFT_ENV); \
+	else \
+		echo "openshift-snowflake-key: Secret updated; skip restart (RESTART=$(RESTART))"; \
+	fi
 
 # Rebuild the backend image, push to the cluster registry, apply manifests, and roll out.
 # Checks oc login before building so expired credentials fail before a long image build.
