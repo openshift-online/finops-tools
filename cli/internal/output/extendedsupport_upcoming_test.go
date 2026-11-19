@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -125,3 +126,54 @@ func TestUpcomingLifecycleEmptyAndSanitizedOutput(t *testing.T) {
 type upcomingBrokenWriter struct{}
 
 func (upcomingBrokenWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestUpcomingLifecyclePrettyPropagatesTableWriteErrors(t *testing.T) {
+	result := upcomingFixture()
+	var buf bytes.Buffer
+	if err := WriteUpcomingLifecycleResult(&buf, FormatPrettyPrint, result); err != nil {
+		t.Fatal(err)
+	}
+	writeErr := errors.New("write failed during table output")
+	for _, section := range []struct {
+		name   string
+		marker string
+	}{
+		{name: "header", marker: "RESOURCE ID / ARN"},
+		{name: "resource", marker: result.Events[0].Accounts[0].Resources[0].ResourceID},
+	} {
+		start := strings.Index(buf.String(), section.marker)
+		if start < 0 {
+			t.Fatalf("missing table %s in output", section.name)
+		}
+		for _, failure := range []struct {
+			name string
+			err  error
+			want error
+		}{
+			{name: "error", err: writeErr, want: writeErr},
+			{name: "short write", want: io.ErrShortWrite},
+		} {
+			t.Run(section.name+"/"+failure.name, func(t *testing.T) {
+				w := &upcomingLimitedWriter{remaining: start + len(section.marker)/2, err: failure.err}
+				if err := WriteUpcomingLifecycleResult(w, FormatPrettyPrint, result); !errors.Is(err, failure.want) {
+					t.Fatalf("error = %v, want %v", err, failure.want)
+				}
+			})
+		}
+	}
+}
+
+type upcomingLimitedWriter struct {
+	remaining int
+	err       error
+}
+
+func (w *upcomingLimitedWriter) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		n := w.remaining
+		w.remaining = 0
+		return n, w.err
+	}
+	w.remaining -= len(p)
+	return len(p), nil
+}

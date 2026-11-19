@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,6 +95,86 @@ func TestHealthPacingSharesEveryOperationPageAndRetry(t *testing.T) {
 	// Without a shared per-attempt gate the retries/page calls form a short burst.
 	if elapsed := attempts[len(attempts)-1].Sub(attempts[0]); elapsed < 12*interval-interval/2 {
 		t.Fatalf("13 requests took only %s; pacing was bypassed", elapsed)
+	}
+}
+
+func TestHealthPacingAfterCredentialRefresh(t *testing.T) {
+	const workers = 4
+	const interval = 20 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	refreshDone := make(chan struct{})
+	var finishRefresh sync.Once
+	unblockRefresh := func() { finishRefresh.Do(func() { close(refreshDone) }) }
+	defer unblockRefresh()
+	var retrieves atomic.Int32
+	cache := aws.NewCredentialsCache(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+		if retrieves.Add(1) > 1 {
+			select {
+			case <-refreshDone:
+			case <-ctx.Done():
+				return aws.Credentials{}, ctx.Err()
+			}
+		}
+		return aws.Credentials{
+			AccessKeyID: "test", SecretAccessKey: "secret", SessionToken: "token",
+			CanExpire: true, Expires: time.Now().Add(time.Hour),
+		}, nil
+	}))
+	if _, err := cache.Retrieve(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cache.Invalidate()
+
+	var mu sync.Mutex
+	var attempts []time.Time
+	cfg := pacingConfig(func(request *http.Request) (*http.Response, error) {
+		mu.Lock()
+		attempts = append(attempts, time.Now())
+		mu.Unlock()
+		return sdkResponse(request, 200, `{"affectedAccounts":[]}`), nil
+	})
+	waiting := make(chan struct{}, workers)
+	cfg.Credentials = aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+		select {
+		case waiting <- struct{}{}:
+		case <-ctx.Done():
+			return aws.Credentials{}, ctx.Err()
+		}
+		return cache.Retrieve(ctx)
+	})
+	client := NewClient(cfg, func(o *ClientOptions) { o.RequestInterval = interval })
+	errs := make(chan error, workers)
+	for range workers {
+		go func() {
+			_, err := client.AffectedAccounts(ctx, "event")
+			errs <- err
+		}()
+	}
+	// Let every worker reach the shared refresh before completing it. Pacing
+	// before credential retrieval would let all requests send together afterward.
+	for range workers {
+		select {
+		case <-waiting:
+		case <-ctx.Done():
+			t.Fatal("waiting for credential refresh:", ctx.Err())
+		}
+	}
+	unblockRefresh()
+	for range workers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if retrieves.Load() != 2 || len(attempts) != workers {
+		t.Fatalf("credential retrievals=%d, HTTP attempts=%d", retrieves.Load(), len(attempts))
+	}
+	// Allow signing/scheduling overhead between pacing and the HTTP hook.
+	for i := 1; i < len(attempts); i++ {
+		if gap := attempts[i].Sub(attempts[i-1]); gap < interval/2 {
+			t.Fatalf("HTTP attempts %d and %d were only %s apart after credential refresh", i, i+1, gap)
+		}
 	}
 }
 

@@ -42,9 +42,10 @@ func NewClient(cfg aws.Config, optFns ...func(*ClientOptions)) *Client {
 	}
 	pacer := &requestPacer{interval: options.RequestInterval}
 	cfg.APIOptions = append(slices.Clone(cfg.APIOptions), func(stack *middleware.Stack) error {
-		// Placing this inside Retry paces every HTTP attempt, including retries,
-		// before authentication/signing. One pacer serves every operation/worker.
-		return stack.Finalize.Insert(pacer, "Retry", middleware.After)
+		// Pace inside Retry, after credential retrieval and immediately before
+		// signing, so a shared credential refresh cannot release an unpaced burst.
+		// One pacer serves every operation/worker.
+		return stack.Finalize.Insert(pacer, "Signing", middleware.Before)
 	})
 	return NewClientWithAPI(health.NewFromConfig(cfg))
 }

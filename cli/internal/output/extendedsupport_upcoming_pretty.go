@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -63,7 +64,9 @@ func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 			}
 			continue
 		}
-		table := newExtendedSupportTable(w)
+		// tablewriter discards write errors, so render into memory before writing to w.
+		var tableOutput bytes.Buffer
+		table := newExtendedSupportTable(&tableOutput)
 		table.SetHeader([]string{cell(s, s.bold, "ACCOUNT"), cell(s, s.bold, "RESOURCE ID / ARN"), cell(s, s.bold, "STATUS")})
 		for _, account := range event.Accounts {
 			if len(account.Resources) == 0 {
@@ -86,6 +89,9 @@ func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 			}
 		}
 		table.Render()
+		if _, err := tableOutput.WriteTo(w); err != nil {
+			return err
+		}
 	}
 	return nil
 }
