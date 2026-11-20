@@ -123,7 +123,7 @@ func TestUpcomingUsesOrganizationalSDKAPIsAndLogsWithoutTokens(t *testing.T) {
 				if !strings.Contains(string(input["organizationEventDetailFilters"]), testAccount) {
 					t.Fatal(input)
 				}
-				body = `{"successfulSet":[{"awsAccountId":"111111111111","event":{"arn":"event"},"eventDescription":{"latestDescription":"Upgrade before the lifecycle change"}}]}`
+				body = `{"successfulSet":[{"awsAccountId":"111111111111","event":{"arn":"event"},"eventDescription":{"latestDescription":"Upgrade before Extended Support begins"}}]}`
 			case "DescribeAffectedEntitiesForOrganization":
 				if _, ok := input["organizationEntityFilters"]; ok {
 					t.Fatal("deprecated entity filter")

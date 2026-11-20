@@ -28,10 +28,11 @@ func NormalizeServices(services []string) []string {
 	return out
 }
 
-// FetchUpcoming collects planned lifecycle events and their affected accounts and
-// resources without member-role assumption or billing queries. Failure to list a
-// payer's events fails the request. Individual detail/account/entity failures keep
-// other findings and produce structured warnings and Complete=false.
+// FetchUpcoming collects planned lifecycle events whose descriptions mention
+// extended support, along with their affected accounts and resources, without
+// member-role assumption or billing queries. Failure to list a payer's events
+// fails the request. Individual lookup failures produce structured warnings and
+// Complete=false; an event requires a matching description to be included.
 func FetchUpcoming(ctx context.Context, q Query) (Result, error) {
 	if q.RequestInterval < 0 {
 		return Result{}, fmt.Errorf("health request interval must not be negative")
@@ -133,13 +134,11 @@ func collectEvent(ctx context.Context, client *Client, event Event) (*Event, []W
 	warn := func(operation, accountID string, err error) {
 		warnings = append(warnings, Warning{PayerAccountID: event.PayerAccountID, EventARN: event.ARN, AccountID: accountID, Operation: operation, Message: err.Error()})
 	}
-	matched := plannedLifecycleText(event.TypeCode)
+	matchedLifecycle := plannedLifecycleText(event.TypeCode)
+	matchedDescription := false
 	accounts, err := client.AffectedAccounts(ctx, event.ARN)
 	if err != nil {
 		warn("affected_accounts", "", err)
-		if matched {
-			return &event, warnings
-		}
 		return nil, warnings
 	}
 	event.AccountsComplete = true
@@ -156,16 +155,18 @@ func collectEvent(ctx context.Context, client *Client, event Event) (*Event, []W
 			warn("event_details", id, err)
 		} else {
 			account.EventDetails = details
-			if event.Description == "" || (!matched && plannedLifecycleText(details.Description)) {
+			matchesDescription := extendedSupportText(details.Description)
+			if matchesDescription && !matchedDescription {
 				event.Description = details.Description
 			}
-			matched = matched || plannedLifecycleText(details.Description)
+			matchedDescription = matchedDescription || matchesDescription
+			matchedLifecycle = matchedLifecycle || plannedLifecycleText(details.Description)
 		}
 		if id != "" {
 			event.Accounts = append(event.Accounts, account)
 		}
 	}
-	if !matched {
+	if !matchedLifecycle || !matchedDescription {
 		return nil, warnings
 	}
 	for i := range event.Accounts {
@@ -186,4 +187,8 @@ func collectEvent(ctx context.Context, client *Client, event Event) (*Event, []W
 func plannedLifecycleText(value string) bool {
 	value = strings.NewReplacer("_", " ", "-", " ").Replace(strings.ToLower(value))
 	return strings.Contains(strings.Join(strings.Fields(value), " "), "planned lifecycle event")
+}
+
+func extendedSupportText(value string) bool {
+	return strings.Contains(strings.Join(strings.Fields(strings.ToLower(value)), " "), "extended support")
 }

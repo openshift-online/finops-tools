@@ -38,10 +38,11 @@ func newExtendedSupportUpcomingCommand() *cobra.Command {
 	f := &extendedSupportUpcomingFlags{}
 	cmd := &cobra.Command{
 		Use:   "upcoming",
-		Short: "List upcoming organizational lifecycle events and affected resources",
+		Short: "List upcoming Extended Support lifecycle events and affected resources",
 		Long: `List future organizational AWS Health events containing "planned lifecycle event"
-in their description or normalized event type code, ordered by effective start time,
-with affected accounts and resource IDs/ARNs.
+in their description or normalized event type code, and "extended support" in their
+description. Text matching ignores case and repeated whitespace. Events are ordered
+by effective start time, with affected accounts and resource IDs/ARNs.
 
 --payer accepts registered payer aliases, comma-separated. This command queries
 Health directly across all services by default. --service filters lifecycle events
@@ -60,7 +61,8 @@ Payer credentials need enabled Health organizational access, an eligible AWS Sup
 plan, health:DescribeEventsForOrganization, health:DescribeAffectedAccountsForOrganization,
 health:DescribeEventDetailsForOrganization, health:DescribeAffectedEntitiesForOrganization,
 and organizations:ListAccounts. Individual lookup failures remain visible as warnings
-and incomplete results. No billing queries or member resource scans are performed.`,
+and incomplete results. Events without a confirmed matching description are omitted.
+No billing queries or member resource scans are performed.`,
 		Example: `  finops extended-support upcoming --payer rh-control
   finops extended-support upcoming --payer rh-control,osd-staging-1 --format json
   finops extended-support upcoming --payer rh-control --service rds
@@ -166,7 +168,7 @@ func (f *extendedSupportUpcomingFlags) run(cmd *cobra.Command) error {
 		}
 		q.Targets = append(q.Targets, awshealth.Target{AccountID: target.AccountID, AWSConfig: target.AWSConfig})
 	}
-	status.Step("Fetching upcoming planned lifecycle events and affected resources…")
+	status.Step("Fetching upcoming Extended Support lifecycle events and affected resources…")
 	result, err := fetchExtendedSupportUpcoming(ctx, q)
 	if err != nil {
 		return err

@@ -909,7 +909,8 @@ Resources with missing engine/version information, failed lifecycle lookups, or 
 #### Upcoming organizational lifecycle events
 
 Use `finops extended-support upcoming` with a registered payer to list future AWS Health planned
-lifecycle events and their affected accounts and resources:
+lifecycle events whose descriptions mention **extended support**, with their affected
+accounts and resources:
 
 ```bash
 finops extended-support upcoming --payer rh-control
@@ -954,11 +955,13 @@ does not publish a numeric request-rate limit for these APIs.
 The query selects scheduled changes with `upcoming` or `open` status whose start
 time is at or after the query timestamp. It matches **planned lifecycle event**
 case-insensitively in event descriptions or event type codes after normalizing
-underscores, hyphens, and whitespace. Events are ordered by start time, earliest
-first, with affected accounts and resources grouped beneath each event. AWS defines
-the start time as the earliest impact date; an event end time can be absent.
-These events can cover support changes, certificate expiration, and other lifecycle
-changes. They do not necessarily represent future Extended Support charges.
+underscores, hyphens, and whitespace. A returned event must also have a description
+containing **extended support**, ignoring case and repeated whitespace. A matching
+event type code alone is insufficient. Resource lookups run only for matching events.
+Events are ordered by start time, earliest first, with affected accounts and
+resources grouped beneath each event. AWS defines the start time as the earliest
+impact date; an event end time can be absent.
+These events do not necessarily represent future Extended Support charges.
 
 Collection paginates `DescribeEventsForOrganization`,
 `DescribeAffectedAccountsForOrganization`, and `DescribeAffectedEntitiesForOrganization`,
@@ -989,6 +992,8 @@ Failure to list a payer's events fails the command. Individual account, descript
 or resource lookup failures preserve other findings, set `complete: false`, and
 appear in structured warnings and on stderr, including with `--quiet`. A failed
 paginated account/resource lookup is never represented as a complete partial list.
+Events whose descriptions cannot be confirmed to match are omitted, while their
+lookup warnings remain visible.
 CSV uses a `row_type` column: `resource` rows contain event/account/resource data;
 `account` or `event` rows retain findings without resources or accounts; `warning`
 rows retain failed lookups, including events whose descriptions could not be

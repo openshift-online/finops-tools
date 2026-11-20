@@ -42,7 +42,7 @@ func (f fakeAPI) DescribeEventDetailsForOrganization(_ context.Context, in *heal
 	if f.details != nil {
 		return f.details(in)
 	}
-	return detailResponse(in, "Upgrade the resource."), nil
+	return detailResponse(in, "Upgrade the resource before Extended Support begins."), nil
 }
 
 func detailResponse(in *health.DescribeEventDetailsForOrganizationInput, description string) *health.DescribeEventDetailsForOrganizationOutput {
@@ -76,6 +76,81 @@ func testQuery(api fakeAPI) Query {
 		newClient: func(aws.Config) *Client { return NewClientWithAPI(api) }}
 }
 
+func TestUpcomingRequiresExtendedSupportInDescription(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		code        string
+		description string
+		wantEvent   bool
+	}{
+		{name: "ordinary maintenance", description: "Ordinary maintenance"},
+		{name: "lifecycle text only", description: "A planned lifecycle event requires an upgrade."},
+		{name: "type code only", code: "AWS_EXTENDED_SUPPORT_PLANNED_LIFECYCLE_EVENT", description: "Upgrade this resource."},
+		{name: "mixed case", description: "Upgrade before Extended Support begins.", wantEvent: true},
+		{name: "uppercase", description: "EXTENDED SUPPORT begins soon.", wantEvent: true},
+		{name: "whitespace", description: "Extended\n\t Support begins soon.", wantEvent: true},
+		{name: "description lifecycle match", code: "AWS_RDS_UPGRADE", description: "A planned lifecycle event introduces extended support.", wantEvent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := tc.code
+			if code == "" {
+				code = "AWS_RDS_PLANNED_LIFECYCLE_EVENT"
+			}
+			resourceCalls := 0
+			api := fakeAPI{
+				events: func(*health.DescribeEventsForOrganizationInput) (*health.DescribeEventsForOrganizationOutput, error) {
+					return &health.DescribeEventsForOrganizationOutput{Events: []ht.OrganizationEvent{testEvent("event", code, "RDS", 1)}}, nil
+				},
+				details: func(in *health.DescribeEventDetailsForOrganizationInput) (*health.DescribeEventDetailsForOrganizationOutput, error) {
+					return detailResponse(in, tc.description), nil
+				},
+				resources: func(in *health.DescribeAffectedEntitiesForOrganizationInput) (*health.DescribeAffectedEntitiesForOrganizationOutput, error) {
+					resourceCalls++
+					return fakeAPI{}.DescribeAffectedEntitiesForOrganization(context.Background(), in)
+				},
+			}
+			result, err := FetchUpcoming(context.Background(), testQuery(api))
+			if err != nil || !result.Complete {
+				t.Fatal(result, err)
+			}
+			if !tc.wantEvent {
+				if len(result.Events) != 0 || resourceCalls != 0 {
+					t.Fatalf("unmatched event retained or resources fetched: events=%+v calls=%d", result.Events, resourceCalls)
+				}
+				return
+			}
+			if len(result.Events) != 1 || resourceCalls != 1 || len(result.Events[0].Accounts) != 1 || len(result.Events[0].Accounts[0].Resources) != 1 || result.Events[0].Description != tc.description {
+				t.Fatal(result, resourceCalls)
+			}
+		})
+	}
+}
+
+func TestUpcomingSelectsMatchingDescriptionAndRetainsAllAffectedAccounts(t *testing.T) {
+	const matchingDescription = "Upgrade before Extended Support begins."
+	api := fakeAPI{
+		accounts: func(*health.DescribeAffectedAccountsForOrganizationInput) (*health.DescribeAffectedAccountsForOrganizationOutput, error) {
+			return &health.DescribeAffectedAccountsForOrganizationOutput{AffectedAccounts: []string{testAccount, "222222222222"}}, nil
+		},
+		details: func(in *health.DescribeEventDetailsForOrganizationInput) (*health.DescribeEventDetailsForOrganizationOutput, error) {
+			text := "Ordinary maintenance"
+			if aws.ToString(in.OrganizationEventDetailFilters[0].AwsAccountId) == "222222222222" {
+				text = matchingDescription
+			}
+			return detailResponse(in, text), nil
+		},
+	}
+	result, err := FetchUpcoming(context.Background(), testQuery(api))
+	if err != nil || !result.Complete || len(result.Events) != 1 || result.Events[0].Description != matchingDescription || len(result.Events[0].Accounts) != 2 {
+		t.Fatal(result, err)
+	}
+	for _, account := range result.Events[0].Accounts {
+		if !account.ResourcesComplete || len(account.Resources) != 1 {
+			t.Fatal(account)
+		}
+	}
+}
+
 func TestUpcomingCollectsAllServicesMatchesDescriptionsAndSortsAcrossPayers(t *testing.T) {
 	pages, resourceCalls := 0, 0
 	api := fakeAPI{
@@ -100,8 +175,11 @@ func TestUpcomingCollectsAllServicesMatchesDescriptionsAndSortsAcrossPayers(t *t
 		},
 		details: func(in *health.DescribeEventDetailsForOrganizationInput) (*health.DescribeEventDetailsForOrganizationOutput, error) {
 			text := "Ordinary maintenance"
-			if aws.ToString(in.OrganizationEventDetailFilters[0].EventArn) == "early" {
-				text = "A Planned\n Lifecycle Event requires an upgrade."
+			switch aws.ToString(in.OrganizationEventDetailFilters[0].EventArn) {
+			case "early":
+				text = "A Planned\n Lifecycle Event introduces Extended Support."
+			case "late":
+				text = "EXTENDED SUPPORT begins soon."
 			}
 			return detailResponse(in, text), nil
 		},
@@ -180,7 +258,7 @@ func TestUpcomingPublicEventDoesNotInventAffectedAccounts(t *testing.T) {
 			if in.OrganizationEventDetailFilters[0].AwsAccountId != nil {
 				t.Fatal("public event used an account ID")
 			}
-			return detailResponse(in, "Public guidance"), nil
+			return detailResponse(in, "Public Extended Support guidance"), nil
 		},
 		resources: func(*health.DescribeAffectedEntitiesForOrganizationInput) (*health.DescribeAffectedEntitiesForOrganizationOutput, error) {
 			t.Fatal("public event invented resources")
@@ -188,12 +266,12 @@ func TestUpcomingPublicEventDoesNotInventAffectedAccounts(t *testing.T) {
 		},
 	}
 	result, err := FetchUpcoming(context.Background(), testQuery(api))
-	if err != nil || len(result.Events) != 1 || len(result.Events[0].Accounts) != 0 || result.Events[0].Description != "Public guidance" || !result.Complete {
+	if err != nil || len(result.Events) != 1 || len(result.Events[0].Accounts) != 0 || result.Events[0].Description != "Public Extended Support guidance" || !result.Complete {
 		t.Fatal(result, err)
 	}
 }
 
-func TestUpcomingLookupFailuresRetainEvidenceAndMarkIncomplete(t *testing.T) {
+func TestUpcomingLookupFailuresPreserveWarningsAndRequireMatchingDescription(t *testing.T) {
 	for _, failure := range []string{"accounts", "details", "resources", "description-only"} {
 		t.Run(failure, func(t *testing.T) {
 			api := fakeAPI{}
@@ -220,7 +298,7 @@ func TestUpcomingLookupFailuresRetainEvidenceAndMarkIncomplete(t *testing.T) {
 			if err != nil || result.Complete || len(result.Warnings) != 1 || result.Warnings[0].EventARN != "event" {
 				t.Fatal(result, err)
 			}
-			if failure == "description-only" {
+			if failure != "resources" {
 				if len(result.Events) != 0 {
 					t.Fatal(result.Events)
 				}
@@ -230,11 +308,7 @@ func TestUpcomingLookupFailuresRetainEvidenceAndMarkIncomplete(t *testing.T) {
 				t.Fatal(result.Events)
 			}
 			event := result.Events[0]
-			if failure == "accounts" {
-				if event.AccountsComplete {
-					t.Fatal(event)
-				}
-			} else if !event.AccountsComplete || len(event.Accounts) != 1 || event.Accounts[0].ResourcesComplete != (failure == "details") {
+			if !event.AccountsComplete || len(event.Accounts) != 1 || event.Accounts[0].ResourcesComplete {
 				t.Fatal(event)
 			}
 		})
@@ -301,15 +375,18 @@ func TestUpcomingConcurrentFailuresKeepOtherAccountsAndEvents(t *testing.T) {
 	q := testQuery(api)
 	q.Workers = 3
 	result, err := FetchUpcoming(context.Background(), q)
-	if err != nil || result.Complete || len(result.Events) != 3 || len(result.Warnings) != 2 {
+	if err != nil || result.Complete || len(result.Events) != 2 || len(result.Warnings) != 2 {
 		t.Fatal(result, err)
 	}
 	if result.Events[0].ARN != "healthy" || !result.Events[0].Accounts[0].ResourcesComplete || len(result.Events[0].Accounts[0].Resources) != 1 {
 		t.Fatal(result.Events[0])
 	}
 	mixed := result.Events[1]
-	if !mixed.Accounts[0].ResourcesComplete || len(mixed.Accounts[0].Resources) != 1 || mixed.Accounts[1].ResourcesComplete || len(mixed.Accounts[1].Resources) != 0 || result.Events[2].AccountsComplete {
+	if !mixed.Accounts[0].ResourcesComplete || len(mixed.Accounts[0].Resources) != 1 || mixed.Accounts[1].ResourcesComplete || len(mixed.Accounts[1].Resources) != 0 {
 		t.Fatal(result.Events)
+	}
+	if result.Warnings[0].EventARN != "failed-accounts" || result.Warnings[1].EventARN != "mixed-resources" {
+		t.Fatal(result.Warnings)
 	}
 }
 
