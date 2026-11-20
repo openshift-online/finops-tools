@@ -906,6 +906,109 @@ For ElastiCache and OpenSearch, a dated AWS Health `end_of_life` event also puts
 
 Resources with missing engine/version information, failed lifecycle lookups, or missing standard support end dates appear under "Support status unknown" in pretty-print output and `summary.unclassified_resources` in JSON. They are excluded from the Extended Support count. Resources still in standard support or before an explicit Extended Support start appear in neither section. CSV contains only resources currently in Extended Support; use JSON to export past-support records and unknown resources. Check warnings before treating an empty result as "no resources in extended support".
 
+#### Upcoming organizational lifecycle events
+
+Use `finops extended-support upcoming` with a registered payer to list future AWS Health planned
+lifecycle events whose descriptions mention **extended support**, with their affected
+accounts and resources:
+
+```bash
+finops extended-support upcoming --payer rh-control
+finops extended-support upcoming --payer rh-control,osd-staging-1 --format json -o upcoming.json
+finops extended-support upcoming --payer rh-control --service rds
+finops extended-support upcoming --payer rh-control --service rds,eks,lambda
+finops extended-support upcoming --payer rh-control --regions us-east-1,global --format csv -o upcoming.csv
+```
+
+This command queries organizational Health events directly, independently of billing
+selection, current Organizations membership, and member resource scans. It covers
+**all Health services by default**, including services without an inventory scanner.
+The optional `--service` flag accepts comma-separated Health service codes, ignoring
+case; `--service rds` includes only RDS lifecycle events, such as
+`RDS_PLANNED_LIFECYCLE_EVENT`, and excludes events for other services before
+affected accounts/resources are collected. `--services` remains an alias; use one
+spelling per command. `opensearch` and `elasticsearch` map to `ES`. `--regions` and `--skip-regions`
+filter the event's region, with exclusions taking precedence. Global events use
+region `global`. `--workers` bounds concurrent event collection.
+
+The Health client spaces **all API request attempts at least 100ms apart**,
+shared across event workers, API operations, pages, and SDK retries for each payer
+client. This is a client policy, not an AWS-published TPS quota.
+`--workers` controls concurrency and does not increase this request rate. Use
+`--health-request-interval 2s` to slow down further when other tools share the
+account, or set a smaller positive interval if your environment permits it:
+
+```bash
+finops extended-support upcoming --payer rh-control --health-request-interval 2s
+```
+
+The SDK defaults to adaptive retry mode and up to six total attempts for these
+clients, with exponential backoff and jitter. Explicit SDK retry configuration is
+preserved. Adaptive retries can wait longer than the configured minimum interval.
+Throttles returned inside an HTTP 200 `failedSet` response are also retried.
+Exhausted retries remain visible through the existing errors/completeness warnings.
+Separate processes or independently created clients do not share pacing state.
+AWS documents [Health throttling errors](https://docs.aws.amazon.com/health/latest/APIReference/CommonErrors.html),
+but its [Health quota reference](https://docs.aws.amazon.com/general/latest/gr/awshealth.html)
+does not publish a numeric request-rate limit for these APIs.
+
+The query selects scheduled changes with `upcoming` or `open` status whose start
+time is at or after the query timestamp. It matches **planned lifecycle event**
+case-insensitively in event descriptions or event type codes after normalizing
+underscores, hyphens, and whitespace. A returned event must also have a description
+containing **extended support**, ignoring case and repeated whitespace. A matching
+event type code alone is insufficient. Resource lookups run only for matching events.
+Events are ordered by start time, earliest first, with affected accounts and
+resources grouped beneath each event. AWS defines the start time as the earliest
+impact date; an event end time can be absent.
+These events do not necessarily represent future Extended Support charges.
+
+Collection paginates `DescribeEventsForOrganization`,
+`DescribeAffectedAccountsForOrganization`, and `DescribeAffectedEntitiesForOrganization`,
+and retrieves descriptions/metadata through `DescribeEventDetailsForOrganization`.
+Every returned resource status is retained, including `PENDING`, `RESOLVED`, and
+missing statuses. A resource identifier can be an ID, ARN, or another service-specific
+entity value. The **Health entity ARN** is stored separately from the resource ID/ARN.
+AWS Health updates can lag behind remediation or resource deletion.
+
+The payer must have Health organizational view enabled, an eligible AWS Support
+plan, and permissions for the four Health operations above plus
+`organizations:ListAccounts`. Organizational access must be through the management
+account or an authorized delegated administrator. The command does not enable
+organization access automatically. The `upcoming` command requires `--payer` and
+has its own service, region, output, worker, and request-pacing flags. Account, OU,
+tag, inventory, and billing selectors remain on their respective commands.
+
+Pretty output shows each event's UTC start time, type, description, service,
+region, payer, affected accounts, and resources. When a description starts with
+a bracketed notice, pretty output shows only the next two sentences, removing
+numeric reference markers such as `[1]` and `[2]`. Descriptions that do
+not match this structure or contain fewer than two complete sentences are shown
+in full. Filtering uses the full description. JSON and CSV retain full descriptions.
+JSON contains `as_of`,
+`payer_account_ids`, `events`, `complete`, and structured `warnings`. Each event
+retains `event_arn`, `accounts_complete`, and affected accounts; each account
+retains its description, metadata, `resources_complete`, and resources. Resource
+records retain `resource_id`, `entity_arn`, status, metadata, and last update time.
+Public events can have no affected accounts and remain visible without inventing
+an account or resource association.
+
+Failure to list a payer's events fails the command. Individual account, description,
+or resource lookup failures preserve other findings, set `complete: false`, and
+appear in structured warnings and on stderr, including with `--quiet`. A failed
+paginated account/resource lookup is never represented as a complete partial list.
+Events whose descriptions cannot be confirmed to match are omitted, while their
+lookup warnings remain visible.
+CSV uses a `row_type` column: `resource` rows contain event/account/resource data;
+`account` or `event` rows retain findings without resources or accounts; `warning`
+rows retain failed lookups, including events whose descriptions could not be
+classified. Completeness columns distinguish unavailable data from empty results.
+
+The reusable `core/awshealth` package exposes `FetchUpcoming` and independent
+`Client.ListUpcomingEvents`, `AffectedAccounts`, `EventDetails`, and
+`AffectedResources` methods. These accept caller-provided credentials and retain
+the identifiers needed for later ownership lookup and notification workflows.
+
 #### Recent charges without discovered Extended Support resources
 
 After scanning and the final skipped-account retry, the command automatically
