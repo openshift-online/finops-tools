@@ -980,7 +980,12 @@ has its own service, region, output, worker, and request-pacing flags. Account, 
 tag, inventory, and billing selectors remain on their respective commands.
 
 Pretty output shows each event's UTC start time, type, description, service,
-region, payer, affected accounts, and resources. JSON contains `as_of`,
+region, payer, affected accounts, and resources. When a description starts with
+a bracketed notice, pretty output shows only the next two sentences, removing
+numeric reference markers such as `[1]` and `[2]`. Descriptions that do
+not match this structure or contain fewer than two complete sentences are shown
+in full. Filtering uses the full description. JSON and CSV retain full descriptions.
+JSON contains `as_of`,
 `payer_account_ids`, `events`, `complete`, and structured `warnings`. Each event
 retains `event_arn`, `accounts_complete`, and affected accounts; each account
 retains its description, metadata, `resources_complete`, and resources. Resource

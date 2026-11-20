@@ -4,10 +4,26 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/openshift-online/finops-tools/core/awshealth"
 )
+
+// Require whitespace after sentence punctuation so version numbers stay intact.
+var upcomingDescriptionSummaryRE = regexp.MustCompile(`^\[[^\]]*\]\s*(.+?[.!?]\s+.+?[.!?])(?:\s|$)`)
+
+var upcomingDescriptionReferenceRE = regexp.MustCompile(`\s*\[[0-9]+\]`)
+
+func upcomingDescriptionSummary(description string) string {
+	description = SanitizeTerminal(strings.Join(strings.Fields(description), " "))
+	// Remove references before matching so "sentence.[1]" is a sentence boundary.
+	withoutReferences := upcomingDescriptionReferenceRE.ReplaceAllString(description, "")
+	if match := upcomingDescriptionSummaryRE.FindStringSubmatch(withoutReferences); match != nil {
+		return match[1]
+	}
+	return description
+}
 
 func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 	s := newStyler(w)
@@ -50,7 +66,7 @@ func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 			return err
 		}
 		if event.Description != "" {
-			if _, err := fmt.Fprintf(w, "  %s\n", SanitizeTerminal(strings.Join(strings.Fields(event.Description), " "))); err != nil {
+			if _, err := fmt.Fprintf(w, "  %s\n", upcomingDescriptionSummary(event.Description)); err != nil {
 				return err
 			}
 		}
