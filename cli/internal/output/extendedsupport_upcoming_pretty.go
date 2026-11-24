@@ -30,6 +30,12 @@ func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 	if _, err := fmt.Fprintf(w, "Upcoming planned lifecycle events: %d\nAs of: %s\n", len(result.Events), upcomingTime(&result.AsOf)); err != nil {
 		return err
 	}
+	if result.LookaheadDays > 0 {
+		until := result.AsOf.UTC().AddDate(0, 0, result.LookaheadDays)
+		if _, err := fmt.Fprintf(w, "Lookahead: %d days (through %s)\n", result.LookaheadDays, upcomingTime(&until)); err != nil {
+			return err
+		}
+	}
 	if len(result.Services) > 0 {
 		if _, err := fmt.Fprintf(w, "Services: %s\n", SanitizeTerminal(strings.Join(result.Services, ", "))); err != nil {
 			return err
@@ -83,14 +89,22 @@ func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 		// tablewriter discards write errors, so render into memory before writing to w.
 		var tableOutput bytes.Buffer
 		table := newExtendedSupportTable(&tableOutput)
-		table.SetHeader([]string{cell(s, s.bold, "ACCOUNT"), cell(s, s.bold, "RESOURCE ID / ARN"), cell(s, s.bold, "STATUS")})
+		lastColumn := "STATUS"
+		if result.OwnersIncluded {
+			lastColumn = "OWNER"
+		}
+		table.SetHeader([]string{cell(s, s.bold, "ACCOUNT"), cell(s, s.bold, "RESOURCE ID / ARN"), cell(s, s.bold, lastColumn)})
 		for _, account := range event.Accounts {
+			owner := account.OwnerEmail
+			if result.OwnersIncluded && owner == "" {
+				owner = "Unknown"
+			}
 			if len(account.Resources) == 0 {
 				message := "No resources reported"
 				if !account.ResourcesComplete {
 					message = "Resource lookup incomplete"
 				}
-				table.Append([]string{account.AccountID, message, ""})
+				table.Append([]string{SanitizeTerminal(account.AccountID), message, SanitizeTerminal(owner)})
 			}
 			for _, resource := range account.Resources {
 				id := resource.ResourceID
@@ -100,6 +114,9 @@ func writeUpcomingLifecyclePretty(w io.Writer, result awshealth.Result) error {
 				status := resource.Status
 				if status == "" {
 					status = "Not reported"
+				}
+				if result.OwnersIncluded {
+					status = owner
 				}
 				table.Append([]string{SanitizeTerminal(account.AccountID), SanitizeTerminal(id), SanitizeTerminal(status)})
 			}

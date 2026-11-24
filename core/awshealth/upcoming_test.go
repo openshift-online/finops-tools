@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/health"
 	ht "github.com/aws/aws-sdk-go-v2/service/health/types"
+	coreaccount "github.com/openshift-online/finops-tools/core/account"
 )
 
 var testNow = time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
@@ -265,9 +266,18 @@ func TestUpcomingPublicEventDoesNotInventAffectedAccounts(t *testing.T) {
 			return nil, nil
 		},
 	}
-	result, err := FetchUpcoming(context.Background(), testQuery(api))
-	if err != nil || len(result.Events) != 1 || len(result.Events[0].Accounts) != 0 || result.Events[0].Description != "Public Extended Support guidance" || !result.Complete {
-		t.Fatal(result, err)
+	for _, hideResolved := range []bool{false, true} {
+		q := testQuery(api)
+		q.HideResolved = hideResolved
+		q.IncludeOwners = true
+		q.listTags = func(context.Context, aws.Config, string) ([]coreaccount.Tag, error) {
+			t.Fatal("public event invented an account owner")
+			return nil, nil
+		}
+		result, err := FetchUpcoming(context.Background(), q)
+		if err != nil || len(result.Events) != 1 || len(result.Events[0].Accounts) != 0 || result.Events[0].Description != "Public Extended Support guidance" || !result.Complete {
+			t.Fatal(result, err)
+		}
 	}
 }
 

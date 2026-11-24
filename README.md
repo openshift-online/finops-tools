@@ -917,6 +917,10 @@ finops extended-support upcoming --payer rh-control
 finops extended-support upcoming --payer rh-control,osd-staging-1 --format json -o upcoming.json
 finops extended-support upcoming --payer rh-control --service rds
 finops extended-support upcoming --payer rh-control --service rds,eks,lambda
+finops extended-support upcoming --payer rh-control --hide-resolved
+finops extended-support upcoming --payer rh-control --owner
+finops extended-support upcoming --payer rh-control --owner --lookahead-days 90
+finops extended-support upcoming --payer rh-control --owner --hide-resolved=false
 finops extended-support upcoming --payer rh-control --regions us-east-1,global --format csv -o upcoming.csv
 ```
 
@@ -930,6 +934,15 @@ affected accounts/resources are collected. `--services` remains an alias; use on
 spelling per command. `opensearch` and `elasticsearch` map to `ES`. `--regions` and `--skip-regions`
 filter the event's region, with exclusions taking precedence. Global events use
 region `global`. `--workers` bounds concurrent event collection.
+
+Use `--lookahead-days N` to include only events whose start time is between the
+query timestamp and N days later, including both endpoints. For example,
+`--lookahead-days 90` reports events starting within the next 90 days. The window
+uses UTC and preserves the query's time of day; it does not round to midnight or
+filter on the event end time. N must be a positive integer. Omitting the flag keeps
+all matching future events. The upper bound is sent to AWS Health and checked
+locally before account, resource, and owner lookups, and applies to every output
+format. Pretty-print shows the cutoff; JSON includes `lookahead_days` when set.
 
 The Health client spaces **all API request attempts at least 100ms apart**,
 shared across event workers, API operations, pages, and SDK retries for each payer
@@ -966,10 +979,33 @@ These events do not necessarily represent future Extended Support charges.
 Collection paginates `DescribeEventsForOrganization`,
 `DescribeAffectedAccountsForOrganization`, and `DescribeAffectedEntitiesForOrganization`,
 and retrieves descriptions/metadata through `DescribeEventDetailsForOrganization`.
-Every returned resource status is retained, including `PENDING`, `RESOLVED`, and
-missing statuses. A resource identifier can be an ID, ARN, or another service-specific
+By default every returned resource status is retained, including `PENDING`, `RESOLVED`,
+and missing statuses. Use `--hide-resolved` to remove `RESOLVED` resources from every
+output format. Accounts whose resources are all confirmed resolved are also omitted,
+along with events whose affected accounts are all omitted. Resources with missing
+or other statuses, accounts with no resources or failed resource lookups, public
+events without affected accounts, and lookup warnings remain visible.
+A resource identifier can be an ID, ARN, or another service-specific
 entity value. The **Health entity ARN** is stored separately from the resource ID/ARN.
 AWS Health updates can lag behind remediation or resource deletion.
+
+Use `--owner` to look up the owner of each affected account by its account ID,
+using the account's AWS Organizations `owner` tag. It uses the same owner-email
+resolution as `account details`: usernames receive `@redhat.com`, and full email
+addresses are validated and normalized to lowercase. Each payer/account pair is
+looked up once per run, after resolved content has been filtered, with at most five
+concurrent tag lookups (also bounded by `--workers`). Payer credentials need
+`organizations:ListTagsForResource`; no member-account roles are assumed.
+
+Owner mode hides resolved content by default. Pass `--owner --hide-resolved=false`
+to include resolved resources. Event details, account IDs, and resource IDs remain
+in the report. Pretty-print replaces the resource `STATUS` column with `OWNER`;
+CSV replaces `resource_status` with `owner_email` and adds `owner_error`. JSON adds
+`owners_included: true` and per-account `owner_email`/`owner_error` fields while
+retaining resource status. Missing, empty, or invalid owner tags and tag lookup
+failures preserve the affected accounts and resources, show `Unknown` in the
+pretty owner column, set `complete: false`, and produce `account_owner` warnings.
+Public events without affected accounts remain visible and require no owner lookup.
 
 The payer must have Health organizational view enabled, an eligible AWS Support
 plan, and permissions for the four Health operations above plus

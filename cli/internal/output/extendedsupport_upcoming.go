@@ -28,7 +28,12 @@ func WriteUpcomingLifecycleResult(w io.Writer, format Format, result awshealth.R
 
 func writeUpcomingLifecycleCSV(w io.Writer, result awshealth.Result) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"row_type", "payer_account_id", "event_arn", "event_type_code", "service", "region", "start_time", "end_time", "event_status", "description", "account_id", "resource_id", "entity_arn", "resource_status", "last_updated_time", "complete", "accounts_complete", "resources_complete", "warning"}); err != nil {
+	header := []string{"row_type", "payer_account_id", "event_arn", "event_type_code", "service", "region", "start_time", "end_time", "event_status", "description", "account_id", "resource_id", "entity_arn", "resource_status", "last_updated_time", "complete", "accounts_complete", "resources_complete", "warning"}
+	if result.OwnersIncluded {
+		header[13] = "owner_email"
+		header = append(header, "owner_error")
+	}
+	if err := cw.Write(header); err != nil {
 		return err
 	}
 	writeRow := func(kind string, event awshealth.Event, account *awshealth.AffectedAccount, resource *awshealth.Resource, warning string) error {
@@ -42,6 +47,13 @@ func writeUpcomingLifecycleCSV(w io.Writer, result awshealth.Result) error {
 		}
 		if resource != nil {
 			row[11], row[12], row[13], row[14] = resource.ResourceID, resource.EntityARN, resource.Status, upcomingTime(resource.LastUpdatedTime)
+		}
+		if result.OwnersIncluded {
+			row[13] = ""
+			row = append(row, "")
+			if account != nil {
+				row[13], row[19] = account.OwnerEmail, account.OwnerError
+			}
 		}
 		for i := range row {
 			row[i] = sanitizeCSVField(row[i])

@@ -33,7 +33,11 @@ func NormalizeServices(services []string) []string {
 // member-role assumption or billing queries. Failure to list a payer's events
 // fails the request. Individual lookup failures produce structured warnings and
 // Complete=false; an event requires a matching description to be included.
+// IncludeOwners resolves account owner tags after filtering with payer credentials.
 func FetchUpcoming(ctx context.Context, q Query) (Result, error) {
+	if q.LookaheadDays < 0 {
+		return Result{}, fmt.Errorf("lookahead days must not be negative")
+	}
 	if q.RequestInterval < 0 {
 		return Result{}, fmt.Errorf("health request interval must not be negative")
 	}
@@ -49,9 +53,18 @@ func FetchUpcoming(ctx context.Context, q Query) (Result, error) {
 		q.Now = time.Now()
 	}
 	q.Now = q.Now.UTC()
+	var until *time.Time
+	if q.LookaheadDays > 0 {
+		end := q.Now.AddDate(0, 0, q.LookaheadDays)
+		until = &end
+	}
 	q.Services = NormalizeServices(q.Services)
 	q.Regions, q.SkipRegions = awsregions.Normalize(q.Regions), awsregions.Normalize(q.SkipRegions)
-	result := Result{AsOf: q.Now, PayerAccountIDs: []string{}, Services: q.Services, Regions: q.Regions, ExcludedRegions: q.SkipRegions, Complete: true, Events: []Event{}}
+	result := Result{
+		AsOf: q.Now, LookaheadDays: q.LookaheadDays, PayerAccountIDs: []string{}, Services: q.Services,
+		Regions: q.Regions, ExcludedRegions: q.SkipRegions, OwnersIncluded: q.IncludeOwners,
+		Complete: true, Events: []Event{},
+	}
 	seen := make(map[string]bool)
 	for _, target := range q.Targets {
 		if err := ctx.Err(); err != nil {
@@ -73,7 +86,7 @@ func FetchUpcoming(ctx context.Context, q Query) (Result, error) {
 				options.RequestInterval = q.RequestInterval
 			})
 		}
-		events, err := client.ListUpcomingEvents(ctx, q.Now)
+		events, err := client.listUpcomingEvents(ctx, q.Now, until)
 		if err != nil {
 			return Result{}, fmt.Errorf("health event discovery for payer %s: %w", target.AccountID, err)
 		}
@@ -101,10 +114,18 @@ func FetchUpcoming(ctx context.Context, q Query) (Result, error) {
 			return Result{}, err
 		}
 		for i, event := range collected {
+			if event != nil && q.HideResolved {
+				event = hideResolvedResources(event)
+			}
 			if event != nil {
 				result.Events = append(result.Events, *event)
 			}
 			result.Warnings = append(result.Warnings, warnings[i]...)
+		}
+	}
+	if q.IncludeOwners {
+		if err := resolveAccountOwners(ctx, q, &result); err != nil {
+			return Result{}, err
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -182,6 +203,29 @@ func collectEvent(ctx context.Context, client *Client, event Event) (*Event, []W
 		}
 	}
 	return &event, warnings
+}
+
+// hideResolvedResources removes only confirmed resolved content. Empty or
+// incomplete lookups remain visible because they do not establish resolution.
+func hideResolvedResources(event *Event) *Event {
+	hadAccounts := len(event.Accounts) > 0
+	accounts := event.Accounts[:0]
+	for _, account := range event.Accounts {
+		hadResources := len(account.Resources) > 0
+		account.Resources = slices.DeleteFunc(account.Resources, func(resource Resource) bool {
+			return strings.EqualFold(strings.TrimSpace(resource.Status), "RESOLVED")
+		})
+		if hadResources && len(account.Resources) == 0 && account.ResourcesComplete {
+			continue
+		}
+		accounts = append(accounts, account)
+	}
+	clear(event.Accounts[len(accounts):])
+	event.Accounts = accounts
+	if hadAccounts && len(event.Accounts) == 0 && event.AccountsComplete {
+		return nil
+	}
+	return event
 }
 
 func plannedLifecycleText(value string) bool {

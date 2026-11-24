@@ -102,6 +102,7 @@ func (f healthHTTPClient) Do(request *http.Request) (*http.Response, error) { re
 
 func TestUpcomingUsesOrganizationalSDKAPIsAndLogsWithoutTokens(t *testing.T) {
 	var calls, logs []string
+	now := time.Unix(2000000000, 0).AddDate(0, 0, -1).UTC()
 	client := NewClient(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("test", "secret", "token"),
 		HTTPClient: healthHTTPClient(func(request *http.Request) (*http.Response, error) {
 			if request.URL.Host != "health.us-east-1.amazonaws.com" {
@@ -116,6 +117,12 @@ func TestUpcomingUsesOrganizationalSDKAPIsAndLogsWithoutTokens(t *testing.T) {
 			body := ""
 			switch op {
 			case "DescribeEventsForOrganization":
+				var filter struct {
+					StartTime struct{ From, To float64 } `json:"startTime"`
+				}
+				if err := json.Unmarshal(input["filter"], &filter); err != nil || filter.StartTime.From != float64(now.Unix()) || filter.StartTime.To != float64(now.AddDate(0, 0, 90).Unix()) {
+					t.Fatal("incorrect SDK time window:", filter, err)
+				}
 				body = `{"events":[{"arn":"event","eventTypeCode":"AWS_RDS_PLANNED_LIFECYCLE_EVENT","eventTypeCategory":"scheduledChange","service":"RDS","region":"us-east-1","startTime":2000000000,"statusCode":"upcoming","eventScopeCode":"ACCOUNT_SPECIFIC"}]}`
 			case "DescribeAffectedAccountsForOrganization":
 				body = `{"affectedAccounts":["111111111111"],"eventScopeCode":"ACCOUNT_SPECIFIC"}`
@@ -139,6 +146,7 @@ func TestUpcomingUsesOrganizationalSDKAPIsAndLogsWithoutTokens(t *testing.T) {
 		}),
 	}, func(o *ClientOptions) { o.RequestInterval = time.Millisecond })
 	q := testQuery(fakeAPI{})
+	q.Now, q.LookaheadDays = now, 90
 	q.newClient = func(aws.Config) *Client { return client }
 	ctx := apilog.WithLog(context.Background(), func(line string) { logs = append(logs, line) })
 	result, err := FetchUpcoming(ctx, q)

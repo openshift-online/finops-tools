@@ -26,6 +26,7 @@ func upcomingFixture() awshealth.Result {
 
 func TestUpcomingLifecycleOutputPreservesHierarchyAndResourceIdentifiers(t *testing.T) {
 	result := upcomingFixture()
+	result.LookaheadDays = 90
 	for _, format := range []Format{FormatPrettyPrint, FormatJSON, FormatCSV} {
 		t.Run(string(format), func(t *testing.T) {
 			var buf bytes.Buffer
@@ -35,6 +36,9 @@ func TestUpcomingLifecycleOutputPreservesHierarchyAndResourceIdentifiers(t *test
 			text := buf.String()
 			eventType := "AWS_RDS_PLANNED_LIFECYCLE_EVENT"
 			if format == FormatPrettyPrint {
+				if !strings.Contains(text, "Lookahead: 90 days (through 2027-03-15T12:30:00Z)") {
+					t.Fatal("missing lookahead window:", text)
+				}
 				if strings.Contains(text, eventType) {
 					t.Fatal("pretty output retained the AWS_ event-name prefix")
 				}
@@ -51,7 +55,7 @@ func TestUpcomingLifecycleOutputPreservesHierarchyAndResourceIdentifiers(t *test
 			switch format {
 			case FormatJSON:
 				var decoded awshealth.Result
-				if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil || decoded.Events[0].Accounts[0].Resources[0].EntityARN != result.Events[0].Accounts[0].Resources[0].EntityARN {
+				if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil || decoded.Events[0].Accounts[0].Resources[0].EntityARN != result.Events[0].Accounts[0].Resources[0].EntityARN || decoded.LookaheadDays != 90 {
 					t.Fatal(decoded, err)
 				}
 			case FormatCSV:

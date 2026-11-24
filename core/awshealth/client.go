@@ -55,6 +55,11 @@ func NewClientWithAPI(api OrganizationAPI) *Client { return &Client{api: api} }
 // ListUpcomingEvents returns scheduled changes at or after now. Matching lifecycle
 // text requires event details and is performed separately by FetchUpcoming.
 func (c *Client) ListUpcomingEvents(ctx context.Context, now time.Time) ([]Event, error) {
+	return c.listUpcomingEvents(ctx, now, nil)
+}
+
+// listUpcomingEvents optionally bounds event start times through until, inclusive.
+func (c *Client) listUpcomingEvents(ctx context.Context, now time.Time, until *time.Time) ([]Event, error) {
 	var events []Event
 	seenEvents, seenTokens := make(map[string]bool), make(map[string]bool)
 	var token *string
@@ -67,7 +72,7 @@ func (c *Client) ListUpcomingEvents(ctx context.Context, now time.Time) ([]Event
 			Filter: &healthtypes.OrganizationEventFilter{
 				EventTypeCategories: []healthtypes.EventTypeCategory{healthtypes.EventTypeCategoryScheduledChange},
 				EventStatusCodes:    []healthtypes.EventStatusCode{healthtypes.EventStatusCodeUpcoming, healthtypes.EventStatusCodeOpen},
-				StartTime:           &healthtypes.DateTimeRange{From: &now},
+				StartTime:           &healthtypes.DateTimeRange{From: &now, To: until},
 			}, MaxResults: aws.Int32(100), NextToken: token,
 		})
 		if err != nil {
@@ -82,6 +87,9 @@ func (c *Client) ListUpcomingEvents(ctx context.Context, now time.Time) ([]Event
 				return nil, fmt.Errorf("Health.DescribeEventsForOrganization returned an event without an ARN or start time")
 			}
 			if item.StartTime.Before(now) || item.StatusCode == healthtypes.EventStatusCodeClosed || item.EventTypeCategory != healthtypes.EventTypeCategoryScheduledChange || seenEvents[arn] {
+				continue
+			}
+			if until != nil && item.StartTime.After(*until) {
 				continue
 			}
 			seenEvents[arn] = true

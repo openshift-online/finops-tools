@@ -43,6 +43,8 @@ func TestUpcomingRequiresPayerAndRejectsInventoryFlags(t *testing.T) {
 		{"--payer", "payer", "--format", "bad"}, {"--payer", "payer", "--workers", "-1"},
 		{"--payer", "payer", "--regions", ","}, {"--payer", "payer", "--skip-regions", ""},
 		{"--payer", "payer", "--health-request-interval", "0s"}, {"--payer", "payer", "--health-request-interval", "-1s"},
+		{"--payer", "payer", "--lookahead-days", "0"}, {"--payer", "payer", "--lookahead-days", "-1"},
+		{"--payer", "payer", "--lookahead-days", "1.5"}, {"--payer", "payer", "--lookahead-days", "abc"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cmd := newExtendedSupportUpcomingCommand()
@@ -66,6 +68,36 @@ func TestUpcomingRequiresPayerAndRejectsInventoryFlags(t *testing.T) {
 	}
 }
 
+func TestUpcomingOwnerDefaultsAndResolvedOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		owner, hidden bool
+	}{
+		{name: "default"},
+		{name: "hide resolved", args: []string{"--hide-resolved"}, hidden: true},
+		{name: "owner", args: []string{"--owner"}, owner: true, hidden: true},
+		{name: "owner keeps resolved", args: []string{"--owner", "--hide-resolved=false"}, owner: true},
+		{name: "override before owner", args: []string{"--hide-resolved=false", "--owner"}, owner: true},
+		{name: "owner explicitly hides resolved", args: []string{"--owner", "--hide-resolved"}, owner: true, hidden: true},
+		{name: "owner disabled", args: []string{"--owner=false"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := testUpcomingCommand(t, append([]string{"--payer", "payer"}, tc.args...)...)
+			f := &extendedSupportUpcomingFlags{}
+			// Use parsed flags to check the owner default and explicit overrides.
+			f.owner, _ = cmd.Flags().GetBool("owner")
+			f.hideResolved, _ = cmd.Flags().GetBool("hide-resolved")
+			f.workers, _ = cmd.Flags().GetInt("workers")
+			f.payer, f.format, f.requestInterval = "payer", "json", time.Second
+			q, _, err := f.query(cmd)
+			if err != nil || q.IncludeOwners != tc.owner || q.HideResolved != tc.hidden {
+				t.Fatal(q, err)
+			}
+		})
+	}
+}
+
 func TestUpcomingIsIndependentSiblingOfList(t *testing.T) {
 	registered, _, err := extendedSupportCmd.Find([]string{"upcoming"})
 	if err != nil || registered.Name() != "upcoming" || registered.Parent() != extendedSupportCmd {
@@ -77,7 +109,7 @@ func TestUpcomingIsIndependentSiblingOfList(t *testing.T) {
 		}
 	}
 	previousPayer, previousServices, previousFormat := extendedSupportListPayer, extendedSupportListServices, extendedSupportListFormat
-	first := testUpcomingCommand(t, "--payer", "first", "--services", "lambda", "--format", "json", "--health-request-interval", "2s")
+	first := testUpcomingCommand(t, "--payer", "first", "--services", "lambda", "--format", "json", "--health-request-interval", "2s", "--hide-resolved", "--owner", "--lookahead-days", "90")
 	if err := first.PreRunE(first, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +120,10 @@ func TestUpcomingIsIndependentSiblingOfList(t *testing.T) {
 	services, _ := second.Flags().GetString("services")
 	format, _ := second.Flags().GetString("format")
 	interval, _ := second.Flags().GetDuration("health-request-interval")
-	if services != "" || format != "pretty-print" || interval != 100*time.Millisecond {
+	hideResolved, _ := second.Flags().GetBool("hide-resolved")
+	owner, _ := second.Flags().GetBool("owner")
+	lookahead, _ := second.Flags().GetInt("lookahead-days")
+	if services != "" || format != "pretty-print" || interval != 100*time.Millisecond || hideResolved || owner || lookahead != 0 {
 		t.Fatal("upcoming command instances share flag values")
 	}
 	if extendedSupportListPayer != previousPayer || extendedSupportListServices != previousServices || extendedSupportListFormat != previousFormat {
@@ -97,7 +132,7 @@ func TestUpcomingIsIndependentSiblingOfList(t *testing.T) {
 }
 
 func TestUpcomingCommandUsesOnlyPayerCredentialsAndPreservesWarningsAndOutput(t *testing.T) {
-	cmd := testUpcomingCommand(t, "--payer", "payer,payer-alias", "--service", " rDs ", "--regions", "us-east-1,global", "--skip-regions", "global", "--format", "json", "--quiet", "--health-request-interval", "2s")
+	cmd := testUpcomingCommand(t, "--payer", "payer,payer-alias", "--service", " rDs ", "--regions", "us-east-1,global", "--skip-regions", "global", "--format", "json", "--quiet", "--health-request-interval", "2s", "--owner", "--lookahead-days", "90")
 	oldFlags := awsFlags
 	oldFetch, oldEnsure, oldLoad := fetchExtendedSupportUpcoming, ensureExtendedSupportUpcomingCredentials, loadAWSConfigForCredentialsAccount
 	oldScan, oldBilling := extendedSupportListFetch, discoverExtendedSupportBillingCandidates
@@ -144,10 +179,13 @@ func TestUpcomingCommandUsesOnlyPayerCredentialsAndPreservesWarningsAndOutput(t 
 		return extendedsupport.BillingCandidates{}, nil
 	}
 	fetchExtendedSupportUpcoming = func(_ context.Context, q awshealth.Query) (awshealth.Result, error) {
-		if len(q.Targets) != 1 || q.Targets[0].AWSConfig.Region != "payer-config" || !reflect.DeepEqual(q.Services, []string{"RDS"}) || len(q.Regions) != 2 || !reflect.DeepEqual(q.SkipRegions, []string{"global"}) || q.RequestInterval != 2*time.Second {
+		if len(q.Targets) != 1 || q.Targets[0].AWSConfig.Region != "payer-config" || !reflect.DeepEqual(q.Services, []string{"RDS"}) || len(q.Regions) != 2 || !reflect.DeepEqual(q.SkipRegions, []string{"global"}) || q.RequestInterval != 2*time.Second || !q.HideResolved || !q.IncludeOwners || q.LookaheadDays != 90 {
 			t.Fatal(q)
 		}
-		return awshealth.Result{AsOf: q.Now, Events: []awshealth.Event{}, Warnings: []awshealth.Warning{{PayerAccountID: "123456789012", Operation: "event_details", Message: "details denied"}}}, nil
+		return awshealth.Result{AsOf: q.Now, LookaheadDays: q.LookaheadDays, OwnersIncluded: q.IncludeOwners, Events: []awshealth.Event{{
+			PayerAccountID: "123456789012", ARN: "event", Description: "Upcoming Extended Support",
+			Accounts: []awshealth.AffectedAccount{{AccountID: "111111111111", OwnerEmail: "jdoe@redhat.com", Resources: []awshealth.Resource{{ResourceID: "db-production", Status: "PENDING"}}}},
+		}}, Warnings: []awshealth.Warning{{PayerAccountID: "123456789012", Operation: "event_details", Message: "details denied"}}}, nil
 	}
 	path := filepath.Join(t.TempDir(), "upcoming.json")
 	if err := cmd.Flags().Set("output", path); err != nil {
@@ -164,8 +202,11 @@ func TestUpcomingCommandUsesOnlyPayerCredentialsAndPreservesWarningsAndOutput(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &decoded); err != nil || decoded.Complete || len(decoded.Warnings) != 1 || ensures != 1 || loads != 1 {
+	if err := json.Unmarshal(data, &decoded); err != nil || decoded.Complete || len(decoded.Warnings) != 1 || ensures != 1 || loads != 1 || !decoded.OwnersIncluded || len(decoded.Events) != 1 || decoded.LookaheadDays != 90 {
 		t.Fatal(string(data), ensures, loads, err)
+	}
+	if account := decoded.Events[0].Accounts[0]; account.OwnerEmail != "jdoe@redhat.com" || account.Resources[0].ResourceID != "db-production" || decoded.Events[0].Description != "Upcoming Extended Support" {
+		t.Fatal(decoded)
 	}
 	if !strings.Contains(cmd.ErrOrStderr().(*bytes.Buffer).String(), "details denied") {
 		t.Fatal("quiet hid a lookup warning")

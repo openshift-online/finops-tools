@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/health"
+	coreaccount "github.com/openshift-online/finops-tools/core/account"
 )
 
 // OrganizationAPI is the Health subset needed for organizational lifecycle events.
@@ -35,12 +36,16 @@ type ClientOptions struct {
 type Query struct {
 	Targets         []Target
 	Now             time.Time
+	LookaheadDays   int      // Limit event start times through Now + N UTC days, inclusive; zero is unbounded.
 	Services        []string // Health service codes; empty selects every service.
 	Regions         []string // Health event regions, including "global" when requested.
 	SkipRegions     []string
+	HideResolved    bool // Hide RESOLVED resources and accounts/events containing only resolved resources.
+	IncludeOwners   bool // Resolve Organizations owner tags using each event's payer credentials.
 	Workers         int
 	RequestInterval time.Duration // Zero uses DefaultRequestInterval; negative values are invalid.
 	newClient       func(aws.Config) *Client
+	listTags        func(context.Context, aws.Config, string) ([]coreaccount.Tag, error)
 }
 
 // Event retains the Health event ARN separately from affected resource identifiers.
@@ -67,6 +72,8 @@ type EventDetails struct {
 type AffectedAccount struct {
 	AccountID string `json:"account_id"`
 	EventDetails
+	OwnerEmail        string     `json:"owner_email,omitempty"`
+	OwnerError        string     `json:"owner_error,omitempty"`
 	ResourcesComplete bool       `json:"resources_complete"`
 	Resources         []Resource `json:"resources"`
 }
@@ -93,10 +100,12 @@ type Warning struct {
 
 type Result struct {
 	AsOf            time.Time `json:"as_of"`
+	LookaheadDays   int       `json:"lookahead_days,omitempty"`
 	PayerAccountIDs []string  `json:"payer_account_ids"`
 	Services        []string  `json:"services,omitempty"`
 	Regions         []string  `json:"regions,omitempty"`
 	ExcludedRegions []string  `json:"excluded_regions,omitempty"`
+	OwnersIncluded  bool      `json:"owners_included,omitempty"`
 	Complete        bool      `json:"complete"`
 	Events          []Event   `json:"events"`
 	Warnings        []Warning `json:"warnings,omitempty"`

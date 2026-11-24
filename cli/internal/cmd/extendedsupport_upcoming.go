@@ -25,8 +25,8 @@ var (
 type extendedSupportUpcomingFlags struct {
 	payer, service, services, regions, format, output string
 	skipRegions                                       []string
-	quiet                                             bool
-	workers                                           int
+	quiet, hideResolved, owner                        bool
+	workers, lookaheadDays                            int
 	requestInterval                                   time.Duration
 }
 
@@ -43,13 +43,22 @@ func newExtendedSupportUpcomingCommand() *cobra.Command {
 in their description or normalized event type code, and "extended support" in their
 description. Text matching ignores case and repeated whitespace. Events are ordered
 by effective start time, with affected accounts and resource IDs/ARNs.
+--lookahead-days N limits event start times from the query timestamp through N
+days later, inclusive, in UTC. Omit it to report all matching future events.
 
 --payer accepts registered payer aliases, comma-separated. This command queries
 Health directly across all services by default. --service filters lifecycle events
 by AWS Health service code (for example rds or rds,eks,lambda); opensearch maps to ES.
 --services is an alias; use one spelling per command.
 --regions/--skip-regions filter event regions; use global for global events.
-All reported resource statuses, including RESOLVED and missing statuses, are retained.
+All reported resource statuses are retained by default. --hide-resolved removes
+RESOLVED resources and accounts/events containing only resolved resources. Missing
+statuses, empty lookups, public events, and incomplete results remain visible.
+--owner resolves each affected account's Organizations owner tag and replaces the
+resource status column with its owner email. Usernames default to @redhat.com.
+Owner mode hides resolved content unless --hide-resolved=false is explicitly set.
+It uses payer credentials and additionally requires organizations:ListTagsForResource;
+no member-account roles are assumed. Missing owners and lookup failures remain visible.
 Output formats: pretty-print (default), JSON, CSV. Use --output to save a report.
 
 Health requests, including retries, share a minimum interval of 100ms per
@@ -66,6 +75,10 @@ No billing queries or member resource scans are performed.`,
 		Example: `  finops extended-support upcoming --payer rh-control
   finops extended-support upcoming --payer rh-control,osd-staging-1 --format json
   finops extended-support upcoming --payer rh-control --service rds
+  finops extended-support upcoming --payer rh-control --hide-resolved
+  finops extended-support upcoming --payer rh-control --owner
+  finops extended-support upcoming --payer rh-control --owner --lookahead-days 90
+  finops extended-support upcoming --payer rh-control --owner --hide-resolved=false
   finops extended-support upcoming --payer rh-control --service rds,eks,lambda
   finops extended-support upcoming --payer rh-control --health-request-interval 2s
   finops extended-support upcoming --payer rh-control --format csv -o upcoming.csv`,
@@ -80,6 +93,9 @@ No billing queries or member resource scans are performed.`,
 	cmd.Flags().StringVar(&f.service, "service", "", "Filter lifecycle events by Health service code(s), comma-separated (default: all; opensearch maps to ES)")
 	cmd.Flags().StringVar(&f.services, "services", "", "Alias for --service")
 	cmd.Flags().StringVar(&f.regions, "regions", "", "Limit events to comma-separated AWS regions, including global (default: all event regions)")
+	cmd.Flags().BoolVar(&f.hideResolved, "hide-resolved", false, "Hide RESOLVED resources and accounts/events containing only resolved resources (default: true with --owner)")
+	cmd.Flags().BoolVar(&f.owner, "owner", false, "Look up account owners using Organizations tags and show owner emails instead of resource statuses")
+	cmd.Flags().IntVar(&f.lookaheadDays, "lookahead-days", 0, "Only include events starting within the next N days, inclusive (positive integer; default: all future events)")
 	bindSkipRegionsFlag(cmd, &f.skipRegions)
 	cmd.Flags().Lookup("skip-regions").Usage = "Exclude event regions, including global (comma-separated or repeatable; overrides --regions)"
 	cmd.Flags().DurationVar(&f.requestInterval, "health-request-interval", awshealth.DefaultRequestInterval,
@@ -93,7 +109,17 @@ No billing queries or member resource scans are performed.`,
 }
 
 func (f *extendedSupportUpcomingFlags) query(cmd *cobra.Command) (awshealth.Query, []string, error) {
-	q := awshealth.Query{Now: extendedSupportUpcomingNow().UTC(), Workers: f.workers, RequestInterval: f.requestInterval}
+	q := awshealth.Query{
+		Now: extendedSupportUpcomingNow().UTC(), Workers: f.workers, RequestInterval: f.requestInterval,
+		HideResolved: f.hideResolved, IncludeOwners: f.owner,
+		LookaheadDays: f.lookaheadDays,
+	}
+	if f.lookaheadDays < 0 || (cmd.Flags().Changed("lookahead-days") && f.lookaheadDays == 0) {
+		return q, nil, fmt.Errorf("--lookahead-days must be a positive integer")
+	}
+	if f.owner && !cmd.Flags().Changed("hide-resolved") {
+		q.HideResolved = true
+	}
 	if q.RequestInterval <= 0 {
 		return q, nil, fmt.Errorf("--health-request-interval must be positive")
 	}
